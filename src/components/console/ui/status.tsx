@@ -21,7 +21,7 @@ export function StatusIndicator({ type, children, className }: { type: StatusTyp
   return (
     <span className={cn("inline-flex items-center gap-1.5 align-middle", color, className)} data-status={type}>
       <Icon className={cn("size-4 shrink-0", type === "in-progress" && "animate-spin")} aria-hidden />
-      <span className="text-sm">{children}</span>
+      <span className="text-[15px]">{children}</span>
     </span>
   );
 }

@@ -3,6 +3,11 @@
 /**
  * 콘솔 해시 경로 → 페이지 매핑과 이동 경로(breadcrumb).
  */
+import { AlarmDetailPage, AlarmListPage, CreateAlarmPage, EditAlarmPage } from "./pages/cloudwatch/cw-alarms";
+import { DashboardDetailPage, DashboardListPage } from "./pages/cloudwatch/cw-dashboards";
+import { LoadTestPage } from "./pages/cloudwatch/cw-load";
+import { MetricsPage } from "./pages/cloudwatch/cw-metrics";
+import { CloudWatchOverviewPage } from "./pages/cloudwatch/cw-overview";
 import { Ec2DashboardPage, RdsDashboardPage, VpcDashboardPage } from "./pages/dashboards";
 import {
   CreateDatabasePage,
@@ -28,6 +33,13 @@ import {
   NatListPage,
 } from "./pages/gateways";
 import { ConsoleHomePage } from "./pages/home";
+import { IamDashboardPage } from "./pages/iam/iam-dashboard";
+import { CreateGroupPage, GroupDetailPage, GroupListPage } from "./pages/iam/iam-groups";
+import { CreatePolicyPage, EditPolicyPage, PolicyDetailPage, PolicyListPage } from "./pages/iam/iam-policies";
+import { CreateRolePage, RoleDetailPage, RoleListPage } from "./pages/iam/iam-roles";
+import { CreateAccessKeyPage, CreateUserPage, UserDetailPage, UserListPage } from "./pages/iam/iam-users";
+import { PolicySimulatorPage } from "./pages/iam/iam-simulator";
+import { ModifyInstanceRolePage } from "./pages/iam/instance-role";
 import { ChangeInstanceSgsPage, EditUserDataPage, InstanceDetailPage, InstanceListPage } from "./pages/instances";
 import { LaunchInstancePage } from "./pages/launch-instance";
 import {
@@ -40,6 +52,11 @@ import {
 } from "./pages/load-balancers";
 import { CreatePathPage, PathDetailPage, PathListPage } from "./pages/reachability";
 import { ResourceMapPage } from "./pages/resource-map";
+import { S3AccessTestPage } from "./pages/s3/s3-access-test";
+import { BucketDetailPage } from "./pages/s3/s3-bucket-detail";
+import { BucketListPage, CreateBucketPage } from "./pages/s3/s3-buckets";
+import { EditBpaPage, EditBucketPolicyPage, EditEncryptionPage, EditVersioningPage, EditWebsitePage, UploadPage } from "./pages/s3/s3-edit";
+import { ObjectDetailPage } from "./pages/s3/s3-object";
 import { CreateRouteTablePage, EditRoutesPage, EditRouteTableAssociationsPage, RouteTableDetailPage, RouteTableListPage } from "./pages/route-tables";
 import {
   CreateNaclPage,
@@ -83,6 +100,10 @@ export interface ResolvedRoute {
 const VPC: Crumb = { text: "VPC", path: "/vpc" };
 const EC2: Crumb = { text: "EC2", path: "/ec2" };
 const RDS: Crumb = { text: "RDS", path: "/rds" };
+const IAM: Crumb = { text: "IAM", path: "/iam" };
+const S3: Crumb = { text: "S3", path: "/s3" };
+const BUCKETS: Crumb = { text: "범용 버킷", path: "/s3" };
+const CW: Crumb = { text: "CloudWatch", path: "/cloudwatch" };
 const TOOLS: Crumb = { text: "도구" };
 
 interface ResourcePages {
@@ -194,6 +215,7 @@ const ROUTES: RouteDef[] = [
     actions: [
       { segment: "security-groups", label: "보안 그룹 변경", render: (id) => <ChangeInstanceSgsPage id={id} /> },
       { segment: "user-data", label: "사용자 데이터 편집", render: (id) => <EditUserDataPage id={id} /> },
+      { segment: "iam-role", label: "IAM 역할 수정", render: (id) => <ModifyInstanceRolePage id={id} /> },
     ],
     detail: (id) => <InstanceDetailPage id={id} />,
   }),
@@ -238,6 +260,69 @@ const ROUTES: RouteDef[] = [
     actions: [{ segment: "edit", label: "편집", render: (id) => <EditDbSubnetGroupPage id={id} /> }],
     detail: (id) => <DbSubnetGroupDetailPage id={id} />,
   }),
+
+  // ------------------------------------------------------------ IAM
+  { pattern: "/iam", title: "IAM 대시보드", crumbs: () => [IAM, { text: "대시보드" }], render: () => <IamDashboardPage /> },
+  ...resourceRoutes(IAM, "/iam/users", "사용자", {
+    list: () => <UserListPage />,
+    create: [{ segment: "create", label: "사용자 생성", render: () => <CreateUserPage /> }],
+    actions: [{ segment: "create-access-key", label: "액세스 키 만들기", render: (id) => <CreateAccessKeyPage id={id} /> }],
+    detail: (id) => <UserDetailPage id={id} />,
+  }),
+  ...resourceRoutes(IAM, "/iam/groups", "사용자 그룹", {
+    list: () => <GroupListPage />,
+    create: [{ segment: "create", label: "사용자 그룹 생성", render: () => <CreateGroupPage /> }],
+    detail: (id) => <GroupDetailPage id={id} />,
+  }),
+  ...resourceRoutes(IAM, "/iam/roles", "역할", {
+    list: () => <RoleListPage />,
+    create: [{ segment: "create", label: "역할 생성", render: () => <CreateRolePage /> }],
+    detail: (id) => <RoleDetailPage id={id} />,
+  }),
+  ...resourceRoutes(IAM, "/iam/policies", "정책", {
+    list: () => <PolicyListPage />,
+    create: [{ segment: "create", label: "정책 생성", render: () => <CreatePolicyPage /> }],
+    actions: [{ segment: "edit", label: "정책 편집", render: (id) => <EditPolicyPage id={id} /> }],
+    detail: (id) => <PolicyDetailPage id={id} />,
+  }),
+  { pattern: "/iam/simulator", title: "정책 시뮬레이터", crumbs: () => [IAM, { text: "정책 시뮬레이터" }], render: () => <PolicySimulatorPage /> },
+
+  // ------------------------------------------------------------ S3
+  { pattern: "/s3", title: "범용 버킷", crumbs: () => [S3, { text: "범용 버킷" }], render: () => <BucketListPage /> },
+  { pattern: "/s3/create", title: "버킷 만들기", crumbs: () => [S3, BUCKETS, { text: "버킷 만들기" }], render: () => <CreateBucketPage /> },
+  { pattern: "/s3/access-test", title: "S3 접근 테스트", crumbs: () => [S3, { text: "S3 접근 테스트" }], render: () => <S3AccessTestPage /> },
+  ...[
+    { segment: "upload", label: "업로드", render: (id: string) => <UploadPage id={id} /> },
+    { segment: "object", label: "객체", render: (id: string) => <ObjectDetailPage id={id} /> },
+    { segment: "edit-bpa", label: "퍼블릭 액세스 차단 편집", render: (id: string) => <EditBpaPage id={id} /> },
+    { segment: "edit-policy", label: "버킷 정책 편집", render: (id: string) => <EditBucketPolicyPage id={id} /> },
+    { segment: "edit-versioning", label: "버전 관리 편집", render: (id: string) => <EditVersioningPage id={id} /> },
+    { segment: "edit-encryption", label: "기본 암호화 편집", render: (id: string) => <EditEncryptionPage id={id} /> },
+    { segment: "edit-website", label: "정적 웹 사이트 호스팅 편집", render: (id: string) => <EditWebsitePage id={id} /> },
+  ].map(
+    (a): RouteDef => ({
+      pattern: `/s3/buckets/:id/${a.segment}`,
+      title: (p) => `${a.label} - ${p.id}`,
+      crumbs: (p) => [S3, BUCKETS, { text: p.id, path: `/s3/buckets/${p.id}` }, { text: a.label }],
+      render: (p) => a.render(p.id),
+    }),
+  ),
+  { pattern: "/s3/buckets/:id", title: (p) => p.id, crumbs: (p) => [S3, BUCKETS, { text: p.id }], render: (p) => <BucketDetailPage id={p.id} /> },
+
+  // ------------------------------------------------------------ CloudWatch
+  { pattern: "/cloudwatch", title: "CloudWatch 개요", crumbs: () => [CW, { text: "개요" }], render: () => <CloudWatchOverviewPage /> },
+  { pattern: "/cloudwatch/metrics", title: "지표", crumbs: () => [CW, { text: "지표" }], render: () => <MetricsPage /> },
+  ...resourceRoutes(CW, "/cloudwatch/alarms", "경보", {
+    list: () => <AlarmListPage />,
+    create: [{ segment: "create", label: "경보 생성", render: () => <CreateAlarmPage /> }],
+    actions: [{ segment: "edit", label: "경보 편집", render: (id) => <EditAlarmPage id={id} /> }],
+    detail: (id) => <AlarmDetailPage id={id} />,
+  }),
+  ...resourceRoutes(CW, "/cloudwatch/dashboards", "대시보드", {
+    list: () => <DashboardListPage />,
+    detail: (id) => <DashboardDetailPage id={id} />,
+  }),
+  { pattern: "/cloudwatch/load", title: "가상 부하", crumbs: () => [CW, { text: "가상 부하" }], render: () => <LoadTestPage /> },
 
   // ------------------------------------------------------------ 도구
   { pattern: "/map", title: "리소스 맵", crumbs: () => [TOOLS, { text: "리소스 맵" }], render: () => <ResourceMapPage />, fullWidth: true },

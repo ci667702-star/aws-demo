@@ -21,6 +21,10 @@ function ConsoleOrMissing({ projectId }: { projectId: string }) {
   const project = useProjectStore((s) => s.projects[projectId]);
   const reset = useConsoleUi((s) => s.reset);
   useEffect(() => reset(projectId), [projectId, reset]);
+  const exists = !!project;
+  useEffect(() => {
+    if (exists) useProjectStore.getState().setPreferredMode(projectId, "console");
+  }, [exists, projectId]);
   const analysis = useMemo(() => (project ? analyzeProject(project) : null), [project]);
   if (!project || !analysis) {
     return (

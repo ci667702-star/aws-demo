@@ -23,7 +23,7 @@ import {
 } from "./alb-engine";
 import { awsReservedReason, formatIpv4, isPublicRoutableIp, parseIpv4, tryParseCidr, cidrContainsIp } from "./cidr-utils";
 import { evaluateNacl } from "./network-acl-engine";
-import { RESOURCE_TYPE_INFO, type Project } from "./resource-models";
+import { RESOURCE_TYPE_INFO, type ListenerRuleAction, type Project } from "./resource-models";
 import { selectRoute } from "./route-engine";
 import { describeSgRule, evaluateSecurityGroups, type Direction, type PacketProtocol } from "./security-group-engine";
 import {
@@ -49,6 +49,17 @@ export interface SimulationRequest {
   ephemeralPort?: number;
   /** ALB 목적지일 때 분산 확인을 위한 요청 수 (기본 1) */
   requestCount?: number;
+  /** ALB 목적지일 때 리스너 규칙을 평가할 HTTP 경로 (기본 "/") */
+  httpPath?: string;
+}
+
+/** ALB가 리스너 규칙의 고정 응답으로 직접 응답한 경우 */
+export interface AlbFixedResponse {
+  ruleId: string;
+  priority: number;
+  statusCode: number;
+  contentType: string;
+  body: string;
 }
 
 export type SimulationOutcome = "success" | "failure" | "invalid-request" | "engine-error";
@@ -72,6 +83,10 @@ export interface SimulationResult {
   distribution: DistributionEntry[] | null;
   /** 단일 요청에서 ALB가 선택한 대상 */
   selectedTargetId: string | null;
+  /** 리스너 규칙이 고정 응답을 돌려줬다면 그 내용 */
+  fixedResponse?: AlbFixedResponse | null;
+  /** 일치한 리스너 규칙 (기본 작업이면 null) */
+  matchedRuleId?: string | null;
   assumptions: string[];
   truncated: boolean;
   errorMessage?: string;
@@ -90,7 +105,7 @@ export const SIMULATION_ASSUMPTIONS = [
   "응답 트래픽의 임시 포트는 하나의 값으로 단순화합니다. 실제 클라이언트·NAT·ALB는 1024-65535 범위의 포트를 사용할 수 있습니다.",
   "인터넷의 가상 외부 호스트는 요청한 포트에서 응답한다고 가정합니다.",
   "EC2는 설정된 '가상 서비스 포트'에서만 응답한다고 가정합니다. 실제 운영체제나 프로세스는 실행되지 않습니다.",
-  "ALB는 교차 영역 로드 밸런싱이 켜져 있고 라운드 로빈으로 대상을 선택한다고 가정합니다. 리스너 규칙(경로 기반 라우팅)은 지원하지 않습니다.",
+  "ALB는 교차 영역 로드 밸런싱이 켜져 있고 라운드 로빈으로 대상을 선택한다고 가정합니다. 리스너 규칙은 경로 패턴 조건과 전달·고정 응답 작업만 지원합니다 (호스트 헤더·쿼리 문자열·가중치 전달은 지원하지 않음).",
 ];
 
 const CONCEPT = {
@@ -100,9 +115,29 @@ const CONCEPT = {
   igw: "인터넷 게이트웨이는 VPC에 연결(Attach)되어 있어야 하며, 퍼블릭 IPv4 주소가 있는 인터페이스에 대해 사설 IP ↔ 퍼블릭 IP 1:1 변환을 수행합니다. 라우팅 테이블에 IGW로 향하는 경로가 있는 서브넷이 퍼블릭 서브넷입니다.",
   nat: "NAT 게이트웨이는 프라이빗 서브넷 리소스의 아웃바운드 연결을 자신의 Elastic IP로 변환(SNAT)합니다. NAT는 퍼블릭 서브넷에 있어야 하며 외부에서 시작된 인바운드 연결은 받지 않습니다.",
   alb: "ALB는 리스너(프로토콜:포트)로 요청을 받고, 리스너의 기본 작업에 따라 대상 그룹의 정상(Healthy) 대상 중 하나로 요청을 전달합니다.",
+  albRules:
+    "리스너 규칙은 우선순위 숫자가 작은 것부터 평가하고, 처음 일치한 규칙 하나의 작업만 수행합니다. 어떤 규칙과도 맞지 않으면 리스너의 기본 작업을 사용합니다. 경로 패턴은 대소문자를 구분하며 *(0자 이상)와 ?(정확히 1자)를 쓸 수 있습니다.",
   dns: "VPC의 DNS 확인(enableDnsSupport)이 켜져 있어야 VPC 안에서 Amazon 제공 DNS로 ALB/RDS 엔드포인트 이름을 해석할 수 있습니다.",
   state: "인스턴스는 Running 상태일 때만 요청을 처리합니다. Stopped 상태에서는 퍼블릭 IP도 해제되며, Terminated 인스턴스는 다시 시작할 수 없습니다.",
 };
+
+/** 요청 경로를 정리한다: 쿼리 문자열을 떼고 /로 시작하게 만든다 */
+export function normalizeHttpPath(path: string | undefined): string {
+  const raw = (path ?? "/").trim().split("?")[0].split("#")[0];
+  if (!raw) return "/";
+  return raw.startsWith("/") ? raw : `/${raw}`;
+}
+
+/** ALB 경로 패턴 일치 (대소문자 구분, * = 0자 이상, ? = 정확히 1자) */
+export function pathPatternMatches(pattern: string, path: string): boolean {
+  const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".");
+  return new RegExp(`^${escaped}$`).test(path);
+}
+
+function ruleActionLabel(topo: Topology, action: ListenerRuleAction): string {
+  if (action.type === "fixed-response") return `고정 응답 ${action.statusCode}`;
+  return topo.get(action.targetGroupId) ? `${topo.name(action.targetGroupId)}(으)로 전달` : `삭제된 대상 그룹 ${action.targetGroupId}`;
+}
 
 interface Packet {
   protocol: PacketProtocol;
@@ -117,6 +152,10 @@ interface Ctx {
   healthCache: Map<string, TargetHealth[]>;
   selectedTargetId: string | null;
   ephemeralPort: number;
+  /** ALB 리스너 규칙을 평가할 HTTP 경로 */
+  httpPath: string;
+  fixedResponse: AlbFixedResponse | null;
+  matchedRuleId: string | null;
 }
 
 type Origin = { kind: "internet"; ip: number } | { kind: "eni"; eni: Eni };
@@ -883,7 +922,73 @@ function serveAlb(ctx: Ctx, nodeEni: Eni, pkt: Packet): void {
     rules: listenerRows,
     concept: CONCEPT.alb,
   });
-  if (!binding.targetGroupId) {
+  // 리스너 규칙: 우선순위 순서로 경로 조건을 검사하고, 처음 일치한 규칙의 작업을 한다
+  const rules = [...(binding.listener.rules ?? [])].sort((a, b) => a.priority - b.priority);
+  let forwardTgId: string | null = binding.targetGroupId;
+  if (rules.length) {
+    const path = ctx.httpPath;
+    const matched = rules.find((r) => r.pathPatterns.some((p) => pathPatternMatches(p, path)));
+    const ruleRows = [
+      ...rules.map((r) => ({
+        label: `우선순위 ${r.priority}: 경로 ${r.pathPatterns.join(", ")} → ${ruleActionLabel(topo, r.action)}`,
+        note: r === matched ? "일치 (이 규칙의 작업을 수행)" : matched && r.priority > matched.priority ? "평가하지 않음 (앞 규칙이 먼저 일치)" : "경로 불일치",
+        matched: r === matched,
+        decisive: r === matched,
+      })),
+      {
+        label: `기본값 → ${binding.targetGroupId ? `${topo.name(binding.targetGroupId)}(으)로 전달` : "(대상 그룹 없음)"}`,
+        note: matched ? "사용하지 않음" : "일치하는 규칙이 없어 기본 작업 사용",
+        matched: !matched,
+        decisive: !matched,
+      },
+    ];
+    if (matched) {
+      ctx.matchedRuleId = matched.id;
+      if (matched.action.type === "fixed-response") {
+        ctx.fixedResponse = { ruleId: matched.id, priority: matched.priority, statusCode: matched.action.statusCode, contentType: matched.action.contentType, body: matched.action.body };
+        log.pass({
+          kind: "listener",
+          title: `리스너 규칙 ${matched.priority} 일치: ALB가 고정 응답 ${matched.action.statusCode} 반환`,
+          detail: `요청 경로 ${path}이(가) 규칙의 경로 패턴과 일치해, 대상(EC2)으로 보내지 않고 ALB가 직접 응답합니다.`,
+          resourceIds: [alb.id],
+          rules: ruleRows,
+          concept: CONCEPT.albRules,
+        });
+        return;
+      }
+      forwardTgId = matched.action.targetGroupId;
+      if (!topo.getOfType(forwardTgId, "target-group")) {
+        log.fail({
+          kind: "listener",
+          category: "listener",
+          title: `리스너 규칙 ${matched.priority}의 대상 그룹이 없음`,
+          reason: `규칙 ${matched.priority}이(가) 전달할 대상 그룹 ${forwardTgId}이(가) 삭제되었습니다.`,
+          resourceIds: [alb.id],
+          rules: ruleRows,
+          fixes: ["로드 밸런서의 리스너 규칙에서 대상 그룹을 다시 선택하거나 규칙을 삭제하세요."],
+          concept: CONCEPT.albRules,
+        });
+      }
+      log.pass({
+        kind: "listener",
+        title: `리스너 규칙 ${matched.priority} 일치: ${topo.name(forwardTgId)}(으)로 전달`,
+        detail: `요청 경로 ${path}이(가) 경로 패턴 ${matched.pathPatterns.join(", ")}과(와) 일치합니다.`,
+        resourceIds: [alb.id, forwardTgId],
+        rules: ruleRows,
+        concept: CONCEPT.albRules,
+      });
+    } else {
+      log.pass({
+        kind: "listener",
+        title: "일치하는 리스너 규칙 없음: 기본 작업 사용",
+        detail: `요청 경로 ${path}과(와) 일치하는 규칙이 없어 리스너의 기본 작업을 사용합니다.`,
+        resourceIds: [alb.id],
+        rules: ruleRows,
+        concept: CONCEPT.albRules,
+      });
+    }
+  }
+  if (!forwardTgId) {
     log.fail({
       kind: "listener",
       category: "listener",
@@ -894,7 +999,7 @@ function serveAlb(ctx: Ctx, nodeEni: Eni, pkt: Packet): void {
       concept: CONCEPT.alb,
     });
   }
-  const tg = topo.getOfType(binding.targetGroupId, "target-group")!;
+  const tg = topo.getOfType(forwardTgId, "target-group")!;
   log.hop(tg.id, topo.label(tg.id));
   const health = healthFor(ctx, tg.id);
   const healthRows = health.map((h) => ({
@@ -974,7 +1079,7 @@ function serveAlb(ctx: Ctx, nodeEni: Eni, pkt: Packet): void {
 
 function runHealthProbe(topo: Topology, args: ProbeArgs, ephemeralPort: number): ProbeResult {
   const log: SimulationLog = new SimulationLog();
-  const ctx: Ctx = { topo, log, requestIndex: 0, healthCache: new Map(), selectedTargetId: null, ephemeralPort };
+  const ctx: Ctx = { topo, log, requestIndex: 0, healthCache: new Map(), selectedTargetId: null, ephemeralPort, httpPath: "/", fixedResponse: null, matchedRuleId: null };
   try {
     const targetEni = topo.enisOf(args.target.id)[0];
     if (!targetEni || targetEni.privateIp === null) {
@@ -1294,6 +1399,8 @@ interface SingleRun {
   selectedTargetId: string | null;
   truncated: boolean;
   errorMessage?: string;
+  fixedResponse?: AlbFixedResponse | null;
+  matchedRuleId?: string | null;
 }
 
 function runOnce(
@@ -1304,7 +1411,7 @@ function runOnce(
 ): SingleRun {
   const ephemeralPort = request.ephemeralPort ?? DEFAULT_EPHEMERAL_PORT;
   const log: SimulationLog = new SimulationLog();
-  const ctx: Ctx = { topo, log, requestIndex, healthCache, selectedTargetId: null, ephemeralPort };
+  const ctx: Ctx = { topo, log, requestIndex, healthCache, selectedTargetId: null, ephemeralPort, httpPath: normalizeHttpPath(request.httpPath), fixedResponse: null, matchedRuleId: null };
   const pkt: Packet = {
     protocol: request.protocol,
     port: request.protocol === "icmp" ? null : request.port,
@@ -1314,7 +1421,7 @@ function runOnce(
     const origin = resolveSource(ctx, request.source);
     const destination = resolveDestination(ctx, request.destination, origin);
     transmit(ctx, origin, destination.address, pkt, `${endpointLabel(topo, request.source)} → ${destination.label}`);
-    return { outcome: "success", steps: log.steps, path: log.path, failure: null, selectedTargetId: ctx.selectedTargetId, truncated: log.isTruncated };
+    return { outcome: "success", steps: log.steps, path: log.path, failure: null, selectedTargetId: ctx.selectedTargetId, truncated: log.isTruncated, fixedResponse: ctx.fixedResponse, matchedRuleId: ctx.matchedRuleId };
   } catch (e) {
     if (e instanceof SimulationHalt) {
       return {
@@ -1392,7 +1499,8 @@ export function simulateWithTopology(topo: Topology, request: SimulationRequest)
     let distribution: DistributionEntry[] | null = null;
     const count = request.requestCount ?? 1;
     const destination = request.destination.kind === "resource" ? topo.get(request.destination.resourceId) : undefined;
-    if (destination?.type === "alb" && count > 1) {
+    // 고정 응답 규칙은 대상으로 보내지 않으므로 분산 결과가 없다
+    if (destination?.type === "alb" && count > 1 && !first.fixedResponse) {
       const tally = new Map<string, DistributionEntry>();
       const record = (run: SingleRun) => {
         if (!run.selectedTargetId) return;
@@ -1411,7 +1519,9 @@ export function simulateWithTopology(topo: Topology, request: SimulationRequest)
       distribution = [...tally.values()].sort((a, b) => topo.orderOf(a.targetId) - topo.orderOf(b.targetId));
     }
     const summary =
-      first.outcome === "success"
+      first.outcome === "success" && first.fixedResponse
+        ? `요청 성공 (가상): ${base.sourceLabel} → ${base.destinationLabel} — ALB 리스너 규칙 ${first.fixedResponse.priority}이(가) 고정 응답 ${first.fixedResponse.statusCode}을(를) 돌려줬습니다 (대상 EC2로 전달하지 않음).`
+        : first.outcome === "success"
         ? `요청 성공 (가상): ${base.sourceLabel} → ${base.destinationLabel} (${request.protocol === "icmp" ? "ICMP" : `${request.protocol.toUpperCase()} ${request.port}`}) — 응답이 출발지로 돌아왔습니다.`
         : first.outcome === "failure"
           ? `요청 실패: ${first.failure?.reason}`

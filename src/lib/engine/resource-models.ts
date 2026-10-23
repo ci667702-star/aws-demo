@@ -89,10 +89,33 @@ export const naclRuleSchema = z.object({
 });
 export type NaclRule = z.infer<typeof naclRuleSchema>;
 
+/** 리스너 규칙의 작업: 대상 그룹으로 전달하거나, ALB가 직접 고정 응답을 돌려준다 */
+export const listenerRuleActionSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("forward"), targetGroupId: id }),
+  z.object({
+    type: z.literal("fixed-response"),
+    statusCode: z.number().int().min(200).max(599),
+    contentType: z.enum(["text/plain", "text/html", "application/json"]),
+    body: z.string().max(1024),
+  }),
+]);
+export type ListenerRuleAction = z.infer<typeof listenerRuleActionSchema>;
+
+/** 리스너 규칙: 경로 조건이 맞으면 기본 작업 대신 이 작업을 한다 (우선순위 숫자가 작은 규칙부터 평가) */
+export const listenerRuleSchema = z.object({
+  id,
+  priority: z.number().int().min(1).max(50000),
+  /** 경로 패턴 (예: /api/*). 와일드카드 * 와 ? 사용 가능, 대소문자 구분 */
+  pathPatterns: z.array(z.string().min(1).max(128)).min(1).max(5),
+  action: listenerRuleActionSchema,
+});
+export type ListenerRule = z.infer<typeof listenerRuleSchema>;
+
 export const listenerSchema = z.object({
   id,
   protocol: z.enum(["HTTP", "HTTPS"]),
   port: z.number().int().min(1).max(65535),
+  rules: z.array(listenerRuleSchema).max(20).default([]),
 });
 export type Listener = z.infer<typeof listenerSchema>;
 
@@ -158,6 +181,8 @@ export const configSchemas = {
     httpResponseCode: z.number().int().min(100).max(599),
     /** 가상 사용자 데이터 (표시용 스크립트, 실행되지 않음) */
     userData: z.string().max(16384).default(""),
+    /** 인스턴스 프로파일로 연결한 IAM 역할 ID */
+    iamRoleId: z.string().max(64).nullable().default(null),
   }),
   alb: z.object({
     scheme: z.enum(["internet-facing", "internal"]),
@@ -291,6 +316,8 @@ export const simulationRequestSchema = z.object({
   port: z.number().int().min(0).max(65535),
   ephemeralPort: z.number().int().min(1024).max(65535).optional(),
   requestCount: z.number().int().min(1).max(100).optional(),
+  /** ALB 목적지일 때 리스너 규칙을 평가할 HTTP 경로 (기본 "/") */
+  httpPath: z.string().max(256).optional(),
 });
 
 /** Reachability Analyzer처럼 저장해 두고 반복 분석하는 네트워크 경로 */
@@ -335,6 +362,207 @@ export type CostAssumptions = z.infer<typeof costAssumptionsSchema>;
 
 export const PROJECT_SCHEMA_VERSION = 1;
 
+// ---------------------------------------------------------------------------
+// VPC 밖의 서비스 (IAM, S3, CloudWatch). 모두 가상이며 실제 AWS와 연결되지 않는다.
+// ---------------------------------------------------------------------------
+
+const timestamp = z.string().min(1).max(40);
+const iamName = z.string().trim().min(1).max(128);
+/** AWS 관리형 정책은 "aws:정책이름", 고객 관리형 정책은 정책 ID */
+const policyRef = z.string().min(1).max(160);
+
+export const iamAccessKeySchema = z.object({
+  /** 가상 액세스 키 ID — 실제 AWS 키와 구별되도록 PGSIM으로 시작한다 */
+  id: z.string().min(1).max(64),
+  /** 비밀 키는 저장하지 않고 마지막 4자리만 보관한다 (AWS도 다시 보여 주지 않음) */
+  secretHint: z.string().max(16),
+  status: z.enum(["Active", "Inactive"]),
+  useCase: z.string().max(64).default(""),
+  description: z.string().max(256).default(""),
+  createdAt: timestamp,
+});
+export type IamAccessKey = z.infer<typeof iamAccessKeySchema>;
+
+export const iamUserSchema = z.object({
+  id,
+  name: iamName,
+  createdAt: timestamp,
+  groupIds: z.array(id).max(10).default([]),
+  policyIds: z.array(policyRef).max(20).default([]),
+  accessKeys: z.array(iamAccessKeySchema).max(2).default([]),
+  /** 콘솔 로그인 허용 여부 (가상 — 암호는 받지 않는다) */
+  consoleAccess: z.boolean().default(false),
+  mfaEnabled: z.boolean().default(false),
+});
+export type IamUser = z.infer<typeof iamUserSchema>;
+
+export const iamGroupSchema = z.object({
+  id,
+  name: iamName,
+  createdAt: timestamp,
+  policyIds: z.array(policyRef).max(20).default([]),
+});
+export type IamGroup = z.infer<typeof iamGroupSchema>;
+
+export const IAM_TRUSTED_ENTITIES = ["ec2.amazonaws.com", "lambda.amazonaws.com", "account"] as const;
+
+export const iamRoleSchema = z.object({
+  id,
+  name: iamName,
+  description: z.string().max(1000).default(""),
+  trustedEntity: z.enum(IAM_TRUSTED_ENTITIES),
+  createdAt: timestamp,
+  policyIds: z.array(policyRef).max(20).default([]),
+});
+export type IamRole = z.infer<typeof iamRoleSchema>;
+
+export const iamPolicySchema = z.object({
+  id,
+  name: iamName,
+  description: z.string().max(1000).default(""),
+  /** 정책 문서 JSON (검증 후 저장) */
+  document: z.string().max(10000),
+  createdAt: timestamp,
+  updatedAt: timestamp,
+});
+export type IamPolicy = z.infer<typeof iamPolicySchema>;
+
+export const s3ObjectVersionSchema = z.object({
+  versionId: z.string().max(64),
+  size: z.number().int().min(0),
+  etag: z.string().max(64),
+  lastModified: timestamp,
+  contentType: z.string().max(128).default("application/octet-stream"),
+  text: z.string().max(65536).nullable().default(null),
+  /** 이 버전이 삭제 마커인지 */
+  deleteMarker: z.boolean().default(false),
+});
+export type S3ObjectVersion = z.infer<typeof s3ObjectVersionSchema>;
+
+export const s3ObjectSchema = z.object({
+  key: z.string().min(1).max(1024),
+  size: z.number().int().min(0),
+  contentType: z.string().max(128).default("application/octet-stream"),
+  etag: z.string().max(64),
+  lastModified: timestamp,
+  versionId: z.string().max(64).default("null"),
+  /** 작은 텍스트 파일만 내용을 보관한다 (미리보기·웹사이트 응답용) */
+  text: z.string().max(65536).nullable().default(null),
+  /** 버전 관리가 켜진 버킷에서 삭제하면 삭제 마커만 남는다 */
+  deleteMarker: z.boolean().default(false),
+  /** 이전 버전 (최신순) */
+  previousVersions: z.array(s3ObjectVersionSchema).max(20).default([]),
+});
+export type S3Object = z.infer<typeof s3ObjectSchema>;
+
+export const s3BucketSchema = z.object({
+  id,
+  name: z.string().min(3).max(63),
+  createdAt: timestamp,
+  blockPublicAccess: z.object({
+    blockPublicAcls: z.boolean(),
+    ignorePublicAcls: z.boolean(),
+    blockPublicPolicy: z.boolean(),
+    restrictPublicBuckets: z.boolean(),
+  }),
+  versioning: z.enum(["Disabled", "Enabled", "Suspended"]).default("Disabled"),
+  encryption: z.enum(["SSE-S3", "SSE-KMS"]).default("SSE-S3"),
+  policy: z.string().max(20000).default(""),
+  website: z
+    .object({ enabled: z.boolean(), indexDocument: z.string().max(1024), errorDocument: z.string().max(1024) })
+    .default({ enabled: false, indexDocument: "index.html", errorDocument: "" }),
+  objects: z.array(s3ObjectSchema).max(500).default([]),
+});
+export type S3Bucket = z.infer<typeof s3BucketSchema>;
+
+export const METRIC_NAMESPACES = ["AWS/EC2", "AWS/ApplicationELB", "AWS/RDS", "AWS/NATGateway"] as const;
+export const METRIC_STATS = ["Average", "Sum", "Maximum", "Minimum"] as const;
+
+export const metricRefSchema = z.object({
+  namespace: z.enum(METRIC_NAMESPACES),
+  metricName: z.string().min(1).max(64),
+  resourceId: id,
+  stat: z.enum(METRIC_STATS).default("Average"),
+});
+export type MetricRef = z.infer<typeof metricRefSchema>;
+
+export const ALARM_COMPARISONS = ["GreaterThanThreshold", "GreaterThanOrEqualToThreshold", "LessThanThreshold", "LessThanOrEqualToThreshold"] as const;
+
+export const alarmSchema = z.object({
+  id,
+  name: z.string().trim().min(1).max(255),
+  description: z.string().max(1024).default(""),
+  metric: metricRefSchema,
+  /** 기간 (초) */
+  period: z.number().int().refine((v) => v === 60 || v === 300 || v === 900, "기간은 60, 300, 900초 중 하나입니다."),
+  comparison: z.enum(ALARM_COMPARISONS),
+  threshold: z.number().finite(),
+  evaluationPeriods: z.number().int().min(1).max(10),
+  datapointsToAlarm: z.number().int().min(1).max(10),
+  treatMissingData: z.enum(["missing", "notBreaching", "breaching", "ignore"]).default("missing"),
+  /** 경보 상태가 바뀌면 가상 알림(SNS 대신 콘솔 토스트·알림 기록)을 남긴다 */
+  notify: z.boolean().default(true),
+  createdAt: timestamp,
+});
+export type Alarm = z.infer<typeof alarmSchema>;
+
+export const dashboardWidgetSchema = z.object({
+  id,
+  title: z.string().trim().min(1).max(100),
+  type: z.enum(["line", "number"]),
+  metrics: z.array(metricRefSchema).min(1).max(5),
+});
+export type DashboardWidget = z.infer<typeof dashboardWidgetSchema>;
+
+export const dashboardSchema = z.object({
+  id,
+  name: z.string().trim().min(1).max(255),
+  createdAt: timestamp,
+  widgets: z.array(dashboardWidgetSchema).max(20).default([]),
+});
+export type Dashboard = z.infer<typeof dashboardSchema>;
+
+/** 가상 부하: 정해진 시간 동안 대상(ALB 또는 EC2)에 분당 요청을 보낸다고 가정한다 */
+export const loadTestSchema = z.object({
+  id,
+  name: z.string().trim().min(1).max(100),
+  targetId: id,
+  port: port,
+  requestsPerMinute: z.number().int().min(1).max(100000),
+  startAt: timestamp,
+  durationMinutes: z.number().int().min(1).max(1440),
+  createdAt: timestamp,
+});
+export type LoadTest = z.infer<typeof loadTestSchema>;
+
+export const EMPTY_SERVICES = {
+  iam: { users: [], groups: [], roles: [], policies: [] },
+  s3: { buckets: [] },
+  cloudwatch: { alarms: [], dashboards: [], loads: [] },
+};
+
+export const servicesSchema = z
+  .object({
+    iam: z
+      .object({
+        users: z.array(iamUserSchema).max(100).default([]),
+        groups: z.array(iamGroupSchema).max(50).default([]),
+        roles: z.array(iamRoleSchema).max(50).default([]),
+        policies: z.array(iamPolicySchema).max(100).default([]),
+      })
+      .default({ users: [], groups: [], roles: [], policies: [] }),
+    s3: z.object({ buckets: z.array(s3BucketSchema).max(100).default([]) }).default({ buckets: [] }),
+    cloudwatch: z
+      .object({
+        alarms: z.array(alarmSchema).max(100).default([]),
+        dashboards: z.array(dashboardSchema).max(20).default([]),
+        loads: z.array(loadTestSchema).max(50).default([]),
+      })
+      .default({ alarms: [], dashboards: [], loads: [] }),
+  })
+  .default(EMPTY_SERVICES);
+export type Services = z.infer<typeof servicesSchema>;
+
 export const projectSchema = z.object({
   schemaVersion: z.literal(PROJECT_SCHEMA_VERSION),
   id,
@@ -348,6 +576,9 @@ export const projectSchema = z.object({
   labId: z.string().nullable().default(null),
   costAssumptions: costAssumptionsSchema.nullable().default(null),
   networkPaths: z.array(networkPathSchema).max(200).default([]),
+  services: servicesSchema,
+  /** 이 샌드박스를 열 때 쓰는 화면 (쉬운 모드: 그림 빌더, 심화 모드: 콘솔) */
+  preferredMode: z.enum(["easy", "console"]).default("console"),
 });
 export type Project = z.infer<typeof projectSchema>;
 

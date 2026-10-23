@@ -41,8 +41,8 @@ describe("콘솔", () => {
     seedStore([p]);
     renderConsole(p.id, "#/");
     expect(await screen.findByRole("heading", { name: "콘솔 홈", level: 1 })).toBeInTheDocument();
-    expect(screen.getByText("시작하기")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /VPC 생성 — IPv4 CIDR/ })).toHaveAttribute("href", "#/vpc/vpcs/create");
+    expect(screen.getByRole("heading", { name: /직접 만들어 보기 \(0\/7\)/ })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /VPC 만들기/ })).toHaveAttribute("href", "#/vpc/vpcs/create");
     expect(project(p.id).resources).toEqual([]);
   });
 
@@ -62,7 +62,7 @@ describe("콘솔", () => {
     await user.type(screen.getByLabelText(/이름 태그/), "my-vpc");
     await user.click(screen.getByRole("button", { name: "VPC 생성" }));
     expect(await screen.findByRole("heading", { name: /vpc-0001 \/ my-vpc/, level: 1 })).toBeInTheDocument();
-    expect(within(screen.getByTestId("flashbar")).getByText(/VPC vpc-0001을\(를\) 생성했습니다/)).toBeInTheDocument();
+    expect(await screen.findByText(/VPC vpc-0001을\(를\) 생성했습니다/)).toBeInTheDocument();
     expect(project(p.id).resources.map((r) => r.type).sort()).toEqual(["network-acl", "route-table", "security-group", "vpc"]);
   });
 

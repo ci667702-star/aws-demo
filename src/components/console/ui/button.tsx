@@ -25,7 +25,7 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
 
 export const buttonClass = (variant: ButtonVariant = "normal", className?: string) =>
   cn(
-    "inline-flex h-8 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-full border-2 px-4 text-sm leading-none font-bold whitespace-nowrap transition-colors select-none",
+    "inline-flex h-9 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-full border-2 px-4 text-[14px] leading-none font-bold whitespace-nowrap transition-colors select-none",
     "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-aws-focus disabled:cursor-not-allowed",
     "[&_svg]:size-4 [&_svg]:shrink-0",
     VARIANT[variant],
@@ -105,14 +105,14 @@ export function ButtonDropdown({
       onSelect={() => onItemClick(item.id)}
       title={item.disabled ? item.disabledReason : undefined}
       className={cn(
-        "flex cursor-pointer flex-col items-start gap-0.5 rounded-md px-3 py-1.5 text-sm outline-none",
+        "flex cursor-pointer flex-col items-start gap-0.5 rounded-lg px-3 py-2 text-[15px] outline-none",
         "data-[highlighted]:bg-aws-info-bg data-[highlighted]:text-aws-link-hover",
         "data-[disabled]:cursor-not-allowed data-[disabled]:text-aws-text-3",
         item.danger && "text-aws-error data-[highlighted]:text-aws-error",
       )}
     >
       <span>{item.text}</span>
-      {item.description && <span className="text-xs text-aws-text-2">{item.description}</span>}
+      {item.description && <span className="text-[13px] text-aws-text-2">{item.description}</span>}
     </DropdownMenuPrimitive.Item>
   );
   return (
@@ -126,12 +126,12 @@ export function ButtonDropdown({
         <DropdownMenuPrimitive.Content
           align={align}
           sideOffset={4}
-          className="z-50 max-h-[min(70vh,var(--radix-dropdown-menu-content-available-height))] min-w-56 overflow-y-auto rounded-lg border border-aws-border bg-aws-surface p-1 text-aws-text shadow-lg"
+          className="z-50 max-h-[min(70vh,var(--radix-dropdown-menu-content-available-height))] min-w-60 overflow-y-auto rounded-xl border border-aws-border bg-aws-surface p-1.5 text-aws-text shadow-xl"
         >
           {items.map((entry) =>
             isGroup(entry) ? (
               <DropdownMenuPrimitive.Group key={entry.id} className="border-t border-aws-divider py-1 first:border-t-0 first:pt-0">
-                <DropdownMenuPrimitive.Label className="px-3 py-1 text-xs font-bold text-aws-text-2">{entry.text}</DropdownMenuPrimitive.Label>
+                <DropdownMenuPrimitive.Label className="px-3 py-1 text-[13px] font-bold text-aws-text-2">{entry.text}</DropdownMenuPrimitive.Label>
                 {entry.items.map(renderItem)}
               </DropdownMenuPrimitive.Group>
             ) : (

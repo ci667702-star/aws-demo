@@ -1,6 +1,7 @@
 "use client";
 
 /** EC2 인스턴스 시작 마법사 (AWS 콘솔의 단일 페이지 구성) */
+import { withHint } from "../error-codes";
 import { useMemo, useState } from "react";
 import { EC2_INSTANCE_TYPES, type ConfigOf, type Project, type SgRule } from "@/lib/engine/resource-models";
 import { displayName } from "@/lib/engine/topology-engine";
@@ -10,11 +11,13 @@ import { touch } from "@/lib/project/mutations";
 import { useRunAction } from "../console-context";
 import { href, navigate, resourcePath } from "../router";
 import { Alert } from "../ui/alert";
+import { PageGuide } from "../ui/page-guide";
 import { Button, ButtonLink } from "../ui/button";
 import { Checkbox, FormField, MultiSelect, RadioGroup, SelectInput, TextInput, Tiles } from "../ui/form";
 import { Container, ContainerHeader, ExpandableSection, KeyValueGrid, PageHeader, SpaceBetween } from "../ui/layout";
 import { InfoLink } from "../ui/links";
 import { useTopology } from "./common";
+import { Ec2RoleSelect, InstanceRoleLink } from "./iam/instance-role";
 import { UserDataFields, useUserDataDraft } from "./user-data";
 
 type Ami = ConfigOf<"ec2">["ami"];
@@ -39,6 +42,7 @@ export function LaunchInstancePage() {
   const [allowHttps, setAllowHttps] = useState(false);
   const [privateIp, setPrivateIp] = useState("");
   const [count, setCount] = useState("1");
+  const [iamRoleId, setIamRoleId] = useState("");
   const userData = useUserDataDraft(ami);
   const [error, setError] = useState<string | null>(null);
 
@@ -91,6 +95,7 @@ export function LaunchInstancePage() {
           httpResponseCode: ud.value.httpResponseCode,
           userData: ud.value.userData,
           count: Number.isInteger(n) ? n : NaN,
+          iamRoleId: iamRoleId || null,
         });
         if (!launched.ok) return launched;
         ids.push(...launched.project.resources.filter((r) => r.type === "ec2" && !p.resources.some((x) => x.id === r.id)).map((r) => r.id));
@@ -98,13 +103,14 @@ export function LaunchInstancePage() {
       },
       { success: () => `인스턴스를 시작했습니다: ${ids.join(", ")}` },
     );
-    if (!result.ok) setError([result.error, result.hint].filter(Boolean).join(" "));
+    if (!result.ok) setError(withHint(result));
     else navigate(ids.length === 1 ? resourcePath("ec2", ids[0]) : "/ec2/instances");
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" data-tour="launch-form">
       <PageHeader title="인스턴스 시작" info={<InfoLink topic="ec2-launch" />} description="아래 단계에 따라 가상 EC2 인스턴스를 구성합니다. 실제 서버는 실행되지 않으며, 네트워크 동작만 시뮬레이션합니다." />
+      <PageGuide topic="ec2-launch" />
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
         <SpaceBetween>
           <Container header={<ContainerHeader title="이름 및 태그" />}>
@@ -237,7 +243,19 @@ export function LaunchInstancePage() {
           </Container>
 
           <ExpandableSection variant="container" header="고급 세부 정보" defaultExpanded>
-            <UserDataFields ami={ami} draft={userData} />
+            <SpaceBetween size="m">
+              <FormField
+                label="IAM 인스턴스 프로파일"
+                info={<InfoLink topic="iam-role" />}
+                description="서버 안의 프로그램이 S3 같은 서비스를 호출할 때 쓸 IAM 역할입니다. 액세스 키를 서버에 넣는 대신 역할을 연결하세요."
+              >
+                <Ec2RoleSelect value={iamRoleId} onChange={setIamRoleId} />
+              </FormField>
+              <p className="text-sm text-aws-text-2">
+                EC2용 역할이 없다면 IAM → 역할에서 먼저 만드세요. 인스턴스를 시작한 뒤에도 작업 → 보안 → IAM 역할 수정에서 연결할 수 있습니다.
+              </p>
+              <UserDataFields ami={ami} draft={userData} />
+            </SpaceBetween>
           </ExpandableSection>
         </SpaceBetween>
 
@@ -255,6 +273,7 @@ export function LaunchInstancePage() {
                   { label: "방화벽(보안 그룹)", value: sgMode === "create" ? `새 보안 그룹 (${newSgName})` : existingSgs.join(", ") || "선택 안 됨" },
                   { label: "서브넷", value: subnet ? `${subnet.id} · ${subnet.config.availabilityZone}` : "선택 안 됨" },
                   { label: "퍼블릭 IPv4", value: subnet ? (willHavePublicIp ? "할당됨" : "할당 안 됨") : "–" },
+                  { label: "IAM 역할", value: iamRoleId ? <InstanceRoleLink roleId={iamRoleId} /> : "없음" },
                   { label: "가상 서비스 포트", value: (() => { const v = userData.toValue(ami); return v.ok ? v.value.listenPorts.join(", ") : "입력 확인 필요"; })() },
                 ]}
               />

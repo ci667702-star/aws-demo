@@ -61,9 +61,22 @@ export function deleteResources(project: Project, ids: string[]): MutationResult
   const removedConnections = project.connections.filter((c) => remove.has(c.sourceResourceId) || remove.has(c.targetResourceId));
   if (removedConnections.length) notes.push(`관련 연결 ${removedConnections.length}개를 함께 삭제했습니다.`);
   let strippedRules = 0;
+  let strippedListenerRules = 0;
   const resources = project.resources
     .filter((r) => !remove.has(r.id))
     .map((r) => {
+      if (r.type === "alb") {
+        // 삭제된 대상 그룹으로 전달하던 리스너 규칙은 함께 지운다
+        let dropped = 0;
+        const listeners = r.config.listeners.map((l) => {
+          const rules = (l.rules ?? []).filter((rule) => !(rule.action.type === "forward" && remove.has(rule.action.targetGroupId)));
+          dropped += (l.rules ?? []).length - rules.length;
+          return rules.length === (l.rules ?? []).length ? l : { ...l, rules };
+        });
+        if (!dropped) return r;
+        strippedListenerRules += dropped;
+        return { ...r, config: { ...r.config, listeners } };
+      }
       if (r.type !== "security-group") return r;
       const keep = (rule: (typeof r.config.inboundRules)[number]) =>
         !(rule.peer.kind === "security-group" && remove.has(rule.peer.securityGroupId));
@@ -75,6 +88,7 @@ export function deleteResources(project: Project, ids: string[]): MutationResult
       return { ...r, config: { ...r.config, inboundRules, outboundRules } };
     });
   if (strippedRules) notes.push(`삭제된 보안 그룹을 참조하던 규칙 ${strippedRules}개를 정리했습니다.`);
+  if (strippedListenerRules) notes.push(`삭제된 대상 그룹으로 전달하던 리스너 규칙 ${strippedListenerRules}개를 정리했습니다.`);
   return ok(
     touch({
       ...project,

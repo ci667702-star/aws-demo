@@ -7,6 +7,7 @@ import { formatIpv4, nextAvailableSubnet, nextAvailableVpcCidr, parseIpv4, tryPa
 import { createId } from "@/lib/engine/ids";
 import {
   AVAILABILITY_ZONES,
+  EMPTY_SERVICES,
   PROJECT_SCHEMA_VERSION,
   RDS_DEFAULT_PORT,
   RESOURCE_TYPE_INFO,
@@ -109,7 +110,7 @@ export const NACL = {
 };
 
 export function newListener(protocol: Listener["protocol"] = "HTTP", port = 80): Listener {
-  return { id: createId("lsn"), protocol, port };
+  return { id: createId("lsn"), protocol, port, rules: [] };
 }
 
 /**
@@ -183,6 +184,7 @@ export function defaultConfig<T extends ResourceType>(type: T, project: Project)
       listenPorts: [22, 80],
       httpResponseCode: 200,
       userData: "",
+      iamRoleId: null,
     }),
     alb: () => ({ scheme: "internet-facing" as const, listeners: [newListener("HTTP", 80)], state: "active" as const }),
     "target-group": () => ({ protocol: "HTTP" as const, port: 80, healthCheck: { ...DEFAULT_HEALTH_CHECK } }),
@@ -234,6 +236,8 @@ export function createEmptyProject(name: string, options: { description?: string
     labId: options.labId ?? null,
     costAssumptions: null,
     networkPaths: [],
+    services: structuredClone(EMPTY_SERVICES),
+    preferredMode: "console",
   };
 }
 

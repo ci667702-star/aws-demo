@@ -89,6 +89,14 @@ export function checkProjectIntegrity(project: Project): IntegrityIssue[] {
       for (const l of r.config.listeners) {
         if (ids.has(l.id)) issues.push({ path: `resources[${i}].config.listeners`, message: `ALB ${r.name}의 리스너 ID가 중복되었습니다.` });
         ids.add(l.id);
+        const priorities = new Set<number>();
+        for (const rule of l.rules ?? []) {
+          if (priorities.has(rule.priority)) issues.push({ path: `resources[${i}].config.listeners`, message: `ALB ${r.name}의 리스너 규칙 우선순위 ${rule.priority}이(가) 중복되었습니다.` });
+          priorities.add(rule.priority);
+          if (rule.action.type === "forward" && byId.get(rule.action.targetGroupId)?.type !== "target-group") {
+            issues.push({ path: `resources[${i}].config.listeners`, message: `ALB ${r.name}의 리스너 규칙이 존재하지 않는 대상 그룹 "${rule.action.targetGroupId}"를 참조합니다.` });
+          }
+        }
       }
     }
   });

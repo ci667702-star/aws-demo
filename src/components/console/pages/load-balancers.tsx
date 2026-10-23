@@ -1,5 +1,6 @@
 "use client";
 
+import { withHint } from "../error-codes";
 import { useState } from "react";
 import { createId } from "@/lib/engine/ids";
 import { AVAILABILITY_ZONES, type ResourceOfType } from "@/lib/engine/resource-models";
@@ -16,7 +17,8 @@ import {
 import { useAnalysis } from "../analysis-context";
 import { useRunAction } from "../console-context";
 import { href, navigate, resourcePath } from "../router";
-import { Alert } from "../ui/alert";
+import { Alert, ErrorAlert } from "../ui/alert";
+import { PageGuide } from "../ui/page-guide";
 import { Button, ButtonDropdown, ButtonLink } from "../ui/button";
 import { Checkbox, FormActions, FormField, MultiSelect, RadioGroup, SelectInput, TextInput } from "../ui/form";
 import { Container, ContainerHeader, EmptyState, KeyValueGrid, PageHeader, SpaceBetween } from "../ui/layout";
@@ -26,6 +28,7 @@ import { ResourceTable } from "../ui/table";
 import { Tabs } from "../ui/tabs";
 import { Badge, CopyText } from "../ui/status";
 import { LbState, ResourceNotFound, SubnetKindLabel, useQueryTab, useResource, useSelection, useTopology } from "./common";
+import { ListenerRulesSection } from "./listener-rules";
 import { HealthStatus } from "./target-groups";
 
 type Alb = ResourceOfType<"alb">;
@@ -41,7 +44,7 @@ function DeleteAlbModal({ alb, onClose }: { alb: Alb | undefined; onClose: () =>
       confirmText="confirm"
       onConfirm={() => {
         const r = run("DeleteLoadBalancer", (p) => deleteLoadBalancer(p, alb.id), { success: () => `로드 밸런서 ${alb.name}을(를) 삭제했습니다.` });
-        if (!r.ok) return r.error;
+        if (!r.ok) return withHint(r);
         navigate("/ec2/load-balancers");
         return null;
       }}
@@ -61,6 +64,7 @@ export function LoadBalancerListPage() {
   const current = albs.find((a) => a.id === selected[0]);
   return (
     <SpaceBetween>
+      <PageGuide topic="alb" />
       <ResourceTable<Alb>
         ariaLabel="로드 밸런서 목록"
         items={albs}
@@ -100,11 +104,11 @@ export function LoadBalancerListPage() {
         empty={<EmptyState title="로드 밸런서 없음" description="여러 인스턴스로 요청을 분산하려면 Application Load Balancer를 만드세요." action={<ButtonLink href={href("/ec2/load-balancers/select-type")}>로드 밸런서 생성</ButtonLink>} />}
         columns={[
           { id: "name", header: "이름", cell: (a) => <TypedResourceLink type="alb" id={a.id}>{a.name}</TypedResourceLink>, sortValue: (a) => a.name },
-          { id: "dns", header: "DNS 이름 (가상)", cell: (a) => <span className="font-mono text-[12px] break-all text-aws-text-2">{topo.dnsName(a.id)}</span> },
+          { id: "dns", optional: true, header: "DNS 이름 (가상)", cell: (a) => <span className="font-mono text-[12px] break-all text-aws-text-2">{topo.dnsName(a.id)}</span> },
           { id: "state", header: "상태", cell: (a) => <LbState state={a.config.state} /> },
           { id: "vpc", header: "VPC ID", cell: (a) => <ResourceLink id={topo.vpcOf(a.id)} /> },
-          { id: "azs", header: "가용 영역", cell: (a) => `${new Set(topo.albSubnets(a.id).map((s) => s.config.availabilityZone)).size}개 가용 영역` },
-          { id: "type", header: "유형", cell: () => "application" },
+          { id: "azs", optional: true, header: "가용 영역", cell: (a) => `${new Set(topo.albSubnets(a.id).map((s) => s.config.availabilityZone)).size}개 가용 영역` },
+          { id: "type", optional: true, header: "유형", cell: () => "application" },
           { id: "scheme", header: "체계", cell: (a) => a.config.scheme },
         ]}
       />
@@ -211,11 +215,12 @@ export function CreateLoadBalancerPage() {
       success: () => `로드 밸런서 ${name.trim()}을(를) 생성했습니다.`,
     });
     if (r.ok && r.createdId) navigate(resourcePath("alb", r.createdId));
-    else if (!r.ok) setError([r.error, r.hint].filter(Boolean).join(" "));
+    else if (!r.ok) setError(withHint(r));
   };
   return (
     <SpaceBetween>
       <PageHeader title="Application Load Balancer 생성" info={<InfoLink topic="alb" />} description="Application Load Balancer는 리스너로 받은 HTTP/HTTPS 요청을 대상 그룹의 정상 대상에게 분산합니다." />
+      <PageGuide topic="alb" />
       <Container header={<ContainerHeader title="기본 구성" />}>
         <SpaceBetween size="m">
           <FormField label="로드 밸런서 이름" constraint="1~32자의 영문자, 숫자, 하이픈. 하이픈으로 시작·끝나거나 'internal-'로 시작할 수 없습니다. 만든 뒤에는 바꿀 수 없습니다.">
@@ -292,7 +297,7 @@ export function CreateLoadBalancerPage() {
           </div>
         </SpaceBetween>
       </Container>
-      <FormActions error={error ? <Alert type="error" header="로드 밸런서를 생성할 수 없습니다">{error}</Alert> : undefined}>
+      <FormActions error={error ? <ErrorAlert message={error} header="로드 밸런서를 생성할 수 없습니다" /> : undefined}>
         <ButtonLink variant="link" href={href("/ec2/load-balancers")}>
           취소
         </ButtonLink>
@@ -319,7 +324,7 @@ function ListenerModal({ alb, listenerId, open, onClose }: { alb: Alb; listenerI
       ? run("ModifyListener", (p) => editListenerDefaultAction(p, alb.id, binding.listener.id, tgId), { success: () => `리스너 ${binding.listener.protocol}:${binding.listener.port}의 기본 작업을 변경했습니다.` })
       : run("CreateListener", (p) => addListener(p, alb.id, { protocol, port: Number(port), targetGroupId: tgId }), { success: () => `리스너 ${protocol}:${port}을(를) 추가했습니다.` });
     if (r.ok) onClose();
-    else setError(r.error);
+    else setError(withHint(r));
   };
   return (
     <Modal
@@ -351,7 +356,7 @@ function ListenerModal({ alb, listenerId, open, onClose }: { alb: Alb; listenerI
         <FormField label="기본 작업: 전달 대상" description="같은 VPC에 있고 다른 로드 밸런서가 쓰지 않는 대상 그룹">
           <SelectInput value={tgId} onChange={setTgId} placeholder="대상 그룹 선택" options={tgs.map((t) => ({ value: t.id, label: `${t.name} (${t.config.protocol}:${t.config.port})` }))} />
         </FormField>
-        {error && <Alert type="error">{error}</Alert>}
+        {error && <ErrorAlert message={error} />}
       </SpaceBetween>
     </Modal>
   );
@@ -451,6 +456,7 @@ export function LoadBalancerDetailPage({ id }: { id: string }) {
                               )}
                             </ul>
                           )}
+                          <ListenerRulesSection alb={alb} listener={b.listener} defaultTgId={b.targetGroupId} />
                         </li>
                       );
                     })}
@@ -512,7 +518,7 @@ export function EditLbSubnetsPage({ id }: { id: string }) {
   const save = () => {
     const r = run("SetSubnets", (p) => editLoadBalancerSubnets(p, alb.id, Object.values(mapping)), { success: () => `로드 밸런서 ${alb.name}의 서브넷을 변경했습니다.` });
     if (r.ok) navigate(resourcePath("alb", alb.id), { query: { tab: "network" } });
-    else setError(r.error);
+    else setError(withHint(r));
   };
   return (
     <SpaceBetween>
@@ -520,7 +526,7 @@ export function EditLbSubnetsPage({ id }: { id: string }) {
       <Container header={<ContainerHeader title="네트워크 매핑" description="최소 2개 가용 영역" />}>
         <SubnetMapping topo={topo} vpcId={vpcId} mapping={mapping} onChange={setMapping} />
       </Container>
-      <FormActions error={error ? <Alert type="error">{error}</Alert> : undefined}>
+      <FormActions error={error ? <ErrorAlert message={error} /> : undefined}>
         <ButtonLink variant="link" href={href(resourcePath("alb", alb.id))}>
           취소
         </ButtonLink>
@@ -544,7 +550,7 @@ export function EditLbSecurityGroupsPage({ id }: { id: string }) {
   const save = () => {
     const r = run("SetSecurityGroups", (p) => editLoadBalancerSecurityGroups(p, alb.id, selected), { success: () => `로드 밸런서 ${alb.name}의 보안 그룹을 변경했습니다.` });
     if (r.ok) navigate(resourcePath("alb", alb.id), { query: { tab: "security" } });
-    else setError(r.error);
+    else setError(withHint(r));
   };
   return (
     <SpaceBetween>

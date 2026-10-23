@@ -1,10 +1,11 @@
 "use client";
 
+import { withHint } from "../error-codes";
 import { useState } from "react";
 import { RESOURCE_TYPE_INFO, type Resource } from "@/lib/engine/resource-models";
 import { editNameTag } from "@/lib/project/console-actions";
 import { useRunAction } from "../console-context";
-import { Alert } from "../ui/alert";
+import { ErrorAlert } from "../ui/alert";
 import { Button } from "../ui/button";
 import { FormField, TextInput } from "../ui/form";
 import { Modal } from "../ui/overlay";
@@ -22,7 +23,7 @@ function EditNameDialog({ resource, onClose }: { resource: Resource; onClose: ()
   const submit = () => {
     const result = run("CreateTags", (p) => editNameTag(p, resource.id, name), { success: () => `${resource.id}의 Name 태그를 업데이트했습니다.` });
     if (result.ok) onClose();
-    else setError(result.error);
+    else setError(withHint(result));
   };
   return (
     <Modal
@@ -45,7 +46,7 @@ function EditNameDialog({ resource, onClose }: { resource: Resource; onClose: ()
         <FormField label="Name" constraint="최대 128자">
           <TextInput value={name} onChange={(e) => setName(e.target.value)} maxLength={128} placeholder="값 입력" />
         </FormField>
-        {error && <Alert type="error">{error}</Alert>}
+        {error && <ErrorAlert message={error} />}
       </div>
     </Modal>
   );

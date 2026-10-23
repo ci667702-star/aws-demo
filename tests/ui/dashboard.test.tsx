@@ -32,10 +32,24 @@ describe("샌드박스 목록 (첫 화면)", () => {
     await user.click(screen.getAllByRole("button", { name: "샌드박스 생성" })[0]);
     const dialog = await screen.findByRole("dialog");
     await user.type(within(dialog).getByLabelText("이름"), "내 VPC 실습");
-    await user.click(within(dialog).getByRole("button", { name: "생성 후 콘솔 열기" }));
+    await user.click(within(dialog).getByRole("button", { name: "생성 후 열기" }));
     await waitFor(() => expect(projects().map((p) => p.name)).toEqual(["내 VPC 실습"]));
     expect(projects()[0].resources).toEqual([]);
     expect(routerPush).toHaveBeenCalledWith(expect.stringMatching(/^\/console\/proj-\d+#\/$/));
+  });
+
+  it("쉬운 모드를 고르면 그림 빌더로 열고, 그 선택을 샌드박스에 기억한다", async () => {
+    seedStore([]);
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    renderWithProviders(<Dashboard />);
+    await user.click(screen.getAllByRole("button", { name: "샌드박스 생성" })[0]);
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("radio", { name: /쉬운 모드/ }));
+    await user.click(within(dialog).getByRole("button", { name: "생성 후 열기" }));
+    await waitFor(() => expect(projects()).toHaveLength(1));
+    expect(projects()[0].preferredMode).toBe("easy");
+    expect(routerPush).toHaveBeenCalledWith(expect.stringMatching(/^\/projects\/proj-\d+$/));
+    expect(await screen.findByText("쉬운 모드", { selector: "span" })).toBeInTheDocument();
   });
 
   it("목록에서 리소스 수를 보여 주고 이름 변경·복제·삭제할 수 있다", async () => {

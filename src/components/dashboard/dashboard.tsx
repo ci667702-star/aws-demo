@@ -14,7 +14,7 @@ import { ClientGate } from "@/components/app/client-gate";
 import { ImportDialog } from "@/components/app/import-dialog";
 import { Alert } from "@/components/console/ui/alert";
 import { Button, ButtonDropdown } from "@/components/console/ui/button";
-import { FormField, TextInput } from "@/components/console/ui/form";
+import { FormField, TextInput, Tiles } from "@/components/console/ui/form";
 import { Container, ContainerHeader, EmptyState, ExpandableSection, PageHeader, SpaceBetween } from "@/components/console/ui/layout";
 import { DeleteModal, Modal } from "@/components/console/ui/overlay";
 import { ResourceTable } from "@/components/console/ui/table";
@@ -68,6 +68,8 @@ function SiteHeader() {
   );
 }
 
+type Mode = Project["preferredMode"];
+
 function stats(p: Project) {
   return {
     resources: p.resources.length,
@@ -91,12 +93,15 @@ function DashboardContent() {
   const [deleting, setDeleting] = useState<Project | null>(null);
   const current = projects.find((p) => p.id === selected[0]);
 
-  const open = (id: string, hash = "#/") => router.push(`/console/${id}${hash}`);
+  /** 쉬운 모드는 그림 빌더(/projects), 심화 모드는 콘솔(/console)로 연다 */
+  const open = (id: string, mode: Mode = "console", hash = "#/") => router.push(mode === "easy" ? `/projects/${id}` : `/console/${id}${hash}`);
 
   const onAction = (action: string, p: Project | undefined) => {
     if (!p) return;
     const store = useProjectStore.getState();
-    if (action === "open") open(p.id);
+    if (action === "open") open(p.id, p.preferredMode);
+    if (action === "open-easy") open(p.id, "easy");
+    if (action === "open-console") open(p.id, "console");
     if (action === "rename") setRenaming(p);
     if (action === "duplicate") {
       const id = store.duplicateProject(p.id);
@@ -140,14 +145,16 @@ function DashboardContent() {
           <PageHeader
             title="샌드박스"
             counter={`(${projects.length})`}
-            description="샌드박스는 서로 독립된 가상 AWS 환경입니다. 새 샌드박스는 비어 있으며, VPC부터 직접 구성합니다."
+            description="샌드박스는 서로 독립된 가상 AWS 환경입니다. 같은 샌드박스를 쉬운 모드(그림으로 설계)와 심화 모드(AWS 콘솔처럼 직접 설정) 중 원하는 화면으로 열 수 있습니다."
             actions={
               <>
                 <ButtonDropdown
                   label="작업"
                   disabled={!current}
                   items={[
-                    { id: "open", text: "콘솔 열기" },
+                    { id: "open", text: "열기" },
+                    { id: "open-easy", text: "쉬운 모드(그림 빌더)로 열기" },
+                    { id: "open-console", text: "심화 모드(콘솔)로 열기" },
                     { id: "rename", text: "이름 변경" },
                     { id: "duplicate", text: "복제" },
                     { id: "export", text: "JSON으로 내보내기" },
@@ -179,13 +186,14 @@ function DashboardContent() {
             id: "name",
             header: "이름",
             cell: (p) => (
-              <a href={`/console/${p.id}#/`} className="font-bold text-aws-link hover:underline" data-testid="sandbox-link">
+              <a href={p.preferredMode === "easy" ? `/projects/${p.id}` : `/console/${p.id}#/`} className="font-bold text-aws-link hover:underline" data-testid="sandbox-link">
                 {p.name}
               </a>
             ),
             sortValue: (p) => p.name,
             filterValue: (p) => `${p.name} ${p.description}`,
           },
+          { id: "mode", header: "화면", cell: (p) => (p.preferredMode === "easy" ? <Badge color="orange">쉬운 모드</Badge> : <Badge color="blue">심화 모드</Badge>) },
           { id: "lab", header: "실습", cell: (p) => (p.labId ? <Badge color="blue">{LABS.find((l) => l.id === p.labId)?.title ?? p.labId}</Badge> : "–") },
           { id: "resources", header: "리소스", cell: (p) => `${stats(p).resources}개`, sortValue: (p) => stats(p).resources },
           { id: "vpcs", header: "VPC", cell: (p) => stats(p).vpcs },
@@ -207,14 +215,23 @@ function DashboardContent() {
               </div>
               <p className="flex-1 text-[13px] text-aws-text-2">{lab.summary}</p>
               {lab.id === "lab-5-security" && <p className="text-xs text-aws-warning">문제를 찾아 고치는 실습이라 잘못된 구성이 미리 만들어집니다.</p>}
-              <div>
+              <div className="flex flex-wrap gap-2">
                 <Button
                   onClick={() => {
-                    const id = useProjectStore.getState().startLab(lab.id);
-                    if (id) open(id, "#/?tools=labs");
+                    const id = useProjectStore.getState().startLab(lab.id, "console");
+                    if (id) open(id, "console", "#/?tools=labs");
                   }}
                 >
                   실습 시작
+                </Button>
+                <Button
+                  variant="link"
+                  onClick={() => {
+                    const id = useProjectStore.getState().startLab(lab.id, "easy");
+                    if (id) open(id, "easy");
+                  }}
+                >
+                  쉬운 모드로 시작
                 </Button>
               </div>
             </li>
@@ -234,7 +251,7 @@ function DashboardContent() {
                   <Button
                     onClick={() => {
                       const id = useProjectStore.getState().createFromSample(s.id);
-                      if (id) open(id, "#/map");
+                      if (id) open(id, "console", "#/map");
                     }}
                   >
                     예시 열기
@@ -250,10 +267,10 @@ function DashboardContent() {
         open={creating}
         count={projects.length}
         onClose={() => setCreating(false)}
-        onCreate={(name, description) => {
-          const id = useProjectStore.getState().createProject(name, description);
+        onCreate={(name, description, mode) => {
+          const id = useProjectStore.getState().createProject(name, description, mode);
           setCreating(false);
-          open(id);
+          open(id, mode);
         }}
       />
       <RenameModal project={renaming} onClose={() => setRenaming(null)} />
@@ -287,14 +304,15 @@ function DashboardContent() {
   );
 }
 
-function CreateSandboxModal({ open, count, onClose, onCreate }: { open: boolean; count: number; onClose: () => void; onCreate: (name: string, description: string) => void }) {
+function CreateSandboxModal({ open, count, onClose, onCreate }: { open: boolean; count: number; onClose: () => void; onCreate: (name: string, description: string, mode: Mode) => void }) {
   const [name, setName] = useState("");
+  const [mode, setMode] = useState<Mode>("console");
   const [description, setDescription] = useState("");
   const [error, setError] = useState<string | null>(null);
   const submit = () => {
     const n = name.trim() || `샌드박스 ${count + 1}`;
     if (n.length > 80) return setError("이름은 80자 이하여야 합니다.");
-    onCreate(n, description.trim());
+    onCreate(n, description.trim(), mode);
     setName("");
     setDescription("");
     setError(null);
@@ -310,7 +328,7 @@ function CreateSandboxModal({ open, count, onClose, onCreate }: { open: boolean;
             취소
           </Button>
           <Button variant="primary" onClick={submit}>
-            생성 후 콘솔 열기
+            생성 후 열기
           </Button>
         </>
       }
@@ -323,6 +341,18 @@ function CreateSandboxModal({ open, count, onClose, onCreate }: { open: boolean;
         }}
       >
         <p className="text-aws-text-2">빈 가상 환경을 만듭니다. 기본 VPC도 없으므로 네트워크부터 직접 구성합니다.</p>
+        <FormField label="어떤 화면으로 시작할까요?" description="나중에 언제든 바꿀 수 있습니다. 두 화면은 같은 샌드박스를 보여 줍니다.">
+          <Tiles
+            aria-label="시작 화면"
+            columns={2}
+            value={mode}
+            onChange={(v) => setMode(v as Mode)}
+            items={[
+              { value: "easy", label: "쉬운 모드", description: "리소스를 끌어다 놓고 선으로 연결하는 그림 빌더. 기본값이 자동으로 채워져서 처음 배울 때 좋습니다." },
+              { value: "console", label: "심화 모드", description: "AWS 콘솔처럼 메뉴와 양식으로 하나씩 직접 설정합니다. IAM·S3·CloudWatch도 여기서 다룹니다." },
+            ]}
+          />
+        </FormField>
         <FormField label="이름" constraint="최대 80자" error={error ?? undefined}>
           <TextInput autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={`샌드박스 ${count + 1}`} maxLength={80} />
         </FormField>

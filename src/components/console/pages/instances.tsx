@@ -1,5 +1,6 @@
 "use client";
 
+import { withHint } from "../error-codes";
 import { useState } from "react";
 import type { ResourceOfType } from "@/lib/engine/resource-models";
 import { displayName } from "@/lib/engine/topology-engine";
@@ -14,7 +15,8 @@ import {
 import { useAnalysis } from "../analysis-context";
 import { useRunAction } from "../console-context";
 import { href, navigate, resourcePath } from "../router";
-import { Alert } from "../ui/alert";
+import { Alert, ErrorAlert } from "../ui/alert";
+import { PageGuide } from "../ui/page-guide";
 import { Button, ButtonDropdown, ButtonLink } from "../ui/button";
 import { FormActions, FormField, MultiSelect } from "../ui/form";
 import { Container, ContainerHeader, EmptyState, KeyValueGrid, PageHeader, SpaceBetween } from "../ui/layout";
@@ -26,6 +28,7 @@ import { CopyText, StatusIndicator } from "../ui/status";
 import { InstanceState, ipText, NameCell, ResourceNotFound, sortName, useQueryTab, useResource, useSelection, useTopology } from "./common";
 import { SgRulesTable } from "./network-tables";
 import { EditNameModal } from "./shared-modals";
+import { InstanceRoleLink } from "./iam/instance-role";
 import { UserDataFields, useUserDataDraft } from "./user-data";
 
 type Instance = ResourceOfType<"ec2">;
@@ -80,7 +83,14 @@ function instanceActions(selected: Instance[]) {
     ],
     actions: [
       { id: "network", text: "네트워킹", items: [{ id: "eip", text: "탄력적 IP 주소 연결", disabled: !one || one.config.state === "terminated" }] },
-      { id: "security", text: "보안", items: [{ id: "sgs", text: "보안 그룹 변경", disabled: !one || one.config.state === "terminated" }] },
+      {
+        id: "security",
+        text: "보안",
+        items: [
+          { id: "sgs", text: "보안 그룹 변경", disabled: !one || one.config.state === "terminated" },
+          { id: "iamrole", text: "IAM 역할 수정", disabled: !one || one.config.state === "terminated" },
+        ],
+      },
       {
         id: "settings",
         text: "인스턴스 설정",
@@ -105,11 +115,13 @@ export function InstanceListPage() {
   const onAction = (id: string) => {
     if (id === "eip") navigate("/ec2/eips");
     if (id === "sgs" && one) navigate(`${resourcePath("ec2", one.id)}/security-groups`);
+    if (id === "iamrole" && one) navigate(`${resourcePath("ec2", one.id)}/iam-role`);
     if (id === "userdata" && one) navigate(`${resourcePath("ec2", one.id)}/user-data`);
     if (id === "tags") setNaming(true);
   };
   return (
     <SpaceBetween>
+      <PageGuide topic="ec2-launch" />
       <ResourceTable<Instance>
         ariaLabel="인스턴스 목록"
         items={instances}
@@ -140,11 +152,11 @@ export function InstanceListPage() {
           { id: "id", header: "인스턴스 ID", cell: (i) => <TypedResourceLink type="ec2" id={i.id} />, sortValue: (i) => i.id },
           { id: "state", header: "인스턴스 상태", cell: (i) => <InstanceState state={i.config.state} />, sortValue: (i) => i.config.state, filterValue: (i) => i.config.state },
           { id: "type", header: "인스턴스 유형", cell: (i) => i.config.instanceType, sortValue: (i) => i.config.instanceType },
-          { id: "az", header: "가용 영역", cell: (i) => topo.getOfType(topo.subnetOf(i.id), "subnet")?.config.availabilityZone ?? "–" },
+          { id: "az", optional: true, header: "가용 영역", cell: (i) => topo.getOfType(topo.subnetOf(i.id), "subnet")?.config.availabilityZone ?? "–" },
           { id: "public", header: "퍼블릭 IPv4 주소", cell: (i) => ipText(topo.enisOf(i.id)[0]?.publicIp), filterValue: (i) => ipText(topo.enisOf(i.id)[0]?.publicIp) },
-          { id: "eip", header: "탄력적 IP", cell: (i) => topo.elasticIpOf(i.id)?.config.publicIp ?? "–" },
+          { id: "eip", optional: true, header: "탄력적 IP", cell: (i) => topo.elasticIpOf(i.id)?.config.publicIp ?? "–" },
           { id: "private", header: "프라이빗 IPv4 주소", cell: (i) => i.config.privateIp, sortValue: (i) => i.config.privateIp },
-          { id: "sg", header: "보안 그룹 이름", cell: (i) => topo.securityGroupsOf(i.id).map((g) => g.name).join(", ") || "–" },
+          { id: "sg", optional: true, header: "보안 그룹 이름", cell: (i) => topo.securityGroupsOf(i.id).map((g) => g.name).join(", ") || "–" },
         ]}
       />
       <StateChangeModal instances={chosen} action={action} onClose={() => setAction(null)} />
@@ -171,6 +183,7 @@ export function InstanceDetailPage({ id }: { id: string }) {
   const onAction = (a: string) => {
     if (a === "eip") navigate("/ec2/eips");
     if (a === "sgs") navigate(`${resourcePath("ec2", inst.id)}/security-groups`);
+    if (a === "iamrole") navigate(`${resourcePath("ec2", inst.id)}/iam-role`);
     if (a === "userdata") navigate(`${resourcePath("ec2", inst.id)}/user-data`);
     if (a === "tags") setNaming(true);
   };
@@ -200,6 +213,7 @@ export function InstanceDetailPage({ id }: { id: string }) {
             { label: "탄력적 IP 주소", value: eip ? <ResourceLink id={eip.id} /> : "–" },
             { label: "VPC ID", value: <ResourceLink id={topo.vpcOf(inst.id)} showName /> },
             { label: "서브넷 ID", value: <ResourceLink id={subnetId} showName /> },
+            { label: "IAM 역할", value: <InstanceRoleLink roleId={inst.config.iamRoleId} />, info: <InfoLink topic="iam-role" /> },
           ]}
         />
       </Container>
@@ -231,9 +245,31 @@ export function InstanceDetailPage({ id }: { id: string }) {
             id: "security",
             label: "보안",
             content: (
-              <Container header={<ContainerHeader title="보안 세부 정보" actions={<Button onClick={() => onAction("sgs")} disabled={inst.config.state === "terminated"}>보안 그룹 변경</Button>} />}>
+              <Container
+                header={
+                  <ContainerHeader
+                    title="보안 세부 정보"
+                    actions={
+                      <>
+                        <Button onClick={() => onAction("iamrole")} disabled={inst.config.state === "terminated"}>
+                          IAM 역할 수정
+                        </Button>
+                        <Button onClick={() => onAction("sgs")} disabled={inst.config.state === "terminated"}>
+                          보안 그룹 변경
+                        </Button>
+                      </>
+                    }
+                  />
+                }
+              >
                 <SpaceBetween size="m">
-                  <KeyValueGrid columns={2} items={[{ label: "보안 그룹", value: sgs.length ? sgs.map((g) => <div key={g.id}><ResourceLink id={g.id} /> ({g.name})</div>) : "없음" }]} />
+                  <KeyValueGrid
+                    columns={2}
+                    items={[
+                      { label: "보안 그룹", value: sgs.length ? sgs.map((g) => <div key={g.id}><ResourceLink id={g.id} /> ({g.name})</div>) : "없음" },
+                      { label: "IAM 역할", value: <InstanceRoleLink roleId={inst.config.iamRoleId} />, info: <InfoLink topic="iam-role" /> },
+                    ]}
+                  />
                   {sgs.map((g) => (
                     <div key={g.id} className="space-y-2">
                       <h3 className="text-sm font-bold">
@@ -327,7 +363,7 @@ export function ChangeInstanceSgsPage({ id }: { id: string }) {
   const save = () => {
     const r = run("ModifyInstanceAttribute", (p) => changeInstanceSecurityGroups(p, inst.id, selected), { success: () => `인스턴스 ${inst.id}의 보안 그룹을 변경했습니다.` });
     if (r.ok) navigate(resourcePath("ec2", inst.id), { query: { tab: "security" } });
-    else setError(r.error);
+    else setError(withHint(r));
   };
   return (
     <SpaceBetween>
@@ -361,7 +397,7 @@ export function EditUserDataPage({ id }: { id: string }) {
     if (!value.ok) return setError(value.error);
     const r = run("ModifyInstanceAttribute", (p) => editInstanceUserData(p, inst.id, value.value), { success: () => `인스턴스 ${inst.id}의 사용자 데이터를 저장했습니다. 다시 시작하면 적용된 서비스가 응답합니다.` });
     if (r.ok) navigate(resourcePath("ec2", inst.id), { query: { tab: "user-data" } });
-    else setError([r.error, r.hint].filter(Boolean).join(" "));
+    else setError(withHint(r));
   };
   return (
     <SpaceBetween>
@@ -382,7 +418,7 @@ export function EditUserDataPage({ id }: { id: string }) {
       <Container header={<ContainerHeader title="사용자 데이터" />}>
         <UserDataFields ami={inst.config.ami} draft={draft} disabled={!stopped} />
       </Container>
-      <FormActions error={error ? <Alert type="error">{error}</Alert> : undefined}>
+      <FormActions error={error ? <ErrorAlert message={error} /> : undefined}>
         <ButtonLink variant="link" href={href(resourcePath("ec2", inst.id))}>
           취소
         </ButtonLink>

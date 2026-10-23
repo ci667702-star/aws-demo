@@ -19,6 +19,8 @@ import {
   type Connection,
   type HealthCheck,
   type Listener,
+  type ListenerRule,
+  type ListenerRuleAction,
   type NaclRule,
   type NetworkPath,
   type Project,
@@ -842,6 +844,8 @@ export interface LaunchInstancesInput {
   httpResponseCode: number;
   userData: string;
   count: number;
+  /** 인스턴스 프로파일로 연결할 IAM 역할 (EC2 신뢰 정책 필요) */
+  iamRoleId?: string | null;
 }
 
 export function launchInstances(project: Project, input: LaunchInstancesInput): ActionResult {
@@ -883,6 +887,14 @@ export function launchInstances(project: Project, input: LaunchInstancesInput): 
     if (taken) return awsFail("InvalidIPAddress.InUse", `주소 ${requested}은(는) 이미 ${taken.label}이(가) 사용 중입니다.`);
   }
 
+  if (input.iamRoleId) {
+    const role = project.services.iam.roles.find((r) => r.id === input.iamRoleId);
+    if (!role) return awsFail("InvalidParameterValue", `IAM 역할 ${input.iamRoleId}을(를) 찾을 수 없습니다.`);
+    if (role.trustedEntity !== "ec2.amazonaws.com") {
+      return awsFail("InvalidParameterValue", `역할 ${role.name}의 신뢰 정책이 EC2(ec2.amazonaws.com)를 허용하지 않습니다.`, "EC2용 역할(AWS 서비스 → EC2)을 고르세요.");
+    }
+  }
+
   let p = project;
   const ids: string[] = [];
   for (let i = 0; i < input.count; i++) {
@@ -901,6 +913,7 @@ export function launchInstances(project: Project, input: LaunchInstancesInput): 
         listenPorts: [...new Set(input.listenPorts)].sort((a, b) => a - b),
         httpResponseCode: input.httpResponseCode,
         userData: input.userData,
+        iamRoleId: input.iamRoleId ?? null,
       },
       subnet.id,
     );
@@ -1067,7 +1080,7 @@ export function deleteTargetGroup(project: Project, tgId: string): ActionResult 
   const tg = find(project, tgId, "target-group");
   if (!tg) return notFound("target-group", tgId);
   const albs = buildTopology(project).targetGroupAlbs(tg.id);
-  if (albs.length) return awsFail("ResourceInUse", `대상 그룹 ${displayName(tg)}이(가) 로드 밸런서 ${displayName(albs[0])}의 리스너에서 사용 중입니다.`, "리스너의 기본 작업을 바꾸거나 리스너를 삭제하세요.");
+  if (albs.length) return awsFail("ResourceInUse", `대상 그룹 ${displayName(tg)}이(가) 로드 밸런서 ${displayName(albs[0])}의 리스너에서 사용 중입니다.`, "리스너의 기본 작업이나 이 대상 그룹으로 전달하는 리스너 규칙을 먼저 바꾸거나 삭제하세요.");
   return ok(touch(removeResources(project, [tg.id])));
 }
 
@@ -1140,7 +1153,7 @@ export function createLoadBalancer(project: Project, input: CreateLoadBalancerIn
   if (input.scheme === "internet-facing" && !topo.igwOfVpc(vpc.id)) {
     return awsFail("InvalidSubnet", `VPC ${vpc.id}에 인터넷 게이트웨이가 연결되어 있지 않아 internet-facing 로드 밸런서를 만들 수 없습니다.`);
   }
-  const listeners: Listener[] = input.listeners.map((l) => ({ id: createId("lsn"), protocol: l.protocol, port: l.port }));
+  const listeners: Listener[] = input.listeners.map((l) => ({ id: createId("lsn"), protocol: l.protocol, port: l.port, rules: [] }));
   const added = addResource(project, "alb", name, { scheme: input.scheme, listeners, state: "provisioning" }, input.subnetIds[0]);
   const albId = added.resource.id;
   const p = addConnections(added.project, [
@@ -1192,7 +1205,7 @@ export function addListener(project: Project, albId: string, input: ListenerInpu
   if (existing.some((l) => l.port === input.port)) return awsFail("DuplicateListener", `포트 ${input.port} 리스너가 이미 있습니다.`);
   const error = checkListeners(topo, vpcId, [input], alb.id);
   if (error) return error;
-  const listener: Listener = { id: createId("lsn"), protocol: input.protocol, port: input.port };
+  const listener: Listener = { id: createId("lsn"), protocol: input.protocol, port: input.port, rules: [] };
   let p = updateConfig<"alb">(project, alb.id, { listeners: [...alb.config.listeners, listener] });
   p = addConnections(p, [link("alb-target-group", alb.id, input.targetGroupId, { listenerId: listener.id })]);
   return ok(touch(p), [], listener.id);
@@ -1220,6 +1233,88 @@ export function deleteListener(project: Project, albId: string, listenerId: stri
   let p = updateConfig<"alb">(project, alb.id, { listeners: alb.config.listeners.filter((l) => l.id !== listenerId) });
   p = removeConnections(p, (c) => c.relationType === "alb-target-group" && c.sourceResourceId === albId && "listenerId" in c.metadata && c.metadata.listenerId === listenerId);
   return ok(touch(p));
+}
+
+// ---------------------------------------------------------------- 리스너 규칙 (경로 기반 라우팅)
+
+export interface ListenerRuleInput {
+  priority: number;
+  pathPatterns: string[];
+  action: ListenerRuleAction;
+}
+
+export const MAX_RULES_PER_LISTENER = 10;
+const PATH_PATTERN_CHARS = /^[A-Za-z0-9_\-.$/~"'@:+&()!,;=*?%]+$/;
+
+function checkListenerRule(project: Project, alb: ResourceOfType<"alb">, listener: Listener, input: ListenerRuleInput, ruleId?: string): ActionResult | null {
+  if (!Number.isInteger(input.priority) || input.priority < 1 || input.priority > 50000) return awsFail("ValidationError", "우선순위는 1~50000 사이의 정수여야 합니다.");
+  if ((listener.rules ?? []).some((r) => r.priority === input.priority && r.id !== ruleId)) {
+    return awsFail("PriorityInUse", `우선순위 ${input.priority}은(는) 이 리스너의 다른 규칙이 쓰고 있습니다.`, "규칙마다 다른 우선순위 숫자를 쓰세요. 숫자가 작을수록 먼저 평가됩니다.");
+  }
+  const patterns = input.pathPatterns.map((p) => p.trim()).filter(Boolean);
+  if (!patterns.length) return awsFail("ValidationError", "경로 패턴을 하나 이상 입력하세요. 예: /api/*");
+  if (patterns.length > 5) return awsFail("ValidationError", "규칙 하나에는 경로 패턴을 5개까지 넣을 수 있습니다.");
+  for (const p of patterns) {
+    if (p.length > 128) return awsFail("ValidationError", `경로 패턴 "${p.slice(0, 20)}…"이(가) 128자를 넘습니다.`);
+    if (!PATH_PATTERN_CHARS.test(p)) return awsFail("ValidationError", `경로 패턴 "${p}"에 쓸 수 없는 문자가 있습니다. (공백·한글 등 불가)`);
+    if (!p.startsWith("/") && !p.startsWith("*")) return awsFail("ValidationError", `경로 패턴 "${p}"은(는) /로 시작해야 합니다. 예: /images/*`);
+  }
+  const topo = buildTopology(project);
+  if (input.action.type === "forward") {
+    const tg = topo.getOfType(input.action.targetGroupId, "target-group");
+    if (!tg) return awsFail("TargetGroupNotFound", "전달할 대상 그룹을 선택하세요.");
+    if (topo.vpcOf(tg.id) !== topo.vpcOf(alb.id)) return awsFail("ValidationError", `대상 그룹 ${displayName(tg)}은(는) 로드 밸런서와 다른 VPC에 있습니다.`);
+    const other = topo.targetGroupAlbs(tg.id).find((a) => a.id !== alb.id);
+    if (other) return awsFail("TargetGroupAssociationLimit", `대상 그룹 ${displayName(tg)}은(는) 이미 로드 밸런서 ${displayName(other)}에서 사용 중입니다.`);
+  } else {
+    const code = input.action.statusCode;
+    if (!Number.isInteger(code) || code < 200 || code > 599 || (code >= 300 && code < 400)) return awsFail("ValidationError", "고정 응답 상태 코드는 2XX, 4XX, 5XX 중 하나여야 합니다.");
+    if (input.action.body.length > 1024) return awsFail("ValidationError", "고정 응답 본문은 1024자 이하여야 합니다.");
+  }
+  return null;
+}
+
+function withListener(project: Project, albId: string, listenerId: string): { alb: ResourceOfType<"alb">; listener: Listener } | ActionResult {
+  const alb = find(project, albId, "alb");
+  if (!alb) return notFound("alb", albId);
+  const listener = alb.config.listeners.find((l) => l.id === listenerId);
+  if (!listener) return awsFail("ListenerNotFound", "리스너를 찾을 수 없습니다.");
+  return { alb, listener };
+}
+
+function saveRules(project: Project, alb: ResourceOfType<"alb">, listenerId: string, rules: ListenerRule[]): Project {
+  const sorted = [...rules].sort((a, b) => a.priority - b.priority);
+  return touch(updateConfig<"alb">(project, alb.id, { listeners: alb.config.listeners.map((l) => (l.id === listenerId ? { ...l, rules: sorted } : l)) }));
+}
+
+export function addListenerRule(project: Project, albId: string, listenerId: string, input: ListenerRuleInput): ActionResult {
+  const found = withListener(project, albId, listenerId);
+  if ("ok" in found) return found;
+  const { alb, listener } = found;
+  if ((listener.rules ?? []).length >= MAX_RULES_PER_LISTENER) return awsFail("TooManyRules", `이 시뮬레이터에서는 리스너마다 규칙을 ${MAX_RULES_PER_LISTENER}개까지 만들 수 있습니다. (실제 AWS 기본 한도는 100개)`);
+  const invalid = checkListenerRule(project, alb, listener, input);
+  if (invalid) return invalid;
+  const rule: ListenerRule = { id: createId("rule"), priority: input.priority, pathPatterns: input.pathPatterns.map((p) => p.trim()).filter(Boolean), action: input.action };
+  return ok(saveRules(project, alb, listenerId, [...(listener.rules ?? []), rule]), [], rule.id);
+}
+
+export function updateListenerRule(project: Project, albId: string, listenerId: string, ruleId: string, input: ListenerRuleInput): ActionResult {
+  const found = withListener(project, albId, listenerId);
+  if ("ok" in found) return found;
+  const { alb, listener } = found;
+  if (!(listener.rules ?? []).some((r) => r.id === ruleId)) return awsFail("RuleNotFound", "규칙을 찾을 수 없습니다.");
+  const invalid = checkListenerRule(project, alb, listener, input, ruleId);
+  if (invalid) return invalid;
+  const rules = (listener.rules ?? []).map((r) => (r.id === ruleId ? { ...r, priority: input.priority, pathPatterns: input.pathPatterns.map((p) => p.trim()).filter(Boolean), action: input.action } : r));
+  return ok(saveRules(project, alb, listenerId, rules));
+}
+
+export function deleteListenerRule(project: Project, albId: string, listenerId: string, ruleId: string): ActionResult {
+  const found = withListener(project, albId, listenerId);
+  if ("ok" in found) return found;
+  const { alb, listener } = found;
+  if (!(listener.rules ?? []).some((r) => r.id === ruleId)) return awsFail("RuleNotFound", "규칙을 찾을 수 없습니다.");
+  return ok(saveRules(project, alb, listenerId, (listener.rules ?? []).filter((r) => r.id !== ruleId)));
 }
 
 export function deleteLoadBalancer(project: Project, albId: string): ActionResult {
@@ -1471,6 +1566,17 @@ export function recordPathAnalysis(project: Project, pathId: string, result: Pic
       p.id === pathId ? { ...p, lastAnalysis: { at: new Date().toISOString(), outcome: result.outcome, summary: result.summary.slice(0, 2000) } } : p,
     ),
   };
+}
+
+/** 같은 요청의 경로가 있으면 결과만 갱신하고, 없으면 새 경로로 기록한다 (쉬운 모드 시뮬레이션용) */
+export function upsertAnalyzedPath(project: Project, request: unknown, result: Pick<SimulationResult, "outcome" | "summary">, name: string): Project {
+  const parsed = simulationRequestSchema.safeParse(request);
+  if (!parsed.success) return project;
+  const key = JSON.stringify(parsed.data);
+  const existing = project.networkPaths.find((p) => JSON.stringify(simulationRequestSchema.parse(p.request)) === key);
+  if (existing) return recordPathAnalysis(project, existing.id, result);
+  const path: NetworkPath = { id: createId("nip"), name, request: parsed.data, createdAt: new Date().toISOString(), lastAnalysis: null };
+  return recordPathAnalysis({ ...project, networkPaths: [path, ...project.networkPaths].slice(0, 200) }, path.id, result);
 }
 
 export function deleteNetworkPaths(project: Project, pathIds: string[]): ActionResult {
