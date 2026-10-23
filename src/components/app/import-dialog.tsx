@@ -19,6 +19,7 @@ import { MAX_IMPORT_BYTES, parseProjectJson } from "@/lib/project/serialization"
  * JSON 가져오기. 스키마와 리소스 참조를 검증하고, 실패하면 아무것도 바꾸지 않고 오류만 보여준다.
  * 성공하면 항상 "새 프로젝트"로 추가하므로 기존 프로젝트는 손상되지 않는다.
  */
+
 export function ImportDialog({
   open,
   onOpenChange,
