@@ -650,6 +650,59 @@ export const LABS: LabDefinition[] = [
   },
 ];
 
+/** 쉬운 모드(그림 빌더)에서 보여 줄 단계 안내. 판정 기준은 두 모드가 같다. */
+const EASY_INSTRUCTIONS: Record<string, Record<string, string>> = {
+  "lab-1-public-ec2": {
+    vpc: "왼쪽 팔레트에서 VPC를 클릭하거나 캔버스로 끌어다 놓으세요. 오른쪽 설정 패널에서 CIDR(예: 10.0.0.0/16)을 확인·수정할 수 있습니다.",
+    subnet: "서브넷을 VPC 영역 위에 놓으세요(자동으로 VPC에 연결됩니다). 서브넷 CIDR이 VPC 범위 안에 있어야 합니다.",
+    igw: "Internet Gateway를 추가하고 VPC와 선으로 연결하세요. 노드 아래쪽 점을 다른 노드의 위쪽 점으로 끌면 연결됩니다.",
+    route: "Route Table을 추가해 VPC와 연결한 뒤, Route Table → Internet Gateway를 이어 0.0.0.0/0 경로를 만들고, Route Table → 서브넷을 이어 서로 연결하세요.",
+    sg: "Security Group을 추가해 VPC와 연결하고, 설정 패널의 인바운드 규칙에 TCP 80 ← 0.0.0.0/0을 추가하세요.",
+    ec2: "EC2를 퍼블릭 서브넷 위에 놓고, 설정 패널에서 퍼블릭 IPv4를 '활성화'로 바꾸고, 가상 서비스 포트에 80이 있는지 확인한 뒤 보안 그룹과 선으로 연결하세요.",
+    analyze: "아래 '시뮬레이션' 탭에서 출발지 '인터넷', 목적지 EC2, TCP 80으로 실행해 성공하는지 확인하세요.",
+  },
+  "lab-2-private-nat": {
+    "public-network": "VPC, 서브넷, Internet Gateway, Route Table(0.0.0.0/0 → IGW)로 퍼블릭 서브넷을 먼저 만드세요.",
+    "private-subnet": "같은 VPC에 두 번째 서브넷을 추가하세요. IGW 경로가 있는 Route Table과는 연결하지 않습니다.",
+    eip: "팔레트에서 Elastic IP를 추가하세요.",
+    nat: "NAT Gateway를 퍼블릭 서브넷 위에 놓고, Elastic IP → NAT Gateway를 선으로 연결하세요. 상태가 Available인지 확인하세요.",
+    "private-route": "새 Route Table을 추가해 NAT Gateway와 연결(0.0.0.0/0)하고 프라이빗 서브넷과 연결하세요.",
+    "private-ec2": "EC2를 프라이빗 서브넷에 놓고 퍼블릭 IPv4를 '비활성화'로 두세요. 보안 그룹도 연결합니다.",
+    egress: "시뮬레이션 탭에서 출발지 '프라이빗 EC2', 목적지 '인터넷', TCP 443을 실행해 NAT를 거치는 경로를 확인하세요.",
+    compare: "시뮬레이션 탭에서 출발지 '인터넷', 목적지 '프라이빗 EC2', TCP 80을 실행해 실패하는지 확인하세요.",
+  },
+  "lab-3-alb": {
+    network: "VPC와 Internet Gateway를 만들고, 서로 다른 가용 영역(2a, 2c)에 퍼블릭 서브넷 2개를 만들어 IGW 경로가 있는 Route Table과 연결하세요.",
+    servers: "EC2 두 대를 서로 다른 가용 영역의 서브넷에 놓으세요. 가상 서비스 포트에 80이 있어야 합니다.",
+    "alb-sg": "ALB용 Security Group을 추가해 인바운드 TCP 80 ← 0.0.0.0/0 규칙을 넣으세요.",
+    tg: "Target Group을 추가하고 Target Group → EC2 두 대를 선으로 이어 대상으로 등록하세요.",
+    alb: "ALB를 추가해 두 퍼블릭 서브넷, ALB 보안 그룹과 연결하고, ALB → Target Group을 이어 리스너가 요청을 전달하게 하세요.",
+    healthy: "웹 서버 보안 그룹의 인바운드에 TCP 80 ← ALB 보안 그룹(보안 그룹 참조) 규칙을 추가하세요.",
+    distribute: "시뮬레이션 탭에서 '인터넷 → ALB'를 요청 수 6으로 실행해 두 EC2에 나뉘는지 확인하세요.",
+  },
+  "lab-4-rds": {
+    app: "VPC와 서브넷을 만들고, 직접 만든 보안 그룹을 연결한 EC2(앱 서버)를 배치하세요.",
+    "db-subnets": "서로 다른 가용 영역에 DB용 서브넷 2개를 추가하세요. IGW 경로는 연결하지 않습니다.",
+    dbsg: "DB Subnet Group을 추가해 두 DB 서브넷과 선으로 연결하세요.",
+    "db-sg": "DB용 Security Group의 인바운드에 TCP 3306 ← 앱 서버 보안 그룹(보안 그룹 참조)을 추가하세요.",
+    rds: "RDS를 추가해 DB Subnet Group과 DB 보안 그룹에 연결하세요. Publicly Accessible은 끈 상태로 둡니다.",
+    connect: "시뮬레이션 탭에서 출발지 앱 EC2, 목적지 RDS, TCP 3306을 실행하세요.",
+    private: "검증 탭에 RDS-006/RDS-007 항목이 없는지 확인하세요.",
+  },
+  "lab-5-security": {
+    ssh: "검증 탭의 SEC-002 항목을 누르면 app-sg로 이동합니다. 설정 패널에서 SSH(22) 규칙의 출발지를 좁히거나 삭제하세요.",
+    "db-exposure": "db-sg의 3306 규칙 출발지를 0.0.0.0/0 대신 app-sg(보안 그룹 참조)로 바꾸세요.",
+    targets: "app-sg의 8080 규칙을 80으로 바꿔 ALB의 헬스 체크와 요청이 들어오게 하세요.",
+    "alb-port": "alb-sg 인바운드에 TCP 80 ← 0.0.0.0/0 규칙을 추가하세요.",
+    nacl: "public-nacl의 아웃바운드에 TCP 1024-65535 → 0.0.0.0/0 허용 규칙을 추가하세요 (NACL은 응답도 따로 허용해야 합니다).",
+    verify: "검증 탭에 오류가 없고, 시뮬레이션 탭의 '인터넷 → ALB' 요청이 성공하는지 확인하세요.",
+  },
+};
+
+export function easyInstruction(labId: string, step: LabStep): string {
+  return EASY_INSTRUCTIONS[labId]?.[step.id] ?? step.instruction;
+}
+
 export function labById(id: string | null | undefined): LabDefinition | undefined {
   return LABS.find((l) => l.id === id);
 }

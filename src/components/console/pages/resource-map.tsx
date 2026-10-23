@@ -264,7 +264,7 @@ function ResourceMap() {
           <EmptyState title="표시할 리소스가 없습니다" description="VPC부터 직접 만들어 보세요." action={<ButtonLink href={href("/vpc/vpcs/create")}>VPC 생성</ButtonLink>} />
         </Container>
       ) : (
-        <div className="relative h-[calc(100dvh-16rem)] min-h-[420px] overflow-hidden rounded-2xl border border-aws-border bg-aws-surface" data-testid="resource-map">
+        <div className="readonly-map relative h-[calc(100dvh-16rem)] min-h-[420px] overflow-hidden rounded-2xl border border-aws-border bg-aws-surface" data-testid="resource-map">
           <ReactFlow<FlowNode, RelationFlowEdge>
             nodes={nodes}
             edges={edges}

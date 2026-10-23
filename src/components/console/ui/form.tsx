@@ -35,7 +35,7 @@ export function FormField({
       <div className={cn("min-w-0 space-y-1", className)}>
         {label && (
           <div className="flex items-center gap-1.5">
-            <label htmlFor={id} className="text-sm font-bold text-aws-text">
+            <label htmlFor={id} className="text-[15px] font-bold text-aws-text">
               {label}
               {optional && <span className="ml-1 font-normal text-aws-text-2 italic">- 선택 사항</span>}
             </label>
@@ -43,18 +43,18 @@ export function FormField({
           </div>
         )}
         {description && (
-          <p id={descId} className="text-[13px] leading-[18px] text-aws-text-2">
+          <p id={descId} className="text-sm leading-relaxed text-aws-text-2">
             {description}
           </p>
         )}
         <div>{children}</div>
         {constraint && !error && (
-          <p id={description ? undefined : descId} className="text-xs text-aws-text-2">
+          <p id={description ? undefined : descId} className="text-[13px] leading-snug text-aws-text-2">
             {constraint}
           </p>
         )}
         {error && (
-          <p id={errId} className="flex items-start gap-1 text-xs font-bold text-aws-error" role="alert">
+          <p id={errId} className="flex items-start gap-1 text-[13px] font-bold text-aws-error" role="alert">
             <CircleX className="mt-px size-3.5 shrink-0" aria-hidden />
             {error}
           </p>
@@ -69,7 +69,7 @@ function useField() {
 }
 
 export const inputClass =
-  "h-8 w-full min-w-0 rounded-lg border border-aws-border-strong bg-aws-surface px-3 text-sm text-aws-text placeholder:text-aws-text-3 placeholder:italic focus:border-aws-focus focus:outline-2 focus:outline-offset-0 focus:outline-aws-focus disabled:cursor-not-allowed disabled:border-aws-disabled disabled:bg-aws-disabled disabled:text-aws-text-3 aria-invalid:border-aws-error aria-invalid:border-l-4";
+  "h-9 w-full min-w-0 rounded-lg border border-aws-border-strong bg-aws-surface px-3 text-[15px] text-aws-text placeholder:text-aws-text-3 placeholder:italic focus:border-aws-focus focus:outline-2 focus:outline-offset-0 focus:outline-aws-focus disabled:cursor-not-allowed disabled:border-aws-disabled disabled:bg-aws-disabled disabled:text-aws-text-3 aria-invalid:border-aws-error aria-invalid:border-l-4";
 
 export const TextInput = forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement>>(function TextInput({ className, id, ...props }, ref) {
   const field = useField();

@@ -253,7 +253,7 @@ export function checkConnection(
           listenerId = free.listener.id;
           notes.push(`리스너 ${free.listener.protocol}:${free.listener.port}이(가) 대상 그룹 ${displayName(target)}(으)로 전달하도록 설정했습니다.`);
         } else if (alb.config.listeners.length === 0 && !options.console) {
-          const listener: Listener = { id: createId("lsn"), protocol: "HTTP", port: 80 };
+          const listener: Listener = { id: createId("lsn"), protocol: "HTTP", port: 80, rules: [] };
           listenerId = listener.id;
           configPatches.push({ resourceId: alb.id, patch: { listeners: [listener] } });
           notes.push(`ALB에 리스너가 없어 기본 리스너 HTTP:80을 만들고 대상 그룹 ${displayName(target)}(으)로 전달하도록 설정했습니다.`);

@@ -50,9 +50,11 @@ interface ProjectStoreState {
   activity: ActivityEntry[];
 
   hydrate: (storage?: StorageLike | null) => void;
-  createProject: (name: string, description?: string) => string;
+  createProject: (name: string, description?: string, mode?: Project["preferredMode"]) => string;
   createFromSample: (sampleId: string) => string | null;
-  startLab: (labId: string) => string | null;
+  startLab: (labId: string, mode?: Project["preferredMode"]) => string | null;
+  /** 이 샌드박스를 열 화면(쉬운 모드/심화 모드)을 기억한다 (실행 취소 기록 없음) */
+  setPreferredMode: (projectId: string, mode: Project["preferredMode"]) => void;
   addImportedProject: (project: Project) => string;
   renameProject: (id: string, name: string) => MutationResult;
   duplicateProject: (id: string) => string | null;
@@ -122,7 +124,7 @@ export const useProjectStore = create<ProjectStoreState>()((set, get) => {
       });
     },
 
-    createProject: (name, description = "") => putProject(createEmptyProject(name, { description })),
+    createProject: (name, description = "", mode = "console") => putProject({ ...createEmptyProject(name, { description }), preferredMode: mode }),
 
     createFromSample: (sampleId) => {
       const sample = SAMPLES.find((s) => s.id === sampleId);
@@ -130,10 +132,14 @@ export const useProjectStore = create<ProjectStoreState>()((set, get) => {
       return putProject(uniqueProject(sample.create()));
     },
 
-    startLab: (labId) => {
+    startLab: (labId, mode = "console") => {
       const lab = labById(labId);
       if (!lab) return null;
-      return putProject(uniqueProject(lab.createStarter()));
+      return putProject({ ...uniqueProject(lab.createStarter()), preferredMode: mode });
+    },
+
+    setPreferredMode: (projectId, mode) => {
+      get().updateWithoutHistory(projectId, (p) => (p.preferredMode === mode ? null : { ...p, preferredMode: mode }));
     },
 
     addImportedProject: (project) => {
@@ -220,7 +226,7 @@ export const useProjectStore = create<ProjectStoreState>()((set, get) => {
       if (!h?.past.length || !current) return false;
       const previous = h.past[h.past.length - 1];
       set((s) => ({
-        projects: { ...s.projects, [projectId]: { ...previous, viewport: current.viewport } },
+        projects: { ...s.projects, [projectId]: { ...previous, viewport: current.viewport, preferredMode: current.preferredMode } },
         history: { ...s.history, [projectId]: { past: h.past.slice(0, -1), future: [current, ...h.future] } },
       }));
       get().log({ projectId, kind: "undo", message: "실행 취소" });
@@ -234,7 +240,7 @@ export const useProjectStore = create<ProjectStoreState>()((set, get) => {
       if (!h?.future.length || !current) return false;
       const next = h.future[0];
       set((s) => ({
-        projects: { ...s.projects, [projectId]: { ...next, viewport: current.viewport } },
+        projects: { ...s.projects, [projectId]: { ...next, viewport: current.viewport, preferredMode: current.preferredMode } },
         history: { ...s.history, [projectId]: { past: [...h.past, current], future: h.future.slice(1) } },
       }));
       get().log({ projectId, kind: "redo", message: "다시 실행" });

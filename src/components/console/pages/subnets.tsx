@@ -1,5 +1,6 @@
 "use client";
 
+import { withHint } from "../error-codes";
 import { useMemo, useState } from "react";
 import { awsUsableHostCount, tryParseCidr } from "@/lib/engine/cidr-utils";
 import { createId } from "@/lib/engine/ids";
@@ -16,7 +17,8 @@ import {
 import { touch } from "@/lib/project/mutations";
 import { useRunAction } from "../console-context";
 import { href, navigate, resourcePath } from "../router";
-import { Alert } from "../ui/alert";
+import { Alert, ErrorAlert } from "../ui/alert";
+import { PageGuide } from "../ui/page-guide";
 import { Button, ButtonDropdown, ButtonLink } from "../ui/button";
 import { Checkbox, FormActions, FormField, SelectInput, TextInput } from "../ui/form";
 import { Container, ContainerHeader, EmptyState, KeyValueGrid, PageHeader, SpaceBetween } from "../ui/layout";
@@ -57,6 +59,7 @@ export function SubnetListPage() {
   const go = (suffix: string) => current && navigate(`${resourcePath("subnet", current.id)}/${suffix}`);
   return (
     <SpaceBetween>
+      <PageGuide topic="subnet" />
       <ResourceTable<Subnet>
         ariaLabel="서브넷 목록"
         items={subnets}
@@ -106,15 +109,15 @@ export function SubnetListPage() {
         columns={[
           { id: "name", header: "Name", cell: (s) => <NameCell r={s} />, sortValue: sortName, filterValue: (s) => s.name },
           { id: "id", header: "서브넷 ID", cell: (s) => <TypedResourceLink type="subnet" id={s.id} />, sortValue: (s) => s.id },
-          { id: "state", header: "상태", cell: () => <StatusIndicator type="success">Available</StatusIndicator> },
+          { id: "state", optional: true, header: "상태", cell: () => <StatusIndicator type="success">Available</StatusIndicator> },
           { id: "vpc", header: "VPC", cell: (s) => <ResourceLink id={topo.vpcOfSubnet(s.id)} showName />, filterValue: (s) => topo.vpcOfSubnet(s.id) ?? "" },
           { id: "cidr", header: "IPv4 CIDR", cell: (s) => s.config.cidr, sortValue: (s) => s.config.cidr },
-          { id: "ips", header: "사용 가능한 IPv4 주소", cell: (s) => availableIps(topo, s) ?? "–", sortValue: (s) => availableIps(topo, s) ?? 0 },
+          { id: "ips", optional: true, header: "사용 가능한 IPv4 주소", cell: (s) => availableIps(topo, s) ?? "–", sortValue: (s) => availableIps(topo, s) ?? 0 },
           { id: "az", header: "가용 영역", cell: (s) => s.config.availabilityZone, sortValue: (s) => s.config.availabilityZone },
-          { id: "rt", header: "라우팅 테이블", cell: (s) => <ResourceLink id={routeTableIdOf(topo, s.id)} /> },
-          { id: "nacl", header: "네트워크 ACL", cell: (s) => <ResourceLink id={naclIdOf(topo, s.id)} /> },
+          { id: "rt", optional: true, header: "라우팅 테이블", cell: (s) => <ResourceLink id={routeTableIdOf(topo, s.id)} /> },
+          { id: "nacl", optional: true, header: "네트워크 ACL", cell: (s) => <ResourceLink id={naclIdOf(topo, s.id)} /> },
           { id: "kind", header: "라우팅 기준 분류", cell: (s) => <SubnetKindLabel topo={topo} subnetId={s.id} /> },
-          { id: "auto", header: "퍼블릭 IPv4 주소 자동 할당", cell: (s) => (s.config.mapPublicIpOnLaunch ? "예" : "아니요") },
+          { id: "auto", optional: true, header: "퍼블릭 IPv4 주소 자동 할당", cell: (s) => (s.config.mapPublicIpOnLaunch ? "예" : "아니요") },
         ]}
       />
       <DeleteSubnetModal subnet={deleting ? current : undefined} onClose={() => setDeleting(false)} />
@@ -134,7 +137,7 @@ function DeleteSubnetModal({ subnet, onClose }: { subnet: Subnet | undefined; on
       confirmText="delete"
       onConfirm={() => {
         const r = run("DeleteSubnet", (p) => deleteSubnet(p, subnet.id), { success: () => `서브넷 ${subnet.id}을(를) 삭제했습니다.` });
-        if (!r.ok) return [r.error, r.hint].filter(Boolean).join(" ");
+        if (!r.ok) return withHint(r);
         navigate("/vpc/subnets");
         return null;
       }}
@@ -194,8 +197,9 @@ export function CreateSubnetPage() {
   };
 
   return (
-    <form onSubmit={submit} className="space-y-6" noValidate>
+    <form onSubmit={submit} className="space-y-6" noValidate data-tour="subnet-form">
       <PageHeader title="서브넷 생성" info={<InfoLink topic="subnet" />} description="VPC의 IPv4 CIDR 범위 안에서 서브넷을 만듭니다. 서브넷마다 하나의 가용 영역을 사용합니다." />
+      <PageGuide topic="subnet" />
       <Container header={<ContainerHeader title="VPC" />}>
         <FormField label="VPC ID" description="이 VPC에 서브넷을 만듭니다." error={error?.index === null ? error.message : undefined}>
           <SelectInput
@@ -255,7 +259,7 @@ export function CreateSubnetPage() {
           </SpaceBetween>
         </Container>
       )}
-      <FormActions error={error && error.index === null && vpc ? <Alert type="error">{error.message}</Alert> : undefined}>
+      <FormActions error={error && error.index === null && vpc ? <ErrorAlert message={error.message} /> : undefined}>
         <ButtonLink variant="link" href={href("/vpc/subnets")}>
           취소
         </ButtonLink>
@@ -435,7 +439,7 @@ export function EditSubnetRouteTablePage({ id }: { id: string }) {
     const target = chosen && !chosen.config.main ? chosen.id : null;
     const r = run("ReplaceRouteTableAssociation", (p) => replaceSubnetRouteTable(p, subnet.id, target), { success: () => `서브넷 ${subnet.id}의 라우팅 테이블 연결을 변경했습니다.` });
     if (r.ok) navigate(resourcePath("subnet", subnet.id), { query: { tab: "route-table" } });
-    else setError(r.error);
+    else setError(withHint(r));
   };
   return (
     <SpaceBetween>
@@ -453,7 +457,7 @@ export function EditSubnetRouteTablePage({ id }: { id: string }) {
           {chosen && vpcId && <RoutesTable topo={topo} routes={topo.routesOf(chosen.id, vpcId)} />}
         </SpaceBetween>
       </Container>
-      <FormActions error={error ? <Alert type="error">{error}</Alert> : undefined}>
+      <FormActions error={error ? <ErrorAlert message={error} /> : undefined}>
         <ButtonLink variant="link" href={href(resourcePath("subnet", subnet.id))}>
           취소
         </ButtonLink>
@@ -478,7 +482,7 @@ export function EditSubnetNaclPage({ id }: { id: string }) {
   const save = () => {
     const r = run("ReplaceNetworkAclAssociation", (p) => replaceSubnetNetworkAcl(p, subnet.id, naclId), { success: () => `서브넷 ${subnet.id}의 네트워크 ACL 연결을 변경했습니다.` });
     if (r.ok) navigate(resourcePath("subnet", subnet.id), { query: { tab: "network-acl" } });
-    else setError(r.error);
+    else setError(withHint(r));
   };
   return (
     <SpaceBetween>
@@ -496,7 +500,7 @@ export function EditSubnetNaclPage({ id }: { id: string }) {
           )}
         </SpaceBetween>
       </Container>
-      <FormActions error={error ? <Alert type="error">{error}</Alert> : undefined}>
+      <FormActions error={error ? <ErrorAlert message={error} /> : undefined}>
         <ButtonLink variant="link" href={href(resourcePath("subnet", subnet.id))}>
           취소
         </ButtonLink>

@@ -14,22 +14,28 @@ export const metadata: Metadata = {
 };
 
 const SUPPORTED = [
-  "VPC, Subnet, Internet Gateway, Route Table, NAT Gateway, Security Group, Network ACL",
-  "EC2 (가상 상태: Pending/Running/Stopped/Terminated), ALB, Target Group, DB Subnet Group, RDS(MySQL/PostgreSQL)",
+  "VPC, Subnet, Internet Gateway, Elastic IP, Route Table, NAT Gateway, Security Group, Network ACL",
+  "EC2 (가상 상태: Pending/Running/Stopped/Terminated, 사용자 데이터, IAM 역할), ALB, Target Group, DB Subnet Group, RDS(MySQL/PostgreSQL)",
   "CIDR 검증, 서브넷 포함/충돌 검사, AWS 예약 주소(서브넷당 5개) 반영",
   "Longest Prefix Match 라우팅, local/IGW/NAT 대상, 기본(main) 라우팅 테이블",
   "보안 그룹(상태 저장, 허용 규칙, SG 참조)과 NACL(상태 비저장, 규칙 번호 순서, 응답 임시 포트) 평가",
   "IGW 1:1 주소 변환, NAT Gateway SNAT, 비대칭 라우팅 탐지",
-  "ALB 리스너 → 대상 그룹 전달, 가상 헬스 체크, 라운드 로빈 분산, fail-open",
+  "ALB 리스너 → 대상 그룹 전달, 리스너 규칙(경로 패턴 → 전달/고정 응답), 가상 헬스 체크, 라운드 로빈 분산, fail-open",
   "RDS 엔드포인트 가상 DNS, Publicly Accessible과 네트워크 경로의 관계, DB 포트 연결 검사",
+  "가상 IAM: 사용자·그룹·역할·정책(JSON 문법 검사), 가상 액세스 키 발급 과정(PGSIM으로 시작하는 연습용 값, 비밀 키 미저장), 정책 평가(명시적 Deny > Allow > 암묵적 거부), 정책 시뮬레이터",
+  "가상 S3: 버킷 이름 규칙, 객체 업로드(16KB 이하 텍스트만 내용 저장), 버전 관리·삭제 마커, 퍼블릭 액세스 차단, 버킷 정책, 정적 웹 사이트, 접근 테스트(네트워크 + 자격 증명 + 정책)",
+  "가상 CloudWatch: 리소스 상태와 가상 부하로 계산한 지표, 경보(M/N 데이터 포인트, 누락 데이터 처리, 상태 기록), 대시보드, 콘솔 알림",
   "교육용 가정 단가를 사용하는 가상 비용 추정",
 ];
 
 const NOT_SUPPORTED = [
   "실제 AWS 계정 연결, API 호출, 리소스 생성 (의도적으로 지원하지 않음)",
-  "IPv6, VPC 피어링, Transit Gateway, VPN/Direct Connect, VPC 엔드포인트, 프리픽스 목록",
-  "ALB 리스너 규칙(경로/호스트 기반 라우팅), TLS 인증서, 스티키 세션, 가중치 기반 분산",
-  "Elastic IP 수동 할당, ENI 추가, 보조 IP, 인스턴스 메타데이터/IAM 역할",
+  "IPv6, VPC 피어링, Transit Gateway, VPN/Direct Connect, VPC 엔드포인트(S3 게이트웨이 엔드포인트 포함), 프리픽스 목록",
+  "ALB 호스트 헤더·쿼리 문자열 조건, 리디렉션·가중치 전달, TLS 인증서, 스티키 세션",
+  "ENI 추가, 보조 IP, 인스턴스 메타데이터 서비스",
+  "IAM의 Condition·NotAction·권한 경계·SCP·교차 계정 접근, 실제 로그인·암호·MFA (콘솔 접근·MFA는 표시만)",
+  "S3 ACL, 객체 잠금, 수명 주기 규칙, 복제, 이진·대용량 파일 내용 저장 (크기·형식만 기록)",
+  "CloudWatch 실제 지표 수집, CloudWatch Logs, SNS 이메일·문자 알림, 경보에 따른 자동 작업(Auto Scaling 등)",
   "실제 OS/애플리케이션 실행, 실제 HTTP 요청, 실제 SQL 쿼리",
   "실제 AWS 요금표 (비용은 교육용 가정값)",
 ];

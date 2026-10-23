@@ -89,36 +89,45 @@
   --aws-nav-fg: #ffffff;
   --aws-nav-muted: #b4bcc8;
   --aws-nav-hover: #2b3645;
-  --aws-page: #f7f7f8;
+  --aws-page: #f3f4f6;
   --aws-surface: #ffffff;
-  --aws-surface-2: #f9f9fa;
-  --aws-text: #0f141a;
-  --aws-text-2: #5b6573;
-  --aws-text-3: #8c8c94;
-  --aws-border: #dedee3;
-  --aws-border-strong: #8c8c94;
-  --aws-divider: #ebebf0;
+  --aws-surface-2: #f8f9fb;
+  --aws-text: #111827;
+  --aws-text-2: #4b5563;
+  --aws-text-3: #7b8494;
+  --aws-border: #d8dce3;
+  --aws-border-strong: #8b93a1;
+  --aws-divider: #e7e9ee;
   --aws-link: #006ce0;
   --aws-link-hover: #002b66;
   --aws-primary: #ff9900;
   --aws-primary-hover: #fa6f00;
   --aws-primary-fg: #0f141a;
   --aws-focus: #006ce0;
-  --aws-selected: #f0fbff;
+  --aws-selected: #eef6ff;
   --aws-disabled: #ebebf0;
-  --aws-success: #00802f;
-  --aws-error: #db0000;
-  --aws-warning: #855900;
-  --aws-info: #006ce0;
-  --aws-pending: #5b6573;
-  --aws-success-bg: #effff1;
-  --aws-error-bg: #fff5f5;
-  --aws-warning-bg: #fffef0;
-  --aws-info-bg: #f0fbff;
+  --aws-success: #0b7a33;
+  --aws-error: #c81e1e;
+  --aws-warning: #8a5a00;
+  --aws-info: #0a64c2;
+  --aws-pending: #4b5563;
+  --aws-success-bg: #ecfdf3;
+  --aws-error-bg: #fef2f2;
+  --aws-warning-bg: #fffbeb;
+  --aws-info-bg: #eff6ff;
   --aws-flash-success: #00802f;
   --aws-flash-error: #db0000;
   --aws-flash-info: #006ce0;
   --aws-flash-warning: #ffe347;
+  /* 차트 색 (범주 순서 고정, 색약 대비 검증 완료 — 흰 배경 대비가 낮은 3·4·5번은 범례·표 보기로 보완) */
+  --viz-1: #2a78d6;
+  --viz-2: #eb6834;
+  --viz-3: #1baf7a;
+  --viz-4: #eda100;
+  --viz-5: #e87ba4;
+  --viz-grid: #e7e9ee;
+  --viz-axis: #c3c7cf;
+  --viz-critical: #d03b3b;
 
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
@@ -159,36 +168,44 @@
   --aws-nav-fg: #ffffff;
   --aws-nav-muted: #a4a4ad;
   --aws-nav-hover: #232b37;
-  --aws-page: #0f141a;
-  --aws-surface: #161d26;
-  --aws-surface-2: #1b232d;
-  --aws-text: #dedee3;
-  --aws-text-2: #a4a4ad;
-  --aws-text-3: #6e737c;
-  --aws-border: #3a4150;
-  --aws-border-strong: #737a85;
-  --aws-divider: #2a313c;
-  --aws-link: #42b4ff;
-  --aws-link-hover: #75cfff;
+  --aws-page: #0e1218;
+  --aws-surface: #171c24;
+  --aws-surface-2: #1d2430;
+  --aws-text: #eceef2;
+  --aws-text-2: #b9bfca;
+  --aws-text-3: #858c98;
+  --aws-border: #343c49;
+  --aws-border-strong: #7d8592;
+  --aws-divider: #262d38;
+  --aws-link: #5cb8ff;
+  --aws-link-hover: #8fd0ff;
   --aws-primary: #ff9900;
   --aws-primary-hover: #ffb347;
   --aws-primary-fg: #0f141a;
-  --aws-focus: #42b4ff;
-  --aws-selected: #001b33;
+  --aws-focus: #5cb8ff;
+  --aws-selected: #0f2742;
   --aws-disabled: #232b37;
-  --aws-success: #2bb534;
-  --aws-error: #ff7a7a;
-  --aws-warning: #fbd332;
-  --aws-info: #42b4ff;
-  --aws-pending: #a4a4ad;
-  --aws-success-bg: #001a02;
-  --aws-error-bg: #1f0000;
-  --aws-warning-bg: #191100;
-  --aws-info-bg: #00142b;
+  --aws-success: #4ade80;
+  --aws-error: #f87171;
+  --aws-warning: #facc15;
+  --aws-info: #60a5fa;
+  --aws-pending: #b9bfca;
+  --aws-success-bg: #0b2a17;
+  --aws-error-bg: #2d1214;
+  --aws-warning-bg: #2a2208;
+  --aws-info-bg: #0d2340;
   --aws-flash-success: #1f8a2a;
   --aws-flash-error: #c71f1f;
   --aws-flash-info: #0a64c2;
   --aws-flash-warning: #fbd332;
+  --viz-1: #3987e5;
+  --viz-2: #d95926;
+  --viz-3: #199e70;
+  --viz-4: #c98500;
+  --viz-5: #d55181;
+  --viz-grid: #262d38;
+  --viz-axis: #3a4350;
+  --viz-critical: #d03b3b;
 
   --background: #0f141a;
   --foreground: #dedee3;
@@ -229,8 +246,8 @@
   }
   body {
     @apply bg-background text-foreground;
-    font-size: 14px;
-    line-height: 20px;
+    font-size: 15px;
+    line-height: 1.6;
   }
   html {
     @apply font-sans;
@@ -253,6 +270,11 @@
 
 .react-flow__node.react-flow__node-zone {
   pointer-events: none;
+}
+
+/* 콘솔의 리소스 맵은 읽기 전용이라 연결점을 숨긴다 */
+.readonly-map .react-flow__handle {
+  visibility: hidden;
 }
 
 .react-flow__handle {
@@ -292,4 +314,123 @@
   .react-flow__edge.path-active .react-flow__edge-path {
     animation: none;
   }
+}
+
+/* ---------------------------------------------------------------- 쉬운 모드(그림 빌더) 가독성: 작은 글자를 조금 키운다 */
+.easy-mode .text-\[10px\] {
+  font-size: 11.5px;
+}
+.easy-mode .text-\[11px\] {
+  font-size: 12.5px;
+}
+.easy-mode .text-\[12px\] {
+  font-size: 13px;
+}
+.easy-mode .text-xs {
+  font-size: 13px;
+  line-height: 1.5;
+}
+.easy-mode .text-sm {
+  font-size: 14.5px;
+}
+
+/* ---------------------------------------------------------------- 튜토리얼 팝업 (driver.js) */
+.driver-popover.pg-tour {
+  background: var(--aws-surface);
+  color: var(--aws-text);
+  border: 1px solid var(--aws-border);
+  border-radius: 16px;
+  min-width: 300px;
+  max-width: 420px;
+  padding: 18px 18px 14px;
+  box-shadow: 0 18px 50px rgba(0, 7, 22, 0.35);
+  font-family: var(--font-sans);
+}
+.driver-popover.pg-tour .driver-popover-title {
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--aws-text);
+}
+.driver-popover.pg-tour .driver-popover-description {
+  margin-top: 8px;
+  font-size: 15px;
+  line-height: 1.65;
+  color: var(--aws-text);
+}
+.driver-popover.pg-tour .driver-popover-description p {
+  margin: 0 0 8px;
+}
+.driver-popover.pg-tour .pg-tour-task {
+  margin-top: 10px;
+  border-radius: 12px;
+  background: var(--aws-info-bg);
+  border: 1px solid color-mix(in oklch, var(--aws-info) 40%, transparent);
+  padding: 10px 12px;
+}
+.driver-popover.pg-tour .pg-tour-task strong {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--aws-info);
+  font-size: 14px;
+}
+.driver-popover.pg-tour .pg-tour-task p {
+  margin: 0;
+}
+.driver-popover.pg-tour .pg-tour-note {
+  margin-top: 8px;
+  font-size: 14px;
+  color: var(--aws-text-2);
+}
+.driver-popover.pg-tour .driver-popover-progress-text {
+  font-size: 13px;
+  color: var(--aws-text-2);
+}
+.driver-popover.pg-tour .driver-popover-footer {
+  margin-top: 12px;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.driver-popover.pg-tour .driver-popover-navigation-btns {
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.driver-popover.pg-tour .driver-popover-footer button {
+  border-radius: 999px;
+  border: 2px solid var(--aws-link);
+  background: var(--aws-surface);
+  color: var(--aws-link);
+  font-size: 14px;
+  font-weight: 700;
+  padding: 5px 14px;
+  text-shadow: none;
+  line-height: 1.3;
+}
+.driver-popover.pg-tour .driver-popover-footer .driver-popover-next-btn,
+.driver-popover.pg-tour .driver-popover-footer .pg-tour-btn-primary {
+  background: var(--aws-primary);
+  border-color: var(--aws-primary);
+  color: var(--aws-primary-fg);
+}
+.driver-popover.pg-tour .driver-popover-footer .pg-tour-btn-link {
+  border-color: transparent;
+}
+.driver-popover.pg-tour .driver-popover-close-btn {
+  color: var(--aws-text-2);
+  font-size: 20px;
+  width: 36px;
+  height: 36px;
+}
+.driver-popover.pg-tour .driver-popover-arrow-side-left.driver-popover-arrow {
+  border-left-color: var(--aws-surface);
+}
+.driver-popover.pg-tour .driver-popover-arrow-side-right.driver-popover-arrow {
+  border-right-color: var(--aws-surface);
+}
+.driver-popover.pg-tour .driver-popover-arrow-side-top.driver-popover-arrow {
+  border-top-color: var(--aws-surface);
+}
+.driver-popover.pg-tour .driver-popover-arrow-side-bottom.driver-popover-arrow {
+  border-bottom-color: var(--aws-surface);
 }

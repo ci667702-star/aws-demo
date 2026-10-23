@@ -1,6 +1,7 @@
 "use client";
 
 /** Reachability Analyzer: 저장된 경로를 만들고 가상 패킷 경로를 단계별로 분석한다. */
+import { withHint } from "../error-codes";
 import { ArrowRight, CircleCheck, CircleX, Info, TriangleAlert } from "lucide-react";
 import { cn } from "cn";
 import { useCallback, useState } from "react";
@@ -21,8 +22,10 @@ import { formatDateTime } from "@/lib/ui/format";
 import { useAnalysis } from "../analysis-context";
 import { useConsoleProjectId, useProject, useRunAction } from "../console-context";
 import { useConsoleUi } from "../console-store";
+import { notify } from "../notify";
 import { href, navigate } from "../router";
-import { Alert } from "../ui/alert";
+import { Alert, ErrorAlert } from "../ui/alert";
+import { PageGuide } from "../ui/page-guide";
 import { Button, ButtonDropdown, ButtonLink } from "../ui/button";
 import { FormActions, FormField, SelectInput, TextInput } from "../ui/form";
 import { Container, ContainerHeader, EmptyState, ExpandableSection, KeyValueGrid, PageHeader, SpaceBetween } from "../ui/layout";
@@ -68,7 +71,8 @@ function endpointText(topo: Topology, e: EndpointSpec): string {
 }
 
 function protocolText(r: SimulationRequest) {
-  return r.protocol === "icmp" ? "ICMP" : `${r.protocol.toUpperCase()} ${r.port}`;
+  const base = r.protocol === "icmp" ? "ICMP" : `${r.protocol.toUpperCase()} ${r.port}`;
+  return r.httpPath && r.httpPath !== "/" ? `${base} · 경로 ${r.httpPath}` : base;
 }
 
 // ---------------------------------------------------------------- 목록
@@ -84,6 +88,7 @@ export function PathListPage() {
   const current = paths.filter((p) => selected.includes(p.id));
   return (
     <SpaceBetween>
+      <PageGuide topic="reachability" />
       <ResourceTable<NetworkPath>
         ariaLabel="분석 경로 목록"
         items={paths}
@@ -148,7 +153,7 @@ export function PathListPage() {
             const ids = current.map((p) => p.id);
             const r = run("DeleteNetworkInsightsPath", (p) => deleteNetworkPaths(p, ids), { success: () => `경로 ${ids.length}개를 삭제했습니다.` });
             setSelected([]);
-            return r.ok ? null : r.error;
+            return r.ok ? null : withHint(r);
           }}
         >
           <p>선택한 경로 {current.length}개와 분석 결과를 삭제하시겠습니까?</p>
@@ -185,6 +190,7 @@ export function CreatePathPage() {
   const [protocol, setProtocol] = useState<"tcp" | "udp" | "icmp">("tcp");
   const [port, setPort] = useState("80");
   const [requestCount, setRequestCount] = useState("4");
+  const [httpPath, setHttpPath] = useState("/");
   const [error, setError] = useState<string | null>(null);
 
   const submit = (e: React.FormEvent) => {
@@ -199,16 +205,17 @@ export function CreatePathPage() {
       protocol,
       port: protocol === "icmp" ? 0 : Number(port),
       requestCount: destKind === "alb" ? Math.min(100, Math.max(1, Number(requestCount) || 1)) : undefined,
+      httpPath: destKind === "alb" ? httpPath.trim() || "/" : undefined,
     };
     const r = run("CreateNetworkInsightsPath", (p) => createNetworkPath(p, { name, request }), {});
-    if (!r.ok) return setError(r.error);
+    if (!r.ok) return setError(withHint(r));
     const path = r.project.networkPaths.find((p) => p.id === r.createdId);
     if (path) {
       const result = analyze(path);
-      useConsoleUi.getState().pushFlash({
+      notify({
         type: result.outcome === "success" ? "success" : result.outcome === "failure" ? "warning" : "error",
-        header: `경로 분석 완료: ${outcomeLabel(result.outcome)}`,
-        content: result.summary,
+        title: `경로 분석 완료: ${outcomeLabel(result.outcome)}`,
+        description: result.summary,
       });
       navigate(`/vpc/reachability/${path.id}`);
     }
@@ -226,8 +233,9 @@ export function CreatePathPage() {
   ];
 
   return (
-    <form onSubmit={submit} className="space-y-6" noValidate>
+    <form onSubmit={submit} className="space-y-6" noValidate data-tour="path-form">
       <PageHeader title="경로 생성 및 분석" info={<InfoLink topic="reachability" />} description="소스에서 대상까지 가상 패킷이 라우팅 테이블, 네트워크 ACL, 보안 그룹, 게이트웨이를 통과하는지 분석합니다. 실제 패킷은 보내지 않습니다." />
+      <PageGuide topic="reachability" />
       <Container header={<ContainerHeader title="경로 구성" />}>
         <SpaceBetween size="m">
           <FormField label="이름 태그" optional>
@@ -286,10 +294,15 @@ export function CreatePathPage() {
                 <TextInput value={requestCount} onChange={(e) => setRequestCount(e.target.value)} inputMode="numeric" />
               </FormField>
             )}
+            {destKind === "alb" && (
+              <FormField label="HTTP 경로" info={<InfoLink topic="listener-rules" />} description="리스너 규칙(경로 기반 라우팅)을 평가할 요청 경로">
+                <TextInput value={httpPath} onChange={(e) => setHttpPath(e.target.value)} placeholder="/api/users" maxLength={256} />
+              </FormField>
+            )}
           </div>
         </SpaceBetween>
       </Container>
-      <FormActions error={error ? <Alert type="error">{error}</Alert> : undefined}>
+      <FormActions error={error ? <ErrorAlert message={error} /> : undefined}>
         <ButtonLink variant="link" href={href("/vpc/reachability")}>
           취소
         </ButtonLink>

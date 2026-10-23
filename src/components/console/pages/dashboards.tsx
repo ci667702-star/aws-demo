@@ -9,14 +9,14 @@ import { Container, ContainerHeader, PageHeader, SpaceBetween } from "../ui/layo
 import { InfoLink } from "../ui/links";
 import { StatusIndicator } from "../ui/status";
 
-interface Tile {
+export interface Tile {
   label: string;
   value: number;
   path: string;
   detail?: string;
 }
 
-function ResourceTiles({ tiles }: { tiles: Tile[] }) {
+export function ResourceTiles({ tiles }: { tiles: Tile[] }) {
   return (
     <div className="grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
       {tiles.map((t) => (

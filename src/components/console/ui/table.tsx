@@ -13,6 +13,8 @@ export interface TableColumn<T> {
   sortValue?: (item: T) => string | number;
   /** 검색에 쓰는 텍스트 (없으면 sortValue를 사용) */
   filterValue?: (item: T) => string;
+  /** 보조 정보 열 — 기본으로 숨기고 "열 더 보기"를 누르면 표시한다 */
+  optional?: boolean;
   minWidth?: number;
 }
 
@@ -57,6 +59,9 @@ export function ResourceTable<T>({
     defaultSort ? { columnId: defaultSort.columnId, descending: !!defaultSort.descending } : null,
   );
   const [page, setPage] = useState(1);
+  const [showAll, setShowAll] = useState(false);
+  const hasOptional = columns.some((c) => c.optional);
+  const shown = showAll ? columns : columns.filter((c) => !c.optional);
 
   const filtered = useMemo(() => {
     const q = filter.trim().toLowerCase();
@@ -112,11 +117,11 @@ export function ResourceTable<T>({
 
   const table = (
     <div className="overflow-x-auto">
-      <table className="w-full border-collapse text-sm" aria-label={ariaLabel}>
+      <table className="w-full border-collapse text-[15px]" aria-label={ariaLabel}>
         <thead>
           <tr className="border-b border-aws-border">
             {selectionType && (
-              <th scope="col" className="w-10 px-3 py-2 text-left">
+              <th scope="col" className="w-11 px-3 py-3 text-left">
                 {selectionType === "multi" ? (
                   <input
                     type="checkbox"
@@ -133,7 +138,7 @@ export function ResourceTable<T>({
                 )}
               </th>
             )}
-            {columns.map((c) => {
+            {shown.map((c) => {
               const active = sort?.columnId === c.id;
               return (
                 <th
@@ -141,7 +146,7 @@ export function ResourceTable<T>({
                   scope="col"
                   style={{ minWidth: c.minWidth }}
                   aria-sort={active ? (sort!.descending ? "descending" : "ascending") : undefined}
-                  className="px-3 py-2 text-left font-bold whitespace-nowrap text-aws-text-2"
+                  className="px-3 py-3 text-left text-sm font-bold whitespace-nowrap text-aws-text-2"
                 >
                   {c.sortValue ? (
                     <button
@@ -163,7 +168,7 @@ export function ResourceTable<T>({
         <tbody>
           {visible.length === 0 ? (
             <tr>
-              <td colSpan={columns.length + (selectionType ? 1 : 0)} className="text-aws-text-2">
+              <td colSpan={shown.length + (selectionType ? 1 : 0)} className="text-aws-text-2">
                 {filter && items.length > 0 ? (
                   <div className="py-6 text-center text-sm">
                     <p className="font-bold text-aws-text">일치하는 리소스 없음</p>
@@ -192,7 +197,7 @@ export function ResourceTable<T>({
                   )}
                 >
                   {selectionType && (
-                    <td className="px-3 py-2 align-middle">
+                    <td className="px-3 py-3 align-middle">
                       <input
                         type={selectionType === "single" ? "radio" : "checkbox"}
                         className="size-4 cursor-pointer accent-[var(--aws-link)]"
@@ -202,8 +207,8 @@ export function ResourceTable<T>({
                       />
                     </td>
                   )}
-                  {columns.map((c) => (
-                    <td key={c.id} className="px-3 py-2 align-middle text-aws-text">
+                  {shown.map((c) => (
+                    <td key={c.id} className="px-3 py-3 align-middle text-aws-text">
                       {c.cell(item)}
                     </td>
                   ))}
@@ -216,9 +221,14 @@ export function ResourceTable<T>({
     </div>
   );
 
-  const toolbar = (filtering || pages > 1) && (
+  const toolbar = (filtering || pages > 1 || hasOptional) && (
     <div className="flex flex-wrap items-center justify-between gap-3">
       {filtering ? <SearchInput value={filter} onChange={(v) => { setFilter(v); setPage(1); }} placeholder={filterPlaceholder} className="w-full max-w-md" /> : <span />}
+      {hasOptional && (
+        <button type="button" onClick={() => setShowAll(!showAll)} className="text-sm font-bold text-aws-link hover:underline" aria-pressed={showAll}>
+          {showAll ? "간단히 보기" : `열 더 보기 (+${columns.length - shown.length})`}
+        </button>
+      )}
       {pages > 1 && (
         <nav className="flex items-center gap-1 text-sm" aria-label="페이지">
           <button type="button" className="rounded p-1 text-aws-text-2 hover:text-aws-text disabled:opacity-40" disabled={current <= 1} onClick={() => setPage(current - 1)} aria-label="이전 페이지">
@@ -255,12 +265,12 @@ export function ResourceTable<T>({
   return (
     <section className="rounded-2xl border border-aws-border bg-aws-surface shadow-[0_1px_3px_rgba(0,7,22,0.08)]">
       {(header || toolbar) && (
-        <div className="space-y-3 px-5 pt-4 pb-3">
+        <div className="space-y-4 px-6 pt-5 pb-4">
           {header}
           {toolbar}
         </div>
       )}
-      <div className="px-2 pb-2">{table}</div>
+      <div className="px-3 pb-3">{table}</div>
     </section>
   );
 }

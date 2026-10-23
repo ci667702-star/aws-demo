@@ -25,10 +25,10 @@ export const ResourceNode = memo(function ResourceNode({ data, selected }: NodeP
         pathState === "pending" && "opacity-60",
       )}
       style={{ width: NODE_WIDTH }}
-      data-testid={`node-${resource.id}`}
+      data-testid={`node-${name}`}
       aria-label={`${typeLabel} ${name}`}
     >
-      <Handle type="target" position={Position.Top} isConnectable={false} />
+      <Handle type="target" position={Position.Top} aria-label={`${name} 연결점 (위)`} />
       <div className="flex items-start gap-2 p-2">
         <ResourceIcon type={resource.type} size="sm" />
         <div className="min-w-0 flex-1">
@@ -70,7 +70,7 @@ export const ResourceNode = memo(function ResourceNode({ data, selected }: NodeP
           {pathOrder + 1}
         </span>
       )}
-      <Handle type="source" position={Position.Bottom} isConnectable={false} />
+      <Handle type="source" position={Position.Bottom} aria-label={`${name} 연결점 (아래)`} />
     </div>
   );
 });

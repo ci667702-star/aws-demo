@@ -2,8 +2,10 @@ import { render } from "@testing-library/react";
 import { act } from "react";
 import { resetConsoleUi } from "@/components/console/console-store";
 import { ConsoleRoute } from "@/components/console/console-route";
+import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type { Project } from "@/lib/engine/resource-models";
+import { useEditorStore } from "@/lib/store/editor-store";
 import { resetProjectStore, useProjectStore } from "@/lib/store/project-store";
 
 export { routerPush } from "./router-mock";
@@ -11,6 +13,18 @@ export { routerPush } from "./router-mock";
 export function seedStore(projects: Project[]) {
   resetProjectStore();
   resetConsoleUi();
+  useEditorStore.setState({
+    projectId: null,
+    selectedResourceIds: [],
+    selectedConnectionIds: [],
+    focusRequest: null,
+    bottomTab: "validation",
+    bottomOpen: true,
+    pendingRequest: null,
+    runs: [],
+    activeRunId: null,
+    highlight: null,
+  });
   useProjectStore.setState({
     status: "ready",
     projects: Object.fromEntries(projects.map((p) => [p.id, p])),
@@ -23,7 +37,12 @@ export function project(id: string): Project {
 }
 
 export function renderWithProviders(ui: React.ReactElement) {
-  return render(<TooltipProvider>{ui}</TooltipProvider>);
+  return render(
+    <TooltipProvider>
+      {ui}
+      <Toaster />
+    </TooltipProvider>,
+  );
 }
 
 /** 콘솔을 특정 해시 경로에서 렌더링한다. */

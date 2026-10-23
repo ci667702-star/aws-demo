@@ -1,12 +1,14 @@
 "use client";
 
+import { withHint } from "../error-codes";
 import { useState } from "react";
 import type { ResourceOfType } from "@/lib/engine/resource-models";
 import { displayName } from "@/lib/engine/topology-engine";
 import { createDefaultVpc, createVpc, deleteVpc, editVpcSettings } from "@/lib/project/console-actions";
 import { useRunAction } from "../console-context";
 import { href, navigate, resourcePath } from "../router";
-import { Alert } from "../ui/alert";
+import { ErrorAlert } from "../ui/alert";
+import { PageGuide } from "../ui/page-guide";
 import { Button, ButtonDropdown, ButtonLink } from "../ui/button";
 import { Checkbox, FormActions, FormField, RadioGroup, TextInput } from "../ui/form";
 import { InfoLink, ResourceLink, TypedResourceLink } from "../ui/links";
@@ -30,6 +32,7 @@ export function VpcListPage() {
 
   return (
     <SpaceBetween>
+      <PageGuide topic="vpc" />
       <ResourceTable<Vpc>
         ariaLabel="VPC 목록"
         items={vpcs}
@@ -78,15 +81,16 @@ export function VpcListPage() {
         columns={[
           { id: "name", header: "Name", cell: (v) => <NameCell r={v} />, sortValue: sortName, filterValue: (v) => v.name },
           { id: "id", header: "VPC ID", cell: (v) => <TypedResourceLink type="vpc" id={v.id} />, sortValue: (v) => v.id },
-          { id: "state", header: "상태", cell: () => <StatusIndicator type="success">Available</StatusIndicator> },
+          { id: "state", optional: true, header: "상태", cell: () => <StatusIndicator type="success">Available</StatusIndicator> },
           { id: "cidr", header: "IPv4 CIDR", cell: (v) => v.config.cidr, sortValue: (v) => v.config.cidr },
-          { id: "rt", header: "기본 라우팅 테이블", cell: (v) => <ResourceLink id={topo.mainRouteTableOf(v.id)?.id} /> },
+          { id: "rt", optional: true, header: "기본 라우팅 테이블", cell: (v) => <ResourceLink id={topo.mainRouteTableOf(v.id)?.id} /> },
           {
             id: "nacl",
+            optional: true,
             header: "기본 네트워크 ACL",
             cell: (v) => <ResourceLink id={topo.ofType("network-acl").find((n) => n.config.isDefault && topo.vpcOf(n.id) === v.id)?.id} />,
           },
-          { id: "default", header: "기본 VPC", cell: (v) => (v.config.isDefault ? "예" : "아니요") },
+          { id: "default", optional: true, header: "기본 VPC", cell: (v) => (v.config.isDefault ? "예" : "아니요") },
         ]}
       />
       <DeleteVpcModal vpc={deleting ? current : undefined} onClose={() => setDeleting(false)} onDeleted={() => setSelected([])} />
@@ -107,7 +111,7 @@ function DeleteVpcModal({ vpc, onClose, onDeleted }: { vpc: Vpc | undefined; onC
       confirmText="delete"
       onConfirm={() => {
         const r = run("DeleteVpc", (p) => deleteVpc(p, vpc.id), { success: () => `VPC ${vpc.id}을(를) 삭제했습니다.` });
-        if (!r.ok) return [r.error, r.hint].filter(Boolean).join(" ");
+        if (!r.ok) return withHint(r);
         onDeleted?.();
         navigate("/vpc/vpcs");
         return null;
@@ -134,12 +138,13 @@ export function CreateVpcPage() {
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     const result = run("CreateVpc", (p) => createVpc(p, { name, cidr }), { success: (r) => `VPC ${r.createdId}을(를) 생성했습니다.` });
-    if (!result.ok) setError(result.error);
+    if (!result.ok) setError(withHint(result));
     else if (result.createdId) navigate(resourcePath("vpc", result.createdId));
   };
   return (
-    <form onSubmit={submit} className="space-y-6" noValidate>
+    <form onSubmit={submit} className="space-y-6" noValidate data-tour="vpc-form">
       <PageHeader title="VPC 생성" info={<InfoLink topic="vpc" />} description="VPC는 리소스를 시작할 수 있는 격리된 가상 네트워크입니다. 서브넷, 인터넷 게이트웨이, 경로는 VPC를 만든 뒤 직접 추가합니다." />
+      <PageGuide topic="vpc" />
       <Container header={<ContainerHeader title="VPC 설정" />}>
         <SpaceBetween size="m">
           <FormField label="생성할 리소스" description="이 시뮬레이터는 VPC만 생성합니다. 서브넷과 게이트웨이는 각 메뉴에서 직접 만드세요.">
@@ -162,7 +167,7 @@ export function CreateVpcPage() {
           </FormField>
         </SpaceBetween>
       </Container>
-      <FormActions error={error && !/CIDR/.test(error) ? <Alert type="error" header="VPC를 생성할 수 없습니다">{error}</Alert> : undefined}>
+      <FormActions error={error && !/CIDR/.test(error) ? <ErrorAlert message={error} header="VPC를 생성할 수 없습니다" /> : undefined}>
         <ButtonLink variant="link" href={href("/vpc/vpcs")}>
           취소
         </ButtonLink>
@@ -317,7 +322,7 @@ export function EditVpcSettingsPage({ id }: { id: string }) {
       success: () => `VPC ${vpc.id}의 설정을 수정했습니다.`,
     });
     if (r.ok) navigate(resourcePath("vpc", vpc.id));
-    else setError(r.error);
+    else setError(withHint(r));
   };
   return (
     <SpaceBetween>
@@ -332,7 +337,7 @@ export function EditVpcSettingsPage({ id }: { id: string }) {
           </Checkbox>
         </SpaceBetween>
       </Container>
-      <FormActions error={error ? <Alert type="error" header="설정을 저장할 수 없습니다">{error}</Alert> : undefined}>
+      <FormActions error={error ? <ErrorAlert message={error} header="설정을 저장할 수 없습니다" /> : undefined}>
         <ButtonLink variant="link" href={href(resourcePath("vpc", vpc.id))}>
           취소
         </ButtonLink>

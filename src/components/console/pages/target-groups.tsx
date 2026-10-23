@@ -1,5 +1,6 @@
 "use client";
 
+import { withHint } from "../error-codes";
 import { useState } from "react";
 import type { TargetHealth } from "@/lib/engine/alb-engine";
 import type { HealthCheck, ResourceOfType } from "@/lib/engine/resource-models";
@@ -9,7 +10,8 @@ import { DEFAULT_HEALTH_CHECK } from "@/lib/project/factory";
 import { useAnalysis } from "../analysis-context";
 import { useRunAction } from "../console-context";
 import { href, navigate, resourcePath } from "../router";
-import { Alert } from "../ui/alert";
+import { ErrorAlert } from "../ui/alert";
+import { PageGuide } from "../ui/page-guide";
 import { Button, ButtonDropdown, ButtonLink } from "../ui/button";
 import { Checkbox, FormActions, FormField, SelectInput, TextInput, Tiles } from "../ui/form";
 import { Container, ContainerHeader, EmptyState, ExpandableSection, KeyValueGrid, PageHeader, SpaceBetween } from "../ui/layout";
@@ -49,7 +51,7 @@ function DeleteTgModal({ tg, onClose }: { tg: Tg | undefined; onClose: () => voi
       title="대상 그룹 삭제"
       onConfirm={() => {
         const r = run("DeleteTargetGroup", (p) => deleteTargetGroup(p, tg.id), { success: () => `대상 그룹 ${tg.name}을(를) 삭제했습니다.` });
-        if (!r.ok) return [r.error, r.hint].filter(Boolean).join(" ");
+        if (!r.ok) return withHint(r);
         navigate("/ec2/target-groups");
         return null;
       }}
@@ -70,6 +72,7 @@ export function TargetGroupListPage() {
   const current = tgs.find((t) => t.id === selected[0]);
   return (
     <SpaceBetween>
+      <PageGuide topic="target-group" />
       <ResourceTable<Tg>
         ariaLabel="대상 그룹 목록"
         items={tgs}
@@ -109,12 +112,12 @@ export function TargetGroupListPage() {
         empty={<EmptyState title="대상 그룹 없음" description="로드 밸런서가 요청을 보낼 인스턴스 묶음을 만드세요." action={<ButtonLink href={href("/ec2/target-groups/create")}>대상 그룹 생성</ButtonLink>} />}
         columns={[
           { id: "name", header: "이름", cell: (t) => <TypedResourceLink type="target-group" id={t.id}>{t.name}</TypedResourceLink>, sortValue: (t) => t.name },
-          { id: "id", header: "ID", cell: (t) => <span className="font-mono text-[13px] text-aws-text-2">{t.id}</span>, sortValue: (t) => t.id },
+          { id: "id", optional: true, header: "ID", cell: (t) => <span className="font-mono text-[13px] text-aws-text-2">{t.id}</span>, sortValue: (t) => t.id },
           { id: "port", header: "포트", cell: (t) => t.config.port, sortValue: (t) => t.config.port },
           { id: "protocol", header: "프로토콜", cell: (t) => t.config.protocol },
-          { id: "type", header: "대상 유형", cell: () => "Instance" },
+          { id: "type", optional: true, header: "대상 유형", cell: () => "Instance" },
           { id: "lb", header: "로드 밸런서", cell: (t) => topo.targetGroupAlbs(t.id).map((a) => <ResourceLink key={a.id} id={a.id} showName />) },
-          { id: "vpc", header: "VPC ID", cell: (t) => <ResourceLink id={topo.vpcOf(t.id)} /> },
+          { id: "vpc", optional: true, header: "VPC ID", cell: (t) => <ResourceLink id={topo.vpcOf(t.id)} /> },
           { id: "health", header: "상태", cell: (t) => healthSummary(health.get(t.id)) },
         ]}
       />
@@ -251,7 +254,7 @@ export function CreateTargetGroupPage() {
       success: () => `대상 그룹 ${name.trim()}을(를) 생성했습니다.`,
     });
     if (r.ok && r.createdId) navigate(resourcePath("target-group", r.createdId));
-    else if (!r.ok) setError(r.error);
+    else if (!r.ok) setError(withHint(r));
   };
 
   return (
@@ -290,7 +293,7 @@ export function CreateTargetGroupPage() {
           <Container header={<ContainerHeader title="상태 검사" info={<InfoLink topic="health-check" />} description="로드 밸런서는 이 설정으로 대상에 주기적으로 요청을 보내 정상 여부를 확인합니다." />}>
             <HealthCheckFields draft={hc} onChange={setHc} />
           </Container>
-          <FormActions error={error ? <Alert type="error">{error}</Alert> : undefined}>
+          <FormActions error={error ? <ErrorAlert message={error} /> : undefined}>
             <ButtonLink variant="link" href={href("/ec2/target-groups")}>
               취소
             </ButtonLink>
@@ -344,7 +347,7 @@ export function CreateTargetGroupPage() {
               <p className="text-sm text-aws-text-2">보류 중인 대상이 없습니다.</p>
             )}
           </Container>
-          <FormActions error={error ? <Alert type="error">{error}</Alert> : undefined}>
+          <FormActions error={error ? <ErrorAlert message={error} /> : undefined}>
             <Button variant="link" onClick={() => setStep(1)}>
               이전
             </Button>
@@ -541,7 +544,7 @@ export function EditHealthCheckPage({ id }: { id: string }) {
     if (!h.ok) return setError(h.error);
     const r = run("ModifyTargetGroup", (p) => editTargetGroupHealthCheck(p, tg.id, h.value), { success: () => `대상 그룹 ${tg.name}의 상태 검사 설정을 저장했습니다.` });
     if (r.ok) navigate(resourcePath("target-group", tg.id), { query: { tab: "health" } });
-    else setError(r.error);
+    else setError(withHint(r));
   };
   return (
     <SpaceBetween>
@@ -549,7 +552,7 @@ export function EditHealthCheckPage({ id }: { id: string }) {
       <Container header={<ContainerHeader title="상태 검사" />}>
         <HealthCheckFields draft={draft} onChange={setDraft} />
       </Container>
-      <FormActions error={error ? <Alert type="error">{error}</Alert> : undefined}>
+      <FormActions error={error ? <ErrorAlert message={error} /> : undefined}>
         <ButtonLink variant="link" href={href(resourcePath("target-group", tg.id))}>
           취소
         </ButtonLink>

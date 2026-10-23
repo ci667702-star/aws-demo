@@ -5,7 +5,7 @@ async function createSandbox(page: Page, name: string) {
   await page.goto("/");
   await page.getByRole("button", { name: "샌드박스 생성" }).first().click();
   await page.getByRole("dialog").getByLabel("이름").fill(name);
-  await page.getByRole("button", { name: "생성 후 콘솔 열기" }).click();
+  await page.getByRole("button", { name: "생성 후 열기" }).click();
   await expect(page).toHaveURL(/\/console\/proj-[^#]+#\/$/);
   await expect(page.getByRole("heading", { name: "콘솔 홈", level: 1 })).toBeVisible();
 }
@@ -35,7 +35,7 @@ async function buildPublicWebServer(page: Page) {
   // 인터넷 게이트웨이 생성 → 알림의 "VPC에 연결" → 연결
   await go(page, "#/vpc/igws/create");
   await page.getByRole("button", { name: "인터넷 게이트웨이 생성" }).click();
-  await page.getByTestId("flashbar").getByRole("link", { name: "VPC에 연결" }).click();
+  await page.locator("[data-sonner-toaster]").getByRole("button", { name: "VPC에 연결" }).click();
   await page.getByLabel("사용 가능한 VPC").selectOption({ index: 1 });
   await page.getByRole("button", { name: "인터넷 게이트웨이 연결" }).click();
   await expect(page.getByText("Attached").first()).toBeVisible();
@@ -58,7 +58,7 @@ async function buildPublicWebServer(page: Page) {
   await page.getByLabel("퍼블릭 IP 자동 할당").selectOption("enabled");
   await page.getByRole("checkbox", { name: /인터넷에서 HTTP 트래픽 허용/ }).check();
   await page.getByRole("radio", { name: /웹 서버 설치/ }).check();
-  await page.getByRole("button", { name: "인스턴스 시작" }).click();
+  await page.getByRole("button", { name: "인스턴스 시작", exact: true }).click();
   await expect(page.getByRole("heading", { name: /인스턴스 요약/, level: 1 })).toBeVisible();
   await expect(page.getByText("실행 중 (Running)").first()).toBeVisible({ timeout: 15_000 });
 }
@@ -117,7 +117,7 @@ test("AWS처럼 잘못된 입력과 의존성 있는 삭제를 오류 코드로 
   // VPC에 연결된 인터넷 게이트웨이는 분리하기 전에는 삭제할 수 없다
   await go(page, "#/vpc/igws/create");
   await page.getByRole("button", { name: "인터넷 게이트웨이 생성" }).click();
-  await page.getByTestId("flashbar").getByRole("link", { name: "VPC에 연결" }).click();
+  await page.locator("[data-sonner-toaster]").getByRole("button", { name: "VPC에 연결" }).click();
   await page.getByLabel("사용 가능한 VPC").selectOption({ index: 1 });
   await page.getByRole("button", { name: "인터넷 게이트웨이 연결" }).click();
   await page.getByRole("button", { name: "작업" }).click();
@@ -147,4 +147,49 @@ test("모바일 너비에서도 가로로 넘치지 않는다", async ({ page })
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     expect(overflow, hash).toBeLessThanOrEqual(1);
   }
+});
+
+test("IAM 가상 액세스 키를 발급하고, S3 버킷을 정적 웹 사이트로 공개한다", async ({ page }) => {
+  await createSandbox(page, "E2E 서비스");
+
+  // IAM: 사용자 → 가상 액세스 키 (PGSIM으로 시작하는 연습용 값)
+  await go(page, "#/iam/users/create");
+  await page.getByLabel("사용자 이름").fill("dev-kim");
+  await page.getByRole("button", { name: "다음" }).click();
+  await page.getByRole("button", { name: "다음" }).click();
+  await page.getByRole("button", { name: "사용자 생성" }).click();
+  await expect(page.getByRole("heading", { name: "dev-kim", level: 1 })).toBeVisible();
+  await page.getByRole("button", { name: "작업" }).click();
+  await page.getByRole("menuitem", { name: "액세스 키 만들기" }).click();
+  await page.getByRole("checkbox", { name: /권장 사항을 이해했으며/ }).check();
+  await page.getByRole("button", { name: "다음" }).click();
+  await page.getByRole("button", { name: "액세스 키 만들기" }).click();
+  await expect(page.getByText(/^PGSIM[A-Z2-7]{15}$/)).toBeVisible();
+
+  // S3: 버킷 → index.html 업로드 → 호스팅 → 차단 해제 → 공개 정책 → 200 OK
+  await go(page, "#/s3/create");
+  await page.getByLabel("버킷 이름").fill("e2e-site-2026");
+  await page.getByRole("button", { name: "버킷 만들기", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "e2e-site-2026", level: 1 })).toBeVisible();
+  const bucketPath = new URL(page.url()).hash.split("?")[0];
+  await go(page, `${bucketPath}/upload`);
+  await page.getByRole("button", { name: "목록에 추가" }).click();
+  await page.getByRole("button", { name: "업로드", exact: true }).click();
+  await expect(page.getByRole("table", { name: "객체 목록" })).toContainText("index.html");
+
+  await go(page, `${bucketPath}/edit-website`);
+  await page.getByRole("switch", { name: "정적 웹 사이트 호스팅 활성화" }).click();
+  await page.getByRole("button", { name: "변경 사항 저장" }).click();
+  await go(page, `${bucketPath}/edit-bpa`);
+  await page.getByRole("checkbox", { name: /모든 퍼블릭 액세스 차단/ }).uncheck();
+  await page.getByPlaceholder("확인").fill("확인");
+  await page.getByRole("button", { name: "변경 사항 저장" }).click();
+  await go(page, `${bucketPath}/edit-policy`);
+  await page.getByRole("button", { name: "퍼블릭 읽기 (정적 웹 사이트용)" }).click();
+  await page.getByRole("button", { name: "변경 사항 저장" }).click();
+  await expect(page.getByText("⚠ 퍼블릭").first()).toBeVisible();
+
+  await go(page, `${bucketPath}?tab=properties`);
+  await page.getByRole("button", { name: "웹 사이트 열어 보기 (가상)" }).click();
+  await expect(page.getByRole("dialog")).toContainText("200 OK");
 });

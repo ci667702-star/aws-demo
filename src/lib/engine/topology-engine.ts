@@ -282,9 +282,15 @@ export class Topology {
       .filter((x): x is { connectionId: string; ec2: ResourceOfType<"ec2"> } => !!x.ec2);
   }
 
+  /** 이 대상 그룹으로 요청을 보내는 ALB (리스너 기본 작업 + 리스너 규칙) */
   targetGroupAlbs(tgId: string): ResourceOfType<"alb">[] {
-    const ids = [...new Set(this.incoming(tgId, "alb-target-group").map((c) => c.sourceResourceId))];
-    return ids.map((id) => this.getOfType(id, "alb")).filter((a): a is ResourceOfType<"alb"> => !!a);
+    return this.memo(`tgAlbs:${tgId}`, () => {
+      const ids = new Set(this.incoming(tgId, "alb-target-group").map((c) => c.sourceResourceId));
+      for (const alb of this.ofType("alb")) {
+        if (alb.config.listeners.some((l) => (l.rules ?? []).some((r) => r.action.type === "forward" && r.action.targetGroupId === tgId))) ids.add(alb.id);
+      }
+      return [...ids].map((id) => this.getOfType(id, "alb")).filter((a): a is ResourceOfType<"alb"> => !!a);
+    });
   }
 
   dbSubnetGroupOf(rdsId: string): ResourceOfType<"db-subnet-group"> | undefined {

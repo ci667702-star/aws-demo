@@ -1,6 +1,7 @@
 "use client";
 
 /** 보안 그룹, 네트워크 ACL */
+import { withHint } from "../error-codes";
 import { useState } from "react";
 import type { ResourceOfType } from "@/lib/engine/resource-models";
 import { displayName } from "@/lib/engine/topology-engine";
@@ -15,7 +16,8 @@ import {
 } from "@/lib/project/console-actions";
 import { useRunAction } from "../console-context";
 import { href, navigate, resourcePath } from "../router";
-import { Alert } from "../ui/alert";
+import { Alert, ErrorAlert } from "../ui/alert";
+import { PageGuide } from "../ui/page-guide";
 import { Button, ButtonDropdown, ButtonLink } from "../ui/button";
 import { Checkbox, FormActions, FormField, SelectInput, TextInput } from "../ui/form";
 import { Container, ContainerHeader, EmptyState, KeyValueGrid, PageHeader, SpaceBetween } from "../ui/layout";
@@ -53,7 +55,7 @@ function DeleteSgModal({ sg, onClose }: { sg: Sg | undefined; onClose: () => voi
       title="보안 그룹 삭제"
       onConfirm={() => {
         const r = run("DeleteSecurityGroup", (p) => deleteSecurityGroup(p, sg.id), { success: () => `보안 그룹 ${sg.id}을(를) 삭제했습니다.` });
-        if (!r.ok) return [r.error, r.hint].filter(Boolean).join(" ");
+        if (!r.ok) return withHint(r);
         navigate("/vpc/security-groups");
         return null;
       }}
@@ -73,6 +75,7 @@ export function SecurityGroupListPage({ base = "/vpc" }: { base?: "/vpc" | "/ec2
   const current = sgs.find((g) => g.id === selected[0]);
   return (
     <SpaceBetween>
+      <PageGuide topic="security-group" />
       <ResourceTable<Sg>
         ariaLabel="보안 그룹 목록"
         items={sgs}
@@ -115,8 +118,8 @@ export function SecurityGroupListPage({ base = "/vpc" }: { base?: "/vpc" | "/ec2
           { id: "name", header: "보안 그룹 이름", cell: (g) => <NameCell r={g} />, sortValue: sortName, filterValue: (g) => g.name },
           { id: "vpc", header: "VPC ID", cell: (g) => <ResourceLink id={topo.vpcOf(g.id)} />, filterValue: (g) => topo.vpcOf(g.id) ?? "" },
           { id: "desc", header: "설명", cell: (g) => <span className="text-aws-text-2">{g.config.description}</span>, filterValue: (g) => g.config.description },
-          { id: "in", header: "인바운드 규칙 수", cell: (g) => `${g.config.inboundRules.length}개 권한 항목` },
-          { id: "out", header: "아웃바운드 규칙 수", cell: (g) => `${g.config.outboundRules.length}개 권한 항목` },
+          { id: "in", optional: true, header: "인바운드 규칙 수", cell: (g) => `${g.config.inboundRules.length}개 권한 항목` },
+          { id: "out", optional: true, header: "아웃바운드 규칙 수", cell: (g) => `${g.config.outboundRules.length}개 권한 항목` },
           { id: "used", header: "사용 중인 리소스", cell: (g) => topo.resourcesUsingSecurityGroup(g.id).filter((r) => !(r.type === "ec2" && r.config.state === "terminated")).length },
         ]}
       />
@@ -147,15 +150,16 @@ export function CreateSecurityGroupPage({ base = "/vpc" }: { base?: "/vpc" | "/e
       success: (res) => `보안 그룹 ${res.createdId}(${name.trim()})을(를) 생성했습니다.`,
     });
     if (r.ok && r.createdId) navigate(resourcePath("security-group", r.createdId));
-    else if (!r.ok) setError(r.error);
+    else if (!r.ok) setError(withHint(r));
   };
   return (
-    <form onSubmit={submit} className="space-y-6" noValidate>
+    <form onSubmit={submit} className="space-y-6" noValidate data-tour="sg-form">
       <PageHeader
         title="보안 그룹 생성"
         info={<InfoLink topic="security-group" />}
         description="보안 그룹은 인스턴스·로드 밸런서·DB의 가상 방화벽 역할을 합니다. 허용 규칙만 지정할 수 있으며 일치하지 않는 트래픽은 거부됩니다."
       />
+      <PageGuide topic="security-group" />
       <Container header={<ContainerHeader title="기본 세부 정보" />}>
         <SpaceBetween size="m">
           <FormField label="보안 그룹 이름" constraint="만든 후에는 이름을 편집할 수 없습니다. 'default'나 'sg-'로 시작하는 이름은 쓸 수 없습니다.">
@@ -175,7 +179,7 @@ export function CreateSecurityGroupPage({ base = "/vpc" }: { base?: "/vpc" | "/e
       <Container header={<ContainerHeader title="아웃바운드 규칙" description="콘솔에서 만든 보안 그룹에는 모든 아웃바운드 트래픽을 허용하는 규칙이 기본으로 들어 있습니다." />}>
         <SgRuleEditor direction="outbound" drafts={outbound} onChange={setOutbound} errors={rowErrors} topo={topo} vpcId={vpcId || null} />
       </Container>
-      <FormActions error={error ? <Alert type="error" header="보안 그룹을 생성할 수 없습니다">{error}</Alert> : undefined}>
+      <FormActions error={error ? <ErrorAlert message={error} header="보안 그룹을 생성할 수 없습니다" /> : undefined}>
         <ButtonLink variant="link" href={href(`${base}/security-groups`)}>
           취소
         </ButtonLink>
@@ -294,7 +298,7 @@ export function EditSgRulesPage({ id, direction }: { id: string; direction: "inb
       success: () => `보안 그룹 ${sg.id}의 ${label} 규칙을 저장했습니다.`,
     });
     if (r.ok) navigate(resourcePath("security-group", sg.id), { query: { tab: direction } });
-    else setError(r.error);
+    else setError(withHint(r));
   };
   return (
     <SpaceBetween>
@@ -302,7 +306,7 @@ export function EditSgRulesPage({ id, direction }: { id: string; direction: "inb
       <Container header={<ContainerHeader title={`${label} 규칙`} />}>
         <SgRuleEditor direction={direction} drafts={drafts} onChange={setDrafts} errors={rowErrors} topo={topo} vpcId={topo.vpcOf(sg.id)} selfId={sg.id} />
       </Container>
-      <FormActions error={error ? <Alert type="error" header="규칙을 저장할 수 없습니다">{error}</Alert> : undefined}>
+      <FormActions error={error ? <ErrorAlert message={error} header="규칙을 저장할 수 없습니다" /> : undefined}>
         <ButtonLink variant="link" href={href(resourcePath("security-group", sg.id))}>
           취소
         </ButtonLink>
@@ -329,7 +333,7 @@ function DeleteNaclModal({ nacl, onClose }: { nacl: Nacl | undefined; onClose: (
       confirmText="delete"
       onConfirm={() => {
         const r = run("DeleteNetworkAcl", (p) => deleteNetworkAcl(p, nacl.id), { success: () => `네트워크 ACL ${nacl.id}을(를) 삭제했습니다.` });
-        if (!r.ok) return [r.error, r.hint].filter(Boolean).join(" ");
+        if (!r.ok) return withHint(r);
         navigate("/vpc/network-acls");
         return null;
       }}
@@ -350,6 +354,7 @@ export function NaclListPage() {
   const current = nacls.find((n) => n.id === selected[0]);
   return (
     <SpaceBetween>
+      <PageGuide topic="nacl" />
       <ResourceTable<Nacl>
         ariaLabel="네트워크 ACL 목록"
         items={nacls}
@@ -397,8 +402,8 @@ export function NaclListPage() {
           { id: "assoc", header: "연결 대상", cell: (n) => { const c = topo.outgoing(n.id, "network-acl-subnet").length; return c ? `${c}개 서브넷` : "–"; } },
           { id: "default", header: "기본", cell: (n) => (n.config.isDefault ? "예" : "아니요") },
           { id: "vpc", header: "VPC ID", cell: (n) => <ResourceLink id={topo.vpcOf(n.id)} /> },
-          { id: "in", header: "인바운드 규칙 수", cell: (n) => n.config.inboundRules.length + 1 },
-          { id: "out", header: "아웃바운드 규칙 수", cell: (n) => n.config.outboundRules.length + 1 },
+          { id: "in", optional: true, header: "인바운드 규칙 수", cell: (n) => n.config.inboundRules.length + 1 },
+          { id: "out", optional: true, header: "아웃바운드 규칙 수", cell: (n) => n.config.outboundRules.length + 1 },
         ]}
       />
       <DeleteNaclModal nacl={deleting ? current : undefined} onClose={() => setDeleting(false)} />
@@ -417,7 +422,7 @@ export function CreateNaclPage() {
     e.preventDefault();
     const r = run("CreateNetworkAcl", (p) => createNetworkAcl(p, { name, vpcId }), { success: (res) => `네트워크 ACL ${res.createdId}을(를) 생성했습니다.` });
     if (r.ok && r.createdId) navigate(resourcePath("network-acl", r.createdId));
-    else if (!r.ok) setError(r.error);
+    else if (!r.ok) setError(withHint(r));
   };
   return (
     <form onSubmit={submit} className="space-y-6" noValidate>
@@ -553,7 +558,7 @@ export function EditNaclRulesPage({ id, direction }: { id: string; direction: "i
     if (Object.keys(errors).length) return setError("규칙의 입력값을 확인하세요.");
     const r = run("ReplaceNetworkAclEntries", (p) => editNetworkAclRules(p, nacl.id, direction, rules), { success: () => `네트워크 ACL ${nacl.id}의 ${label} 규칙을 저장했습니다.` });
     if (r.ok) navigate(resourcePath("network-acl", nacl.id), { query: { tab: direction } });
-    else setError(r.error);
+    else setError(withHint(r));
   };
   return (
     <SpaceBetween>
@@ -565,7 +570,7 @@ export function EditNaclRulesPage({ id, direction }: { id: string; direction: "i
       <Container header={<ContainerHeader title={`${label} 규칙`} />}>
         <NaclRuleEditor direction={direction} drafts={drafts} onChange={setDrafts} errors={rowErrors} />
       </Container>
-      <FormActions error={error ? <Alert type="error" header="규칙을 저장할 수 없습니다">{error}</Alert> : undefined}>
+      <FormActions error={error ? <ErrorAlert message={error} header="규칙을 저장할 수 없습니다" /> : undefined}>
         <ButtonLink variant="link" href={href(resourcePath("network-acl", nacl.id))}>
           취소
         </ButtonLink>
@@ -589,7 +594,7 @@ export function EditNaclAssociationsPage({ id }: { id: string }) {
   const save = () => {
     const r = run("ReplaceNetworkAclAssociation", (p) => editNetworkAclAssociations(p, nacl.id, selected), { success: () => `네트워크 ACL ${nacl.id}의 서브넷 연결을 업데이트했습니다.` });
     if (r.ok) navigate(resourcePath("network-acl", nacl.id), { query: { tab: "associations" } });
-    else setError([r.error, r.hint].filter(Boolean).join(" "));
+    else setError(withHint(r));
   };
   return (
     <SpaceBetween>
@@ -614,7 +619,7 @@ export function EditNaclAssociationsPage({ id }: { id: string }) {
           <p className="text-sm text-aws-text-2">이 VPC에 서브넷이 없습니다.</p>
         )}
       </Container>
-      <FormActions error={error ? <Alert type="error">{error}</Alert> : undefined}>
+      <FormActions error={error ? <ErrorAlert message={error} /> : undefined}>
         <ButtonLink variant="link" href={href(resourcePath("network-acl", nacl.id))}>
           취소
         </ButtonLink>

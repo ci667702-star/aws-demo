@@ -1,5 +1,6 @@
 "use client";
 
+import { withHint } from "../error-codes";
 import { useState } from "react";
 import { createId } from "@/lib/engine/ids";
 import type { ResourceOfType } from "@/lib/engine/resource-models";
@@ -7,7 +8,8 @@ import { displayName } from "@/lib/engine/topology-engine";
 import { createRouteTable, deleteRouteTable, editRouteTableAssociations, editRoutes, makeMainRouteTable } from "@/lib/project/console-actions";
 import { useRunAction } from "../console-context";
 import { href, navigate, resourcePath } from "../router";
-import { Alert } from "../ui/alert";
+import { Alert, ErrorAlert } from "../ui/alert";
+import { PageGuide } from "../ui/page-guide";
 import { Button, ButtonDropdown, ButtonLink } from "../ui/button";
 import { Checkbox, FormActions, FormField, SelectInput, TextInput } from "../ui/form";
 import { Container, ContainerHeader, EmptyState, KeyValueGrid, PageHeader, SpaceBetween } from "../ui/layout";
@@ -33,7 +35,7 @@ function DeleteRtModal({ rt, onClose }: { rt: RouteTable | undefined; onClose: (
       confirmText="delete"
       onConfirm={() => {
         const r = run("DeleteRouteTable", (p) => deleteRouteTable(p, rt.id), { success: () => `라우팅 테이블 ${rt.id}을(를) 삭제했습니다.` });
-        if (!r.ok) return [r.error, r.hint].filter(Boolean).join(" ");
+        if (!r.ok) return withHint(r);
         navigate("/vpc/route-tables");
         return null;
       }}
@@ -77,6 +79,7 @@ export function RouteTableListPage() {
   const onAction = useRtActionHandler(current, setDeleting, setNaming);
   return (
     <SpaceBetween>
+      <PageGuide topic="route-table" />
       <ResourceTable<RouteTable>
         ariaLabel="라우팅 테이블 목록"
         items={rts}
@@ -113,7 +116,7 @@ export function RouteTableListPage() {
             },
           },
           { id: "main", header: "기본", cell: (r) => (r.config.main ? "예" : "아니요"), sortValue: (r) => (r.config.main ? 0 : 1) },
-          { id: "routes", header: "경로 수", cell: (r) => topo.routesOf(r.id, topo.vpcOf(r.id)).length },
+          { id: "routes", optional: true, header: "경로 수", cell: (r) => topo.routesOf(r.id, topo.vpcOf(r.id)).length },
           { id: "vpc", header: "VPC", cell: (r) => <ResourceLink id={topo.vpcOf(r.id)} showName />, filterValue: (r) => topo.vpcOf(r.id) ?? "" },
         ]}
       />
@@ -136,7 +139,7 @@ export function CreateRouteTablePage() {
       successAction: (res) => ({ label: "라우팅 편집", href: href(`${resourcePath("route-table", res.createdId!)}/edit-routes`) }),
     });
     if (r.ok && r.createdId) navigate(resourcePath("route-table", r.createdId));
-    else if (!r.ok) setError(r.error);
+    else if (!r.ok) setError(withHint(r));
   };
   return (
     <form onSubmit={submit} className="space-y-6" noValidate>
@@ -294,11 +297,11 @@ export function EditRoutesPage({ id }: { id: string }) {
   const save = () => {
     const r = run("ReplaceRoutes", (p) => editRoutes(p, rt.id, drafts.map((d) => ({ destination: d.destination, targetId: d.targetId }))), { success: () => `라우팅 테이블 ${rt.id}의 경로를 업데이트했습니다.` });
     if (r.ok) navigate(resourcePath("route-table", rt.id), { query: { tab: "routes" } });
-    else setError(r.error);
+    else setError(withHint(r));
   };
   const update = (key: string, patch: Partial<RouteDraft>) => setDrafts(drafts.map((d) => (d.key === key ? { ...d, ...patch } : d)));
   return (
-    <SpaceBetween>
+    <div className="flex flex-col gap-6" data-tour="routes-form">
       <PageHeader title="라우팅 편집" info={<InfoLink topic="route-table" />} description={`${rt.id} (${displayName(rt)}) · VPC ${vpcId ?? "없음"}`} />
       <Container header={<ContainerHeader title="라우팅" description="목적지 CIDR과 트래픽을 보낼 대상을 지정합니다. 가장 구체적인 경로가 우선합니다." />}>
         <div className="overflow-x-auto">
@@ -352,7 +355,7 @@ export function EditRoutesPage({ id }: { id: string }) {
           </Alert>
         )}
       </Container>
-      <FormActions error={error ? <Alert type="error" header="경로를 저장할 수 없습니다">{error}</Alert> : undefined}>
+      <FormActions error={error ? <ErrorAlert message={error} header="경로를 저장할 수 없습니다" /> : undefined}>
         <ButtonLink variant="link" href={href(resourcePath("route-table", rt.id))}>
           취소
         </ButtonLink>
@@ -360,7 +363,7 @@ export function EditRoutesPage({ id }: { id: string }) {
           변경 사항 저장
         </Button>
       </FormActions>
-    </SpaceBetween>
+    </div>
   );
 }
 
@@ -376,7 +379,7 @@ export function EditRouteTableAssociationsPage({ id }: { id: string }) {
   const save = () => {
     const r = run("AssociateRouteTable", (p) => editRouteTableAssociations(p, rt.id, selected), { success: () => `라우팅 테이블 ${rt.id}의 서브넷 연결을 업데이트했습니다.` });
     if (r.ok) navigate(resourcePath("route-table", rt.id), { query: { tab: "associations" } });
-    else setError(r.error);
+    else setError(withHint(r));
   };
   return (
     <SpaceBetween>
@@ -418,7 +421,7 @@ export function EditRouteTableAssociationsPage({ id }: { id: string }) {
           <p className="text-sm text-aws-text-2">이 VPC에 서브넷이 없습니다.</p>
         )}
       </Container>
-      <FormActions error={error ? <Alert type="error">{error}</Alert> : undefined}>
+      <FormActions error={error ? <ErrorAlert message={error} /> : undefined}>
         <ButtonLink variant="link" href={href(resourcePath("route-table", rt.id))}>
           취소
         </ButtonLink>
