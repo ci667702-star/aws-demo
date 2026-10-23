@@ -105,3 +105,38 @@ export function applyAutoLayout(project: Project): Project {
     resources: project.resources.map((r) => (positions[r.id] ? { ...r, position: positions[r.id] } : r)),
   };
 }
+
+export interface Rect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** anchor 주변에서 기존 노드와 겹치지 않는 가장 가까운 격자 위치를 찾는다. */
+export function findFreePosition(anchor: { x: number; y: number }, occupied: Rect[], size = { width: NODE_WIDTH, height: NODE_HEIGHT }): { x: number; y: number } {
+  const gapX = size.width + 32;
+  const gapY = size.height + 32;
+  const margin = 12;
+  const overlaps = (x: number, y: number) =>
+    occupied.some(
+      (r) => x < r.x + r.width + margin && x + size.width + margin > r.x && y < r.y + r.height + margin && y + size.height + margin > r.y,
+    );
+  for (let ring = 0; ring <= 10; ring++) {
+    const candidates: [number, number][] = [];
+    for (let j = -ring; j <= ring; j++) {
+      for (let i = -ring; i <= ring; i++) {
+        if (Math.max(Math.abs(i), Math.abs(j)) !== ring) continue;
+        candidates.push([i, j]);
+      }
+    }
+    // 오른쪽/아래쪽을 먼저 시도한다
+    candidates.sort((a, b) => b[1] - a[1] || b[0] - a[0]).sort((a, b) => Math.abs(a[0]) + Math.abs(a[1]) - (Math.abs(b[0]) + Math.abs(b[1])));
+    for (const [i, j] of candidates) {
+      const x = anchor.x + i * gapX;
+      const y = anchor.y + j * gapY;
+      if (!overlaps(x, y)) return { x: Math.round(x), y: Math.round(y) };
+    }
+  }
+  return { x: Math.round(anchor.x), y: Math.round(anchor.y) };
+}

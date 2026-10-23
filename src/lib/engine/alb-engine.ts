@@ -8,7 +8,7 @@
  */
 import type { HealthCheck, ResourceOfType } from "./resource-models";
 import type { FailureInfo, SimStep } from "./simulation-log";
-import type { Eni, Topology } from "./topology-engine";
+import { displayName, type Eni, type Topology } from "./topology-engine";
 
 export type TargetHealthState = "healthy" | "unhealthy" | "unused" | "initial";
 
@@ -124,7 +124,7 @@ export function computeTargetHealth(topo: Topology, tgId: string, probe: HealthP
     const az = subnet?.config.availabilityZone ?? null;
     const base = {
       targetId: ec2.id,
-      targetName: ec2.name,
+      targetName: displayName(ec2),
       connectionId,
       availabilityZone: az,
     };

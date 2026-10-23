@@ -33,7 +33,7 @@ import {
   type PathHop,
   type SimStep,
 } from "./simulation-log";
-import { buildTopology, Topology, VIRTUAL_PUBLIC_POOL, type EffectiveRoute, type Eni } from "./topology-engine";
+import { buildTopology, Topology, VIRTUAL_PUBLIC_POOL, type EffectiveRoute, type Eni, displayName } from "./topology-engine";
 
 export type EndpointSpec =
   | { kind: "internet"; ip: string }
@@ -170,7 +170,7 @@ function checkSecurityGroups(
     matched: e.matches,
     decisive: e === decision.matched,
   }));
-  const groupNames = groups.map((g) => g.name).join(", ");
+  const groupNames = groups.map((g) => displayName(g)).join(", ");
   const peerWord = direction === "inbound" ? "출발지" : "목적지";
   if (decision.allowed) {
     log.pass({
@@ -907,7 +907,7 @@ function serveAlb(ctx: Ctx, nodeEni: Eni, pkt: Packet): void {
       kind: "target",
       category: "target",
       title: `${topo.label(tg.id)}에 등록된 대상이 없음 (HTTP 503, 가상)`,
-      reason: `대상 그룹 ${tg.name}에 등록된 EC2가 없어 ALB가 503 Service Unavailable을 반환합니다 (가상).`,
+      reason: `대상 그룹 ${displayName(tg)}에 등록된 EC2가 없어 ALB가 503 Service Unavailable을 반환합니다 (가상).`,
       resourceIds: [tg.id, alb.id],
       fixes: ["대상 그룹에 EC2를 등록하세요 (캔버스에서 Target Group → EC2 연결)."],
       concept: CONCEPT.alb,
@@ -919,7 +919,7 @@ function serveAlb(ctx: Ctx, nodeEni: Eni, pkt: Packet): void {
       kind: "target",
       category: "target",
       title: "요청을 받을 수 있는 대상이 없음 (HTTP 503, 가상)",
-      reason: `대상 그룹 ${tg.name}의 모든 대상이 사용 불가(Unused/Initial) 상태입니다: ${health.map((h) => `${h.targetName}(${h.reason})`).join("; ")}`,
+      reason: `대상 그룹 ${displayName(tg)}의 모든 대상이 사용 불가(Unused/Initial) 상태입니다: ${health.map((h) => `${h.targetName}(${h.reason})`).join("; ")}`,
       resourceIds: [tg.id, ...health.map((h) => h.targetId)],
       rules: healthRows,
       fixes: ["대상 인스턴스를 Running 상태로 만들고, ALB가 대상의 가용 영역 서브넷에도 배치되었는지 확인하세요."],
@@ -961,7 +961,7 @@ function serveAlb(ctx: Ctx, nodeEni: Eni, pkt: Packet): void {
     { kind: "eni", eni: nodeEni },
     targetEni.privateIp,
     { protocol: "tcp", port: tg.config.port, ephemeralPort: pkt.ephemeralPort },
-    `${alb.name} → ${chosen.targetName}`,
+    `${displayName(alb)} → ${chosen.targetName}`,
   );
   const target = topo.getOfType(chosen.targetId, "ec2");
   log.pass({
@@ -981,7 +981,7 @@ function runHealthProbe(topo: Topology, args: ProbeArgs, ephemeralPort: number):
       log.fail({
         kind: "target",
         category: "configuration",
-        title: `${args.target.name}의 사설 IP가 올바르지 않음`,
+        title: `${displayName(args.target)}의 사설 IP가 올바르지 않음`,
         resourceIds: [args.target.id],
       });
     }
@@ -990,7 +990,7 @@ function runHealthProbe(topo: Topology, args: ProbeArgs, ephemeralPort: number):
       { kind: "eni", eni: args.nodeEni },
       targetEni.privateIp,
       { protocol: "tcp", port: args.port, ephemeralPort },
-      `헬스 체크: ${args.alb.name} → ${args.target.name}`,
+      `헬스 체크: ${displayName(args.alb)} → ${displayName(args.target)}`,
     );
     return { connected: true, steps: log.steps, failure: null };
   } catch (e) {
@@ -1200,6 +1200,17 @@ function resolveDestination(ctx: Ctx, spec: EndpointSpec, origin: Origin): Resol
     }
     case "alb": {
       const name = topo.dnsName(r.id);
+      if (r.config.state !== "active") {
+        log.fail({
+          kind: "state",
+          category: "state",
+          title: `${topo.label(r.id)} 상태: ${r.config.state}`,
+          reason: `로드 밸런서가 아직 프로비저닝 중이어서(Provisioning) DNS 이름이 해석되지 않고 요청을 받을 수 없습니다.`,
+          resourceIds: [r.id],
+          fixes: ["로드 밸런서 상태가 Active가 될 때까지 기다린 뒤 다시 분석하세요."],
+          concept: CONCEPT.alb,
+        });
+      }
       requireDns(name);
       const nodes = topo.enisOf(r.id);
       if (!nodes.length) {

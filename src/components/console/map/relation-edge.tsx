@@ -53,7 +53,7 @@ export const RelationEdge = memo(function RelationEdge(props: EdgeProps<Relation
             style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}
           >
             <span>{data.label}</span>
-            {selected && (
+            {selected && deleteConnections && (
               <button
                 type="button"
                 className="rounded p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"

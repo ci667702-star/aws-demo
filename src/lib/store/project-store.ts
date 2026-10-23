@@ -3,7 +3,9 @@
 /**
  * 프로젝트 스토어 (Zustand).
  * - 브라우저 저장소에서 프로젝트를 복원하고 변경 시 자동 저장한다 (디바운스).
- * - 모든 편집은 apply()를 통해 순수 변경 연산(mutations.ts)을 실행하고 Undo/Redo 기록을 남긴다.
+ * - 모든 편집은 apply()를 통해 순수 변경 연산(console-actions.ts 등)을 실행하고 Undo/Redo 기록을 남긴다.
+ * - 첫 방문에도 예시 프로젝트를 만들어 두지 않는다. 사용자가 직접 샌드박스를 만들고 리소스를 구성한다.
+ * - pending/provisioning/creating 상태의 리소스는 잠시 후 사용 가능 상태로 바뀐다 (lifecycle.ts).
  */
 import { create } from "zustand";
 import type { Project, Viewport } from "@/lib/engine/resource-models";
@@ -15,8 +17,9 @@ import {
   setViewport as withViewport,
   type MutationResult,
 } from "@/lib/project/mutations";
+import { advanceLifecycle, pendingTransitions } from "@/lib/project/lifecycle";
 import { browserStorage, loadProjects, saveProjects, type StorageLike } from "@/lib/project/persistence";
-import { createThreeTierSample, SAMPLES } from "@/lib/project/samples";
+import { SAMPLES } from "@/lib/project/samples";
 import { createId } from "@/lib/engine/ids";
 
 export const HISTORY_LIMIT = 100;
@@ -55,6 +58,8 @@ interface ProjectStoreState {
   duplicateProject: (id: string) => string | null;
   deleteProject: (id: string) => void;
   apply: (projectId: string, label: string, mutate: (project: Project) => MutationResult) => MutationResult;
+  /** 실행 취소 기록 없이 프로젝트를 갱신한다 (상태 전이, 분석 결과 기록 등). null을 돌려주면 변경하지 않는다. */
+  updateWithoutHistory: (projectId: string, update: (project: Project) => Project | null) => boolean;
   setViewport: (projectId: string, viewport: Viewport) => void;
   undo: (projectId: string) => boolean;
   redo: (projectId: string) => boolean;
@@ -109,19 +114,12 @@ export const useProjectStore = create<ProjectStoreState>()((set, get) => {
       const result = loadProjects(storageRef);
       const projects: Record<string, Project> = {};
       for (const p of result.projects) projects[p.id] = p;
-      let seeded = false;
-      if (result.firstRun && storageRef) {
-        const example = createThreeTierSample();
-        projects[example.id] = example;
-        seeded = true;
-      }
       set({
         status: "ready",
         projects,
         loadErrors: result.errors,
         saveStatus: storageRef ? "saved" : "unavailable",
       });
-      if (seeded) scheduleSave();
     },
 
     createProject: (name, description = "") => putProject(createEmptyProject(name, { description })),
@@ -197,6 +195,16 @@ export const useProjectStore = create<ProjectStoreState>()((set, get) => {
       return result;
     },
 
+    updateWithoutHistory: (projectId, update) => {
+      const current = get().projects[projectId];
+      if (!current) return false;
+      const next = update(current);
+      if (!next || next === current) return false;
+      set((s) => ({ projects: { ...s.projects, [projectId]: next } }));
+      scheduleSave();
+      return true;
+    },
+
     setViewport: (projectId, viewport) => {
       const current = get().projects[projectId];
       if (!current) return;
@@ -244,10 +252,51 @@ export const useProjectStore = create<ProjectStoreState>()((set, get) => {
   };
 });
 
+// ---------------------------------------------------------------- 수명 주기 타이머
+
+const lifecycleTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+const STATE_LABEL: Record<string, string> = {
+  running: "Running",
+  available: "Available",
+  active: "Active",
+};
+
+/** 현재 프로젝트들에서 상태 전이를 기다리는 리소스마다 타이머를 하나씩 건다. */
+function syncLifecycleTimers(projects: Record<string, Project>) {
+  for (const project of Object.values(projects)) {
+    for (const t of pendingTransitions(project)) {
+      const key = `${project.id}:${t.resourceId}:${t.from}`;
+      if (lifecycleTimers.has(key)) continue;
+      lifecycleTimers.set(
+        key,
+        setTimeout(() => {
+          lifecycleTimers.delete(key);
+          const store = useProjectStore.getState();
+          const changed = store.updateWithoutHistory(project.id, (p) => advanceLifecycle(p, t.resourceId, t.from, t.to));
+          if (changed) {
+            store.log({ projectId: project.id, kind: "system", message: `${t.resourceId} 상태 변경: ${t.from} → ${STATE_LABEL[t.to] ?? t.to}` });
+          }
+        }, t.delayMs),
+      );
+    }
+  }
+}
+
+useProjectStore.subscribe((state, previous) => {
+  if (state.projects !== previous.projects) syncLifecycleTimers(state.projects);
+});
+
+function clearLifecycleTimers() {
+  for (const timer of lifecycleTimers.values()) clearTimeout(timer);
+  lifecycleTimers.clear();
+}
+
 /** 테스트용: 스토어를 초기 상태로 되돌린다. */
 export function resetProjectStore() {
   if (saveTimer) clearTimeout(saveTimer);
   saveTimer = null;
+  clearLifecycleTimers();
   storageRef = null;
   useProjectStore.setState({
     status: "idle",

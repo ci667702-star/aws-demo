@@ -11,6 +11,7 @@ export const RESOURCE_TYPES = [
   "vpc",
   "subnet",
   "internet-gateway",
+  "elastic-ip",
   "route-table",
   "nat-gateway",
   "security-group",
@@ -112,6 +113,8 @@ export const configSchemas = {
     cidr: cidrText,
     enableDnsSupport: z.boolean(),
     enableDnsHostnames: z.boolean(),
+    /** AWS 기본 VPC 여부 (콘솔의 "기본 VPC 생성"으로 만든 VPC) */
+    isDefault: z.boolean().default(false),
   }),
   subnet: z.object({
     cidr: cidrText,
@@ -119,6 +122,10 @@ export const configSchemas = {
     mapPublicIpOnLaunch: z.boolean(),
   }),
   "internet-gateway": z.object({}),
+  "elastic-ip": z.object({
+    /** 할당 시 정해지는 가상 퍼블릭 IPv4 주소 (실제 공인 IP 아님) */
+    publicIp: ipText,
+  }),
   "route-table": z.object({
     /** VPC의 기본(main) 라우팅 테이블 여부. 명시적 연결이 없는 서브넷이 사용한다. */
     main: z.boolean(),
@@ -130,10 +137,14 @@ export const configSchemas = {
     description: z.string().max(255),
     inboundRules: z.array(sgRuleSchema).max(60),
     outboundRules: z.array(sgRuleSchema).max(60),
+    /** VPC를 만들 때 AWS가 자동으로 만드는 기본 보안 그룹 여부 (삭제 불가) */
+    isDefault: z.boolean().default(false),
   }),
   "network-acl": z.object({
     inboundRules: z.array(naclRuleSchema).max(40),
     outboundRules: z.array(naclRuleSchema).max(40),
+    /** VPC를 만들 때 AWS가 자동으로 만드는 기본 네트워크 ACL 여부 (삭제 불가) */
+    isDefault: z.boolean().default(false),
   }),
   ec2: z.object({
     ami: z.enum(EC2_AMIS),
@@ -145,10 +156,13 @@ export const configSchemas = {
     listenPorts: z.array(port).max(20),
     /** HTTP 요청(헬스 체크 포함)에 대한 가상 애플리케이션 응답 코드. */
     httpResponseCode: z.number().int().min(100).max(599),
+    /** 가상 사용자 데이터 (표시용 스크립트, 실행되지 않음) */
+    userData: z.string().max(16384).default(""),
   }),
   alb: z.object({
     scheme: z.enum(["internet-facing", "internal"]),
     listeners: z.array(listenerSchema).max(10),
+    state: z.enum(["provisioning", "active"]).default("active"),
   }),
   "target-group": z.object({
     protocol: z.enum(["HTTP", "HTTPS"]),
@@ -165,7 +179,7 @@ export const configSchemas = {
     publiclyAccessible: z.boolean(),
     multiAz: z.boolean(),
     allocatedStorageGb: z.number().int().min(20).max(65536),
-    state: z.enum(["available", "stopped"]),
+    state: z.enum(["creating", "available", "stopped"]),
   }),
 } as const;
 
@@ -173,7 +187,8 @@ export const positionSchema = z.object({ x: z.number(), y: z.number() });
 
 const resourceBase = {
   id,
-  name: z.string().trim().min(1).max(128),
+  /** Name 태그. AWS처럼 선택 사항이며 비어 있으면 ID로 표시한다. */
+  name: z.string().trim().max(128),
   position: positionSchema,
 };
 
@@ -181,6 +196,7 @@ export const resourceSchema = z.discriminatedUnion("type", [
   z.object({ ...resourceBase, type: z.literal("vpc"), config: configSchemas.vpc }),
   z.object({ ...resourceBase, type: z.literal("subnet"), config: configSchemas.subnet }),
   z.object({ ...resourceBase, type: z.literal("internet-gateway"), config: configSchemas["internet-gateway"] }),
+  z.object({ ...resourceBase, type: z.literal("elastic-ip"), config: configSchemas["elastic-ip"] }),
   z.object({ ...resourceBase, type: z.literal("route-table"), config: configSchemas["route-table"] }),
   z.object({ ...resourceBase, type: z.literal("nat-gateway"), config: configSchemas["nat-gateway"] }),
   z.object({ ...resourceBase, type: z.literal("security-group"), config: configSchemas["security-group"] }),
@@ -216,6 +232,9 @@ export const RELATION_TYPES = [
   "db-subnet-group-subnet",
   "rds-db-subnet-group",
   "rds-security-group",
+  "elastic-ip-nat-gateway",
+  "elastic-ip-ec2",
+  "vpc-target-group",
 ] as const;
 export type RelationType = (typeof RELATION_TYPES)[number];
 
@@ -260,6 +279,37 @@ export type Connection = z.infer<typeof connectionSchema>;
 export type RouteConnection = Extract<Connection, { relationType: RouteRelationType }>;
 export type ListenerForwardConnection = Extract<Connection, { relationType: "alb-target-group" }>;
 
+export const endpointSpecSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("internet"), ip: z.string().max(64) }),
+  z.object({ kind: z.literal("resource"), resourceId: id, addressing: z.enum(["auto", "private", "public"]).optional() }),
+]);
+
+export const simulationRequestSchema = z.object({
+  source: endpointSpecSchema,
+  destination: endpointSpecSchema,
+  protocol: z.enum(["tcp", "udp", "icmp"]),
+  port: z.number().int().min(0).max(65535),
+  ephemeralPort: z.number().int().min(1024).max(65535).optional(),
+  requestCount: z.number().int().min(1).max(100).optional(),
+});
+
+/** Reachability Analyzer처럼 저장해 두고 반복 분석하는 네트워크 경로 */
+export const networkPathSchema = z.object({
+  id,
+  name: z.string().trim().max(128).default(""),
+  request: simulationRequestSchema,
+  createdAt: z.string().min(1),
+  lastAnalysis: z
+    .object({
+      at: z.string().min(1),
+      outcome: z.enum(["success", "failure", "invalid-request", "engine-error"]),
+      summary: z.string().max(2000),
+    })
+    .nullable()
+    .default(null),
+});
+export type NetworkPath = z.infer<typeof networkPathSchema>;
+
 export const viewportSchema = z.object({
   x: z.number(),
   y: z.number(),
@@ -297,6 +347,7 @@ export const projectSchema = z.object({
   updatedAt: z.string().min(1),
   labId: z.string().nullable().default(null),
   costAssumptions: costAssumptionsSchema.nullable().default(null),
+  networkPaths: z.array(networkPathSchema).max(200).default([]),
 });
 export type Project = z.infer<typeof projectSchema>;
 
@@ -325,6 +376,8 @@ export interface RelationSpec {
   maxPerSource?: number;
   /** 하나의 target이 가질 수 있는 최대 연결 수 */
   maxPerTarget?: number;
+  /** AWS에서 리소스를 만들 때 정해지고 이후 변경할 수 없는 관계 */
+  immutable?: boolean;
 }
 
 export const RELATION_SPECS: Record<RelationType, RelationSpec> = {
@@ -336,6 +389,7 @@ export const RELATION_SPECS: Record<RelationType, RelationSpec> = {
     description: "서브넷은 정확히 하나의 VPC에 속하며 VPC CIDR 범위 안의 주소를 사용합니다.",
     category: "membership",
     maxPerTarget: 1,
+    immutable: true,
   },
   "vpc-internet-gateway": {
     type: "vpc-internet-gateway",
@@ -355,6 +409,7 @@ export const RELATION_SPECS: Record<RelationType, RelationSpec> = {
     description: "라우팅 테이블은 하나의 VPC에 속합니다.",
     category: "membership",
     maxPerTarget: 1,
+    immutable: true,
   },
   "vpc-security-group": {
     type: "vpc-security-group",
@@ -364,6 +419,7 @@ export const RELATION_SPECS: Record<RelationType, RelationSpec> = {
     description: "보안 그룹은 하나의 VPC에 속하며 같은 VPC의 리소스에만 연결할 수 있습니다.",
     category: "membership",
     maxPerTarget: 1,
+    immutable: true,
   },
   "vpc-network-acl": {
     type: "vpc-network-acl",
@@ -373,6 +429,7 @@ export const RELATION_SPECS: Record<RelationType, RelationSpec> = {
     description: "네트워크 ACL은 하나의 VPC에 속합니다.",
     category: "membership",
     maxPerTarget: 1,
+    immutable: true,
   },
   "route-table-subnet": {
     type: "route-table-subnet",
@@ -416,6 +473,7 @@ export const RELATION_SPECS: Record<RelationType, RelationSpec> = {
     description: "퍼블릭 NAT 게이트웨이는 하나의 (퍼블릭) 서브넷에 배치됩니다.",
     category: "placement",
     maxPerSource: 1,
+    immutable: true,
   },
   "ec2-subnet": {
     type: "ec2-subnet",
@@ -425,6 +483,7 @@ export const RELATION_SPECS: Record<RelationType, RelationSpec> = {
     description: "EC2 인스턴스의 기본 네트워크 인터페이스는 하나의 서브넷에 배치됩니다.",
     category: "placement",
     maxPerSource: 1,
+    immutable: true,
   },
   "ec2-security-group": {
     type: "ec2-security-group",
@@ -484,6 +543,38 @@ export const RELATION_SPECS: Record<RelationType, RelationSpec> = {
     description: "RDS 인스턴스는 DB 서브넷 그룹의 서브넷에 배치됩니다.",
     category: "placement",
     maxPerSource: 1,
+    immutable: true,
+  },
+  "elastic-ip-nat-gateway": {
+    type: "elastic-ip-nat-gateway",
+    source: "elastic-ip",
+    target: "nat-gateway",
+    label: "EIP",
+    description: "퍼블릭 NAT 게이트웨이는 만들 때 탄력적 IP 하나를 지정하며, 이 주소로 아웃바운드 트래픽을 변환합니다.",
+    category: "attachment",
+    maxPerSource: 1,
+    maxPerTarget: 1,
+    immutable: true,
+  },
+  "elastic-ip-ec2": {
+    type: "elastic-ip-ec2",
+    source: "elastic-ip",
+    target: "ec2",
+    label: "EIP 연결",
+    description: "탄력적 IP를 인스턴스에 연결하면 고정 퍼블릭 IPv4 주소가 됩니다. 인스턴스의 VPC에 인터넷 게이트웨이가 연결되어 있어야 합니다.",
+    category: "attachment",
+    maxPerSource: 1,
+    maxPerTarget: 1,
+  },
+  "vpc-target-group": {
+    type: "vpc-target-group",
+    source: "vpc",
+    target: "target-group",
+    label: "소속",
+    description: "대상 그룹은 만들 때 지정한 VPC에 속하며, 같은 VPC의 인스턴스만 대상으로 등록할 수 있습니다.",
+    category: "membership",
+    maxPerTarget: 1,
+    immutable: true,
   },
   "rds-security-group": {
     type: "rds-security-group",
@@ -549,6 +640,14 @@ export const RESOURCE_TYPE_INFO: Record<ResourceType, ResourceTypeInfo> = {
     idPrefix: "igw",
     category: "networking",
     description: "VPC와 인터넷 사이의 통신을 가능하게 하는 게이트웨이.",
+  },
+  "elastic-ip": {
+    type: "elastic-ip",
+    label: "Elastic IP",
+    shortLabel: "EIP",
+    idPrefix: "eipalloc",
+    category: "networking",
+    description: "계정에 할당해 두는 고정 퍼블릭 IPv4 주소 (시뮬레이터에서는 문서화용 대역의 가상 주소).",
   },
   "route-table": {
     type: "route-table",

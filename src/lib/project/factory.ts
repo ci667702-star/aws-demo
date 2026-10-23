@@ -3,7 +3,7 @@
  * 기본값은 AWS 콘솔의 일반적인 기본 동작을 따른다
  * (예: 새 보안 그룹은 아웃바운드 전체 허용, 새 사용자 지정 NACL은 모든 트래픽 거부).
  */
-import { nextAvailableSubnet, nextAvailableVpcCidr, tryParseCidr, type Cidr } from "@/lib/engine/cidr-utils";
+import { formatIpv4, nextAvailableSubnet, nextAvailableVpcCidr, parseIpv4, tryParseCidr, type Cidr } from "@/lib/engine/cidr-utils";
 import { createId } from "@/lib/engine/ids";
 import {
   AVAILABILITY_ZONES,
@@ -21,11 +21,13 @@ import {
   type RuleProtocol,
   type SgRule,
 } from "@/lib/engine/resource-models";
+import { buildTopology, VIRTUAL_PUBLIC_POOL } from "@/lib/engine/topology-engine";
 
 export const DEFAULT_NAME_BASE: Record<ResourceType, string> = {
   vpc: "vpc",
   subnet: "subnet",
   "internet-gateway": "igw",
+  "elastic-ip": "eip",
   "route-table": "rtb",
   "nat-gateway": "nat",
   "security-group": "sg",
@@ -110,6 +112,31 @@ export function newListener(protocol: Listener["protocol"] = "HTTP", port = 80):
   return { id: createId("lsn"), protocol, port };
 }
 
+/**
+ * 아직 쓰이지 않은 가상 퍼블릭 IPv4 주소 (탄력적 IP 할당용).
+ * 기존 탄력적 IP와 현재 자동 할당된 퍼블릭 IP를 피해서, 198.51.100.10부터 차례로 고른다.
+ */
+export function allocateVirtualPublicIp(project: Project): string | null {
+  const pool = tryParseCidr(VIRTUAL_PUBLIC_POOL)!;
+  const used = new Set<number>();
+  for (const r of project.resources) {
+    if (r.type === "elastic-ip") {
+      const ip = parseIpv4(r.config.publicIp);
+      if (ip !== null) used.add(ip);
+    }
+  }
+  for (const eni of buildTopology(project).enis()) if (eni.publicIp !== null) used.add(eni.publicIp);
+  for (let offset = 10; offset < 255; offset++) {
+    const ip = (pool.network + offset) >>> 0;
+    if (!used.has(ip)) return formatIpv4(ip);
+  }
+  for (let offset = 1; offset < 10; offset++) {
+    const ip = (pool.network + offset) >>> 0;
+    if (!used.has(ip)) return formatIpv4(ip);
+  }
+  return null;
+}
+
 function existingCidrs(project: Project, type: "vpc" | "subnet"): Cidr[] {
   return project.resources
     .filter((r) => r.type === type)
@@ -123,6 +150,7 @@ export function defaultConfig<T extends ResourceType>(type: T, project: Project)
       cidr: nextAvailableVpcCidr(existingCidrs(project, "vpc")).text,
       enableDnsSupport: true,
       enableDnsHostnames: true,
+      isDefault: false,
     }),
     subnet: () => {
       const vpcs = project.resources.filter((r): r is ResourceOfType<"vpc"> => r.type === "vpc");
@@ -136,14 +164,16 @@ export function defaultConfig<T extends ResourceType>(type: T, project: Project)
       };
     },
     "internet-gateway": () => ({}),
+    "elastic-ip": () => ({ publicIp: allocateVirtualPublicIp(project) ?? "" }),
     "route-table": () => ({ main: false }),
     "nat-gateway": () => ({ state: "available" as const }),
     "security-group": () => ({
       description: "",
       inboundRules: [],
       outboundRules: [SG.all("0.0.0.0/0", "기본 아웃바운드 전체 허용")],
+      isDefault: false,
     }),
-    "network-acl": () => ({ inboundRules: [], outboundRules: [] }),
+    "network-acl": () => ({ inboundRules: [], outboundRules: [], isDefault: false }),
     ec2: () => ({
       ami: "amazon-linux-2023" as const,
       instanceType: "t3.micro" as const,
@@ -152,8 +182,9 @@ export function defaultConfig<T extends ResourceType>(type: T, project: Project)
       state: "running" as const,
       listenPorts: [22, 80],
       httpResponseCode: 200,
+      userData: "",
     }),
-    alb: () => ({ scheme: "internet-facing" as const, listeners: [newListener("HTTP", 80)] }),
+    alb: () => ({ scheme: "internet-facing" as const, listeners: [newListener("HTTP", 80)], state: "active" as const }),
     "target-group": () => ({ protocol: "HTTP" as const, port: 80, healthCheck: { ...DEFAULT_HEALTH_CHECK } }),
     "db-subnet-group": () => ({ description: "" }),
     rds: () => ({
@@ -202,6 +233,7 @@ export function createEmptyProject(name: string, options: { description?: string
     updatedAt: now,
     labId: options.labId ?? null,
     costAssumptions: null,
+    networkPaths: [],
   };
 }
 

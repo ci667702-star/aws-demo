@@ -14,7 +14,7 @@ function sg(id: string, inbound: ReturnType<typeof SG.tcp>[], outbound: ReturnTy
     type: "security-group",
     name: id,
     position: { x: 0, y: 0 },
-    config: { description: "", inboundRules: inbound, outboundRules: outbound },
+    config: { description: "", inboundRules: inbound, outboundRules: outbound, isDefault: false },
   };
 }
 

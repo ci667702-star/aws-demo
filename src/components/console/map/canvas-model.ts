@@ -11,7 +11,7 @@ import {
   type RelationCategory,
   type Resource,
 } from "@/lib/engine/resource-models";
-import type { SubnetKind, Topology } from "@/lib/engine/topology-engine";
+import { displayName, type SubnetKind, type Topology } from "@/lib/engine/topology-engine";
 import type { ValidationFinding } from "@/lib/engine/validation-engine";
 import type { Tone } from "@/components/resource-visuals";
 import { NODE_HEIGHT, NODE_WIDTH } from "@/lib/project/layout";
@@ -100,6 +100,13 @@ export function describeResource(
       return {
         subtitle: vpc ? `연결: ${topo.name(vpc)}` : "VPC 미연결",
         badges: vpc ? [{ label: "Attached", tone: "ok" }] : [{ label: "Detached", tone: "warn" }],
+      };
+    }
+    case "elastic-ip": {
+      const target = topo.elasticIpTarget(r.id);
+      return {
+        subtitle: `${r.config.publicIp} (가상)`,
+        badges: target ? [{ label: `연결: ${topo.name(target.id)}`, tone: "ok" }] : [{ label: "미연결", tone: "warn" }],
       };
     }
     case "route-table": {
@@ -231,7 +238,7 @@ export function computeZones(topo: Topology, positions: Positions, sizes: Sizes)
         resourceId: vpc.id,
         kind: "vpc",
         ...box,
-        label: `VPC ${vpc.name}`,
+        label: `VPC ${displayName(vpc)}`,
         detail: vpc.config.cidr,
         tone: "vpc",
       });
@@ -251,7 +258,7 @@ export function computeZones(topo: Topology, positions: Positions, sizes: Sizes)
         resourceId: subnet.id,
         kind: "subnet",
         ...box,
-        label: `${subnet.name}`,
+        label: displayName(subnet),
         detail: `${SUBNET_KIND_LABEL[cls.kind]} · ${subnet.config.cidr}`,
         tone: cls.kind,
       });
@@ -262,40 +269,7 @@ export function computeZones(topo: Topology, positions: Positions, sizes: Sizes)
 
 export const DEFAULT_NODE_SIZE = { width: NODE_WIDTH, height: NODE_HEIGHT };
 
-export interface Rect {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
-/** anchor 주변에서 기존 노드와 겹치지 않는 가장 가까운 격자 위치를 찾는다. */
-export function findFreePosition(anchor: { x: number; y: number }, occupied: Rect[], size = DEFAULT_NODE_SIZE): { x: number; y: number } {
-  const gapX = size.width + 32;
-  const gapY = size.height + 32;
-  const margin = 12;
-  const overlaps = (x: number, y: number) =>
-    occupied.some(
-      (r) => x < r.x + r.width + margin && x + size.width + margin > r.x && y < r.y + r.height + margin && y + size.height + margin > r.y,
-    );
-  for (let ring = 0; ring <= 10; ring++) {
-    const candidates: [number, number][] = [];
-    for (let j = -ring; j <= ring; j++) {
-      for (let i = -ring; i <= ring; i++) {
-        if (Math.max(Math.abs(i), Math.abs(j)) !== ring) continue;
-        candidates.push([i, j]);
-      }
-    }
-    // 오른쪽/아래쪽을 먼저 시도한다
-    candidates.sort((a, b) => b[1] - a[1] || b[0] - a[0]).sort((a, b) => Math.abs(a[0]) + Math.abs(a[1]) - (Math.abs(b[0]) + Math.abs(b[1])));
-    for (const [i, j] of candidates) {
-      const x = anchor.x + i * gapX;
-      const y = anchor.y + j * gapY;
-      if (!overlaps(x, y)) return { x: Math.round(x), y: Math.round(y) };
-    }
-  }
-  return { x: Math.round(anchor.x), y: Math.round(anchor.y) };
-}
+export { findFreePosition, type Rect } from "@/lib/project/layout";
 
 // ---------------------------------------------------------------- 연결선
 

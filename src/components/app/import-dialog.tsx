@@ -74,9 +74,9 @@ export function ImportDialog({
     >
       <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>프로젝트 JSON 가져오기</DialogTitle>
+          <DialogTitle>샌드박스 JSON 가져오기</DialogTitle>
           <DialogDescription>
-            내보낸 프로젝트 파일을 선택하거나 JSON을 붙여넣으세요. 검증을 통과하면 새 프로젝트로 추가되며 기존 프로젝트는 변경되지
+            내보낸 샌드박스 파일을 선택하거나 JSON을 붙여넣으세요. 검증을 통과하면 새 샌드박스로 추가되며 기존 샌드박스는 변경되지
             않습니다.
           </DialogDescription>
         </DialogHeader>
@@ -119,7 +119,7 @@ export function ImportDialog({
           </div>
           {errors.length > 0 && (
             <div role="alert" className="max-h-48 overflow-auto rounded-md border border-destructive/40 bg-destructive/5 p-3 text-xs text-destructive">
-              <p className="mb-1 font-medium">가져오기 실패 — 현재 프로젝트는 변경되지 않았습니다.</p>
+              <p className="mb-1 font-medium">가져오기 실패 — 기존 샌드박스는 변경되지 않았습니다.</p>
               <ul className="list-disc space-y-0.5 pl-4">
                 {errors.map((e, i) => (
                   <li key={i}>{e}</li>

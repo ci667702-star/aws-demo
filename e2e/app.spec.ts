@@ -1,139 +1,150 @@
 import { expect, test, type Page } from "@playwright/test";
 
-async function openExample(page: Page) {
+/** 첫 화면에서 빈 샌드박스를 만들고 콘솔 홈으로 이동한다 */
+async function createSandbox(page: Page, name: string) {
   await page.goto("/");
-  await page.getByRole("link", { name: "예시: 3-Tier 웹 아키텍처" }).first().click();
-  await expect(page.getByTestId("builder")).toBeVisible();
-  await expect(page.getByTestId("node-web-alb")).toBeVisible();
+  await page.getByRole("button", { name: "샌드박스 생성" }).first().click();
+  await page.getByRole("dialog").getByLabel("이름").fill(name);
+  await page.getByRole("button", { name: "생성 후 콘솔 열기" }).click();
+  await expect(page).toHaveURL(/\/console\/proj-[^#]+#\/$/);
+  await expect(page.getByRole("heading", { name: "콘솔 홈", level: 1 })).toBeVisible();
 }
 
-async function handleCenter(page: Page, nodeName: string, position: "top" | "bottom") {
-  const handle = page.getByTestId(`node-${nodeName}`).locator("..").locator(`.react-flow__handle-${position}`);
-  const box = await handle.boundingBox();
-  if (!box) throw new Error(`handle not visible: ${nodeName} ${position}`);
-  return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+async function go(page: Page, hash: string) {
+  await page.evaluate((h) => (window.location.hash = h), hash);
 }
 
-test("첫 방문 시 예시 프로젝트가 있고, 새 프로젝트를 만들어 빌더로 이동한다", async ({ page }) => {
+/** 콘솔 화면만으로 퍼블릭 웹 서버를 구성한다 (앱이 대신 설정하는 것 없음) */
+async function buildPublicWebServer(page: Page) {
+  // VPC
+  await go(page, "#/vpc/vpcs/create");
+  await page.getByLabel("IPv4 CIDR", { exact: true }).fill("10.0.0.0/16");
+  await page.getByLabel(/이름 태그/).fill("e2e-vpc");
+  await page.getByRole("button", { name: "VPC 생성" }).click();
+  await expect(page.getByRole("heading", { name: /vpc-.+ \/ e2e-vpc/, level: 1 })).toBeVisible();
+
+  // 서브넷
+  await go(page, "#/vpc/subnets/create");
+  await page.getByLabel("VPC ID").selectOption({ index: 1 });
+  await page.getByLabel("서브넷 이름").fill("public-a");
+  await page.getByLabel("가용 영역").selectOption("ap-northeast-2a");
+  await page.getByLabel(/IPv4 서브넷 CIDR 블록/).fill("10.0.1.0/24");
+  await page.getByRole("button", { name: "서브넷 생성" }).click();
+  await expect(page.getByRole("heading", { name: /subnet-.+ \/ public-a/, level: 1 })).toBeVisible();
+
+  // 인터넷 게이트웨이 생성 → 알림의 "VPC에 연결" → 연결
+  await go(page, "#/vpc/igws/create");
+  await page.getByRole("button", { name: "인터넷 게이트웨이 생성" }).click();
+  await page.getByTestId("flashbar").getByRole("link", { name: "VPC에 연결" }).click();
+  await page.getByLabel("사용 가능한 VPC").selectOption({ index: 1 });
+  await page.getByRole("button", { name: "인터넷 게이트웨이 연결" }).click();
+  await expect(page.getByText("Attached").first()).toBeVisible();
+
+  // 기본 라우팅 테이블에 0.0.0.0/0 → IGW
+  await go(page, "#/vpc/route-tables");
+  await page.getByRole("table", { name: "라우팅 테이블 목록" }).getByRole("radio").first().check();
+  await page.getByRole("button", { name: "작업" }).click();
+  await page.getByRole("menuitem", { name: "라우팅 편집" }).click();
+  await page.getByRole("button", { name: "라우팅 추가" }).click();
+  await page.getByLabel("경로 1 대상 CIDR").fill("0.0.0.0/0");
+  await page.getByLabel("경로 1 대상 리소스").selectOption({ index: 1 });
+  await page.getByRole("button", { name: "변경 사항 저장" }).click();
+  await expect(page.getByRole("table", { name: "경로" })).toContainText("0.0.0.0/0");
+
+  // 인스턴스 시작
+  await go(page, "#/ec2/instances/launch");
+  await page.getByLabel("이름", { exact: true }).fill("web-1");
+  await page.getByLabel("서브넷").selectOption({ index: 1 });
+  await page.getByLabel("퍼블릭 IP 자동 할당").selectOption("enabled");
+  await page.getByRole("checkbox", { name: /인터넷에서 HTTP 트래픽 허용/ }).check();
+  await page.getByRole("radio", { name: /웹 서버 설치/ }).check();
+  await page.getByRole("button", { name: "인스턴스 시작" }).click();
+  await expect(page.getByRole("heading", { name: /인스턴스 요약/, level: 1 })).toBeVisible();
+  await expect(page.getByText("실행 중 (Running)").first()).toBeVisible({ timeout: 15_000 });
+}
+
+test("첫 화면에는 미리 만든 프로젝트가 없고, 새 샌드박스는 리소스 없이 시작한다", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: /클라우드 인프라를 설계하고/ })).toBeVisible();
-  await expect(page.getByTestId("project-card").first()).toContainText("예시: 3-Tier 웹 아키텍처");
-  await expect(page.getByText(/제휴하지 않은 독립 학습용 시뮬레이터/)).toBeVisible();
-
-  await page.getByRole("button", { name: "새 프로젝트" }).first().click();
-  await page.getByLabel("이름").fill("E2E 프로젝트");
-  await page.getByRole("button", { name: "만들기" }).click();
-  await expect(page).toHaveURL(/\/projects\/proj-/);
-  await expect(page.getByTestId("project-name")).toHaveText("E2E 프로젝트");
-  await expect(page.getByText("빈 캔버스입니다")).toBeVisible();
+  await expect(page.getByText("샌드박스 없음")).toBeVisible();
+  await expect(page.getByText(/제휴하지 않은 독립 프로젝트/)).toBeVisible();
+  await createSandbox(page, "E2E 빈 샌드박스");
+  await go(page, "#/vpc/vpcs");
+  await expect(page.getByText("VPC 없음")).toBeVisible();
+  await go(page, "#/ec2/instances");
+  await expect(page.getByText("인스턴스 없음")).toBeVisible();
 });
 
-test("리소스를 추가하고 연결점을 드래그해 관계를 만들고, 삭제한다", async ({ page }) => {
-  await page.goto("/");
-  await page.getByRole("button", { name: "새 프로젝트" }).first().click();
-  await page.getByLabel("이름").fill("연결 테스트");
-  await page.getByRole("button", { name: "만들기" }).click();
-  await expect(page.getByTestId("builder")).toBeVisible();
+test("콘솔 화면만으로 퍼블릭 웹 서버를 구성하고 Reachability Analyzer로 도달 가능을 확인한다", async ({ page }) => {
+  await createSandbox(page, "E2E 웹 서버");
+  await buildPublicWebServer(page);
 
-  await page.getByTestId("palette-vpc").click();
-  await expect(page.getByTestId("node-vpc-1")).toBeVisible();
-  await page.locator(".react-flow__pane").click({ position: { x: 20, y: 20 } });
-  await page.getByTestId("palette-subnet").click();
-  await expect(page.getByTestId("node-subnet-1")).toBeVisible();
-  await page.getByRole("button", { name: "자동 정렬" }).click();
-  await page.locator(".react-flow__controls-fitview").click();
+  await go(page, "#/vpc/reachability/create");
+  await page.getByLabel("대상", { exact: true }).selectOption({ index: 1 });
+  await page.getByRole("button", { name: "경로 생성 및 분석" }).click();
+  await expect(page.getByTestId("analysis-outcome")).toHaveAttribute("data-outcome", "success");
+  await expect(page.getByTestId("analysis-steps")).toContainText("보안 그룹");
 
-  // 서브넷은 아직 VPC에 속하지 않는다 → 검증 오류
-  await expect(page.getByTestId("tab-validation")).toContainText("1");
+  // 리소스 맵에서 경로 표시
+  await page.getByRole("link", { name: "리소스 맵에서 보기" }).click();
+  await expect(page.getByTestId("resource-map")).toBeVisible();
+  await expect(page.locator(".react-flow__node-resource").first()).toBeVisible();
+  expect(await page.locator(".react-flow__node-resource").count()).toBeGreaterThanOrEqual(6);
 
-  const from = await handleCenter(page, "vpc-1", "bottom");
-  const to = await handleCenter(page, "subnet-1", "top");
-  await page.mouse.move(from.x, from.y);
-  await page.mouse.down();
-  await page.mouse.move((from.x + to.x) / 2, (from.y + to.y) / 2, { steps: 5 });
-  await page.mouse.move(to.x, to.y, { steps: 5 });
-  await page.mouse.up();
-  await expect(page.locator(".react-flow__edge")).toHaveCount(1);
-  await expect(page.getByText(/연결됨/).first()).toBeVisible();
-  await expect(page.getByTestId("tab-validation")).not.toContainText(/\d/);
-
-  // 연결선 선택 후 삭제
-  await page.locator(".react-flow__edge").first().click({ force: true });
-  const deleteButton = page.getByTestId("inspector").getByRole("button", { name: "연결 삭제" });
-  await expect(deleteButton).toBeVisible();
-  await deleteButton.click();
-  await expect(page.locator(".react-flow__edge")).toHaveCount(0);
-
-  // 실행 취소로 연결 복원
-  await page.locator(".react-flow__pane").click({ position: { x: 20, y: 20 } });
-  await page.keyboard.press("Control+z");
-  await expect(page.locator(".react-flow__edge")).toHaveCount(1);
-});
-
-test("설정 패널은 잘못된 CIDR을 거부한다", async ({ page }) => {
-  await openExample(page);
-  await page.locator(".react-flow__controls-fitview").click();
-  await page.getByTestId("node-main-vpc").click();
-  const cidr = page.getByTestId("vpc-cidr");
-  await cidr.fill("10.0.0.0/33");
-  await cidr.press("Enter");
-  await expect(page.getByRole("alert").filter({ hasText: "접두사 길이" })).toBeVisible();
-  await cidr.press("Escape");
-  await expect(cidr).toHaveValue("10.0.0.0/16");
-});
-
-test("시뮬레이션: 인터넷 → ALB 요청이 성공하고 두 EC2로 분산된다", async ({ page }) => {
-  await openExample(page);
-  await page.getByTestId("open-simulation").click();
-  await page.getByRole("button", { name: /인터넷 → web-alb:80/ }).click();
-  const result = page.getByTestId("simulation-result");
-  await expect(result).toHaveAttribute("data-outcome", "success");
-  await expect(page.getByTestId("distribution")).toContainText("app-1");
-  await expect(page.getByTestId("distribution")).toContainText("app-2");
-  await expect(page.locator(".react-flow__edge.path-active").first()).toBeVisible();
-});
-
-test("시뮬레이션: EC2를 중지하면 실패 원인이 바뀐다", async ({ page }) => {
-  await openExample(page);
-  await page.locator(".react-flow__controls-fitview").click();
-  for (const name of ["app-1", "app-2"]) {
-    await page.getByTestId(`node-${name}`).click();
-    await page.getByRole("button", { name: "중지" }).click();
-    await expect(page.getByTestId(`node-${name}`)).toContainText("stopped");
-  }
-  await page.getByTestId("open-simulation").click();
-  await page.getByRole("button", { name: /인터넷 → web-alb:80/ }).click();
-  await expect(page.getByTestId("simulation-result")).toHaveAttribute("data-outcome", "failure");
-  await expect(page.getByTestId("simulation-result")).toContainText("Stopped");
-});
-
-test("프로젝트는 새로고침 후에도 복원된다", async ({ page }) => {
-  await openExample(page);
-  await page.getByTestId("project-name").click();
-  const input = page.getByLabel("프로젝트 이름").first();
-  await input.fill("새로고침 테스트");
-  await input.press("Enter");
-  await expect(page.getByTestId("save-status")).toContainText("저장됨");
+  // 새로고침해도 구성이 남아 있다
   await page.reload();
-  await expect(page.getByTestId("project-name")).toHaveText("새로고침 테스트");
+  await go(page, "#/ec2/instances");
+  await expect(page.getByRole("table", { name: "인스턴스 목록" })).toContainText("web-1");
 });
 
-test("JSON 내보내기 파일을 다시 가져오면 새 프로젝트가 된다", async ({ page }) => {
-  await openExample(page);
-  await page.getByRole("button", { name: "더 보기" }).click();
-  const downloadPromise = page.waitForEvent("download");
-  await page.getByRole("menuitem", { name: /JSON 내보내기/ }).click();
-  const download = await downloadPromise;
-  expect(download.suggestedFilename()).toMatch(/\.aws-playground\.json$/);
-  const path = await download.path();
+test("AWS처럼 잘못된 입력과 의존성 있는 삭제를 오류 코드로 거부한다", async ({ page }) => {
+  await createSandbox(page, "E2E 오류");
+  await go(page, "#/vpc/vpcs/create");
+  await page.getByLabel("IPv4 CIDR", { exact: true }).fill("10.0.0.0/8");
+  await page.getByRole("button", { name: "VPC 생성" }).click();
+  await expect(page.getByText(/\[InvalidVpc\.Range\]/)).toBeVisible();
 
-  await page.goto("/");
-  await page.getByRole("button", { name: "JSON 가져오기" }).click();
-  await page.getByTestId("import-file-input").setInputFiles(path);
-  await page.getByRole("button", { name: "검증 후 가져오기" }).click();
-  await expect(page).toHaveURL(/\/projects\/proj-/);
-  await expect(page.getByTestId("node-web-alb")).toBeVisible();
+  await page.getByLabel("IPv4 CIDR", { exact: true }).fill("10.1.0.0/16");
+  await page.getByRole("button", { name: "VPC 생성" }).click();
+  await expect(page.getByRole("heading", { name: /vpc-/, level: 1 })).toBeVisible();
 
+  // 기본 보안 그룹은 삭제할 수 없다 (메뉴 비활성)
+  await go(page, "#/vpc/security-groups");
+  await page.getByRole("table", { name: "보안 그룹 목록" }).getByRole("radio").first().check();
+  await page.getByRole("button", { name: "작업" }).click();
+  await expect(page.getByRole("menuitem", { name: "보안 그룹 삭제" })).toHaveAttribute("aria-disabled", "true");
+  await page.keyboard.press("Escape");
+
+  // VPC에 연결된 인터넷 게이트웨이는 분리하기 전에는 삭제할 수 없다
+  await go(page, "#/vpc/igws/create");
+  await page.getByRole("button", { name: "인터넷 게이트웨이 생성" }).click();
+  await page.getByTestId("flashbar").getByRole("link", { name: "VPC에 연결" }).click();
+  await page.getByLabel("사용 가능한 VPC").selectOption({ index: 1 });
+  await page.getByRole("button", { name: "인터넷 게이트웨이 연결" }).click();
+  await page.getByRole("button", { name: "작업" }).click();
+  await page.getByRole("menuitem", { name: "인터넷 게이트웨이 삭제" }).click();
+  await page.getByRole("dialog").getByRole("textbox").fill("delete");
+  await page.getByRole("dialog").getByRole("button", { name: "삭제" }).click();
+  await expect(page.getByRole("dialog")).toContainText("[DependencyViolation]");
+});
+
+test("실습을 시작하면 빈 샌드박스와 실습 패널이 열리고 진행 상황을 판정한다", async ({ page }) => {
   await page.goto("/");
-  await expect(page.locator('section[aria-labelledby="projects-heading"] [data-testid="project-card"]')).toHaveCount(2);
+  await page.getByTestId("lab-card").first().getByRole("button", { name: "실습 시작" }).click();
+  await expect(page.getByTestId("lab-guide")).toBeVisible();
+  await expect(page.getByTestId("lab-progress")).toHaveText("0/7 단계");
+  await page.getByTestId("lab-guide").getByRole("link", { name: "콘솔에서 열기 →" }).first().click();
+  await page.getByLabel("IPv4 CIDR", { exact: true }).fill("10.0.0.0/16");
+  await page.getByRole("button", { name: "VPC 생성" }).click();
+  await expect(page.getByTestId("lab-progress")).toHaveText("1/7 단계");
+});
+
+test("모바일 너비에서도 가로로 넘치지 않는다", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await createSandbox(page, "E2E 모바일");
+  for (const hash of ["#/", "#/vpc/vpcs", "#/vpc/subnets/create", "#/ec2/instances/launch", "#/vpc/security-groups/create", "#/checks", "#/billing"]) {
+    await go(page, hash);
+    await page.waitForTimeout(150);
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    expect(overflow, hash).toBeLessThanOrEqual(1);
+  }
 });

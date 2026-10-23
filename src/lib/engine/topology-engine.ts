@@ -138,16 +138,17 @@ export class Topology {
     return this.order.get(id) ?? Number.MAX_SAFE_INTEGER;
   }
 
+  /** Name 태그 (없으면 리소스 ID) */
   name(id: string | null | undefined): string {
     const r = this.get(id);
-    return r ? r.name : id ?? "(없음)";
+    return r ? displayName(r) : (id ?? "(없음)");
   }
 
   /** 예: "web-1 (EC2)" */
   label(id: string | null | undefined): string {
     const r = this.get(id);
     if (!r) return id ?? "(없음)";
-    return `${r.name} (${RESOURCE_TYPE_INFO[r.type].shortLabel})`;
+    return `${displayName(r)} (${RESOURCE_TYPE_INFO[r.type].shortLabel})`;
   }
 
   outgoing(id: string, relation?: RelationType): Connection[] {
@@ -198,6 +199,22 @@ export class Topology {
 
   vpcOfIgw(igwId: string): string | null {
     return this.firstSource(igwId, "vpc-internet-gateway");
+  }
+
+  /** 리소스에 연결된 탄력적 IP (EC2, NAT Gateway) */
+  elasticIpOf(resourceId: string): ResourceOfType<"elastic-ip"> | undefined {
+    const c = this.incoming(resourceId).find(
+      (x) => x.relationType === "elastic-ip-ec2" || x.relationType === "elastic-ip-nat-gateway",
+    );
+    return this.getOfType(c?.sourceResourceId, "elastic-ip");
+  }
+
+  /** 탄력적 IP가 연결된 대상 (없으면 undefined) */
+  elasticIpTarget(eipId: string): Resource | undefined {
+    const c = this.outgoing(eipId).find(
+      (x) => x.relationType === "elastic-ip-ec2" || x.relationType === "elastic-ip-nat-gateway",
+    );
+    return this.get(c?.targetResourceId);
   }
 
   subnetOf(resourceId: string): string | null {
@@ -324,6 +341,10 @@ export class Topology {
         return this.firstSource(r.id, "vpc-security-group");
       case "network-acl":
         return this.firstSource(r.id, "vpc-network-acl");
+      case "elastic-ip":
+        return null;
+      case "target-group":
+        return this.firstSource(r.id, "vpc-target-group") ?? this.vpcsOf(r.id)[0] ?? null;
       case "nat-gateway":
       case "ec2": {
         const subnet = this.subnetOf(r.id);
@@ -346,6 +367,7 @@ export class Topology {
       }
       case "target-group":
         return uniq([
+          this.firstSource(r.id, "vpc-target-group"),
           ...this.targetGroupTargets(r.id).map((t) => this.vpcOf(t.ec2.id)),
           ...this.targetGroupAlbs(r.id).flatMap((a) => this.vpcsOf(a.id)),
         ]);
@@ -491,12 +513,20 @@ export class Topology {
     return !!subnet?.config.mapPublicIpOnLaunch;
   }
 
-  /** 가상 퍼블릭 IP 배정 (결정적, 해시 + 선형 탐색). 키 → IP */
+  /**
+   * 가상 퍼블릭 IP 배정. 키 → IP
+   * - 탄력적 IP는 할당 시 정해진 주소를 그대로 사용한다.
+   * - 자동 할당 퍼블릭 IP는 결정적 해시 + 선형 탐색으로 정한다 (탄력적 IP 주소는 피한다).
+   */
   private publicIpTable(): Map<string, number> {
     return this.memo("publicIps", () => {
       const pool = tryParseCidr(VIRTUAL_PUBLIC_POOL)!;
       const used = new Set<number>();
       const table = new Map<string, number>();
+      for (const eip of this.ofType("elastic-ip")) {
+        const ip = parseIpv4(eip.config.publicIp);
+        if (ip !== null) used.add(ip);
+      }
       const assign = (key: string) => {
         const start = (hashString(key) % 254) + 1;
         for (let i = 0; i < 254; i++) {
@@ -509,10 +539,20 @@ export class Topology {
           }
         }
       };
+      const fromEip = (resourceId: string) => {
+        const eip = this.elasticIpOf(resourceId);
+        const ip = eip ? parseIpv4(eip.config.publicIp) : null;
+        if (ip === null) return false;
+        table.set(resourceId, ip);
+        return true;
+      };
       for (const r of this.project.resources) {
-        if (r.type === "ec2" && this.ec2PublicIpEnabled(r)) assign(r.id);
-        else if (r.type === "nat-gateway") assign(r.id);
-        else if (r.type === "alb" && r.config.scheme === "internet-facing") {
+        if (r.type === "ec2") {
+          if (!fromEip(r.id) && this.ec2PublicIpEnabled(r)) assign(r.id);
+        } else if (r.type === "nat-gateway") {
+          // 레거시 프로젝트(탄력적 IP 리소스가 없는 NAT)는 가상 주소를 자동 배정한다.
+          if (!fromEip(r.id)) assign(r.id);
+        } else if (r.type === "alb" && r.config.scheme === "internet-facing") {
           for (const s of this.albSubnets(r.id)) assign(`${r.id}@${s.id}`);
         } else if (r.type === "rds" && r.config.publiclyAccessible) assign(r.id);
       }
@@ -571,6 +611,8 @@ export class Topology {
         if (r.type === "ec2") {
           const subnetId = this.subnetOf(r.id);
           const active = r.config.state === "running" || r.config.state === "pending";
+          // 자동 할당 퍼블릭 IP는 중지 시 해제되지만, 탄력적 IP는 연결된 상태로 남는다.
+          const keepsPublicIp = active || (!!this.elasticIpOf(r.id) && r.config.state !== "terminated");
           result.push({
             id: r.id,
             ownerId: r.id,
@@ -579,7 +621,7 @@ export class Topology {
             subnetId,
             vpcId: subnetId ? this.vpcOfSubnet(subnetId) : null,
             privateIp: parseIpv4(r.config.privateIp),
-            publicIp: active ? (publicIps.get(r.id) ?? null) : null,
+            publicIp: keepsPublicIp ? (publicIps.get(r.id) ?? null) : null,
             securityGroupIds: this.securityGroupsOf(r.id).map((sg) => sg.id),
             managed: false,
           });
@@ -604,7 +646,7 @@ export class Topology {
               id: key,
               ownerId: r.id,
               ownerType: "alb",
-              label: `${r.name} 노드 (${s.config.availabilityZone})`,
+              label: `${displayName(r)} 노드 (${s.config.availabilityZone})`,
               subnetId: s.id,
               vpcId: this.vpcOfSubnet(s.id),
               privateIp: managedIps.get(key) ?? null,
@@ -678,9 +720,9 @@ export class Topology {
     const suffix = (hashString(r.id) % 900000) + 100000;
     if (r.type === "alb") {
       const prefix = r.config.scheme === "internal" ? "internal-" : "";
-      return `${prefix}${slug(r.name)}-${suffix}.${VIRTUAL_REGION}.elb.playground.local`;
+      return `${prefix}${slug(displayName(r))}-${suffix}.${VIRTUAL_REGION}.elb.playground.local`;
     }
-    if (r.type === "rds") return `${slug(r.name)}.c${suffix}.${VIRTUAL_REGION}.rds.playground.local`;
+    if (r.type === "rds") return `${slug(displayName(r))}.c${suffix}.${VIRTUAL_REGION}.rds.playground.local`;
     if (r.type === "ec2") {
       const eni = this.enisOf(r.id)[0];
       return eni?.privateIp !== null && eni?.privateIp !== undefined
@@ -689,6 +731,11 @@ export class Topology {
     }
     return null;
   }
+}
+
+/** Name 태그가 비어 있으면 리소스 ID를 표시 이름으로 쓴다 (AWS 콘솔과 동일). */
+export function displayName(r: Pick<Resource, "id" | "name">): string {
+  return r.name?.trim() ? r.name : r.id;
 }
 
 export function buildTopology(project: Project): Topology {

@@ -6,12 +6,14 @@ import { CircleX, TriangleAlert } from "lucide-react";
 import { cn } from "cn";
 import { CATEGORY_STYLES, ResourceIcon, ToneBadge } from "@/components/resource-visuals";
 import { RESOURCE_TYPE_INFO } from "@/lib/engine/resource-models";
+import { displayName } from "@/lib/engine/topology-engine";
 import { NODE_WIDTH } from "@/lib/project/layout";
 import type { ResourceFlowNode, ZoneFlowNode } from "./canvas-model";
 
 export const ResourceNode = memo(function ResourceNode({ data, selected }: NodeProps<ResourceFlowNode>) {
   const { resource, subtitle, badges, errors, warnings, pathState, pathOrder, typeLabel } = data;
   const category = CATEGORY_STYLES[RESOURCE_TYPE_INFO[resource.type].category];
+  const name = displayName(resource);
   return (
     <div
       className={cn(
@@ -23,16 +25,16 @@ export const ResourceNode = memo(function ResourceNode({ data, selected }: NodeP
         pathState === "pending" && "opacity-60",
       )}
       style={{ width: NODE_WIDTH }}
-      data-testid={`node-${resource.name}`}
-      aria-label={`${typeLabel} ${resource.name}`}
+      data-testid={`node-${resource.id}`}
+      aria-label={`${typeLabel} ${name}`}
     >
-      <Handle type="target" position={Position.Top} aria-label={`${resource.name} 연결점 (위)`} />
+      <Handle type="target" position={Position.Top} isConnectable={false} />
       <div className="flex items-start gap-2 p-2">
         <ResourceIcon type={resource.type} size="sm" />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1">
-            <span className="truncate text-[13px] leading-tight font-medium" title={resource.name}>
-              {resource.name}
+            <span className="truncate text-[13px] leading-tight font-medium" title={name}>
+              {name}
             </span>
           </div>
           <div className="truncate text-[11px] text-muted-foreground" title={subtitle}>
@@ -68,7 +70,7 @@ export const ResourceNode = memo(function ResourceNode({ data, selected }: NodeP
           {pathOrder + 1}
         </span>
       )}
-      <Handle type="source" position={Position.Bottom} aria-label={`${resource.name} 연결점 (아래)`} />
+      <Handle type="source" position={Position.Bottom} isConnectable={false} />
     </div>
   );
 });

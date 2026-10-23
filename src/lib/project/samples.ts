@@ -15,6 +15,7 @@ export interface SampleDefinition {
 /** Internet → IGW → Public Subnet(ALB) → Private Subnet(EC2 ×2) → DB Subnet(RDS) */
 export function createThreeTierSample(name = "예시: 3-Tier 웹 아키텍처"): Project {
   const b = new ProjectBuilder(name, {
+    awsDefaults: true,
     description: "ALB + EC2 2대 + RDS(MySQL)로 구성된 3계층 웹 아키텍처. 시뮬레이션 콘솔에서 '인터넷 → ALB' 요청을 실행해 보세요.",
   });
   const vpc = b.vpc("main-vpc", "10.0.0.0/16");
@@ -45,7 +46,7 @@ export function createThreeTierSample(name = "예시: 3-Tier 웹 아키텍처"):
 
   const app1 = b.ec2("app-1", appA, { ip: "10.0.11.10", sgs: [appSg], listenPorts: [80] });
   const app2 = b.ec2("app-2", appC, { ip: "10.0.12.10", sgs: [appSg], listenPorts: [80] });
-  const tg = b.targetGroup("web-tg", { port: 80, targets: [app1, app2] });
+  const tg = b.targetGroup("web-tg", { port: 80, vpc, targets: [app1, app2] });
   b.alb("web-alb", { subnets: [pubA, pubC], sgs: [albSg], listeners: [{ port: 80, targetGroup: tg }] });
 
   const dbGroup = b.dbSubnetGroup("db-subnets", [dbA, dbC]);
@@ -55,7 +56,7 @@ export function createThreeTierSample(name = "예시: 3-Tier 웹 아키텍처"):
 
 /** Internet → IGW → Public Subnet → EC2 (퍼블릭 IP) */
 export function createPublicEc2Sample(name = "샘플: 퍼블릭 EC2 웹 서버"): Project {
-  const b = new ProjectBuilder(name, { description: "퍼블릭 서브넷의 EC2 한 대. IGW와 라우팅 테이블의 역할을 확인하기 좋은 구성입니다." });
+  const b = new ProjectBuilder(name, { awsDefaults: true, description: "퍼블릭 서브넷의 EC2 한 대. IGW와 라우팅 테이블의 역할을 확인하기 좋은 구성입니다." });
   const vpc = b.vpc("web-vpc", "10.10.0.0/16");
   const pub = b.subnet("public-a", vpc, "10.10.1.0/24", "ap-northeast-2a", { mapPublicIpOnLaunch: true });
   const igw = b.igw("web-igw", vpc);
@@ -71,6 +72,7 @@ export function createPublicEc2Sample(name = "샘플: 퍼블릭 EC2 웹 서버")
 /** Public Subnet(NAT) + Private Subnet(EC2) + 서브넷 NACL */
 export function createPrivateNatSample(name = "샘플: 프라이빗 서브넷 + NAT Gateway"): Project {
   const b = new ProjectBuilder(name, {
+    awsDefaults: true,
     description: "프라이빗 서브넷의 EC2가 NAT Gateway를 통해 외부로 나가는 구성. 프라이빗 서브넷에는 NACL이 연결되어 있습니다.",
   });
   const vpc = b.vpc("app-vpc", "10.20.0.0/16");

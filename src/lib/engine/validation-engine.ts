@@ -29,7 +29,7 @@ import { evaluateNacl, findShadowedRules, describeNaclRule } from "./network-acl
 import { AVAILABILITY_ZONES, type NaclRule, type Project, type SgRule } from "./resource-models";
 import { findDuplicateDestinations } from "./route-engine";
 import { describeSgRule, evaluateSecurityGroups, ruleAllowsFromAnywhere } from "./security-group-engine";
-import { buildTopology, type Topology } from "./topology-engine";
+import { buildTopology, displayName, type Topology } from "./topology-engine";
 
 export type Severity = "error" | "warning" | "info";
 export type ValidationCategory = "network" | "security" | "compute" | "load-balancing" | "database" | "general";
@@ -136,7 +136,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
           {
             resourceIds: [vpc.id],
             cause: r.error,
-            condition: `VPC ${vpc.name}의 CIDR = "${vpc.config.cidr}"`,
+            condition: `VPC ${displayName(vpc)}의 CIDR = "${vpc.config.cidr}"`,
             fix: ["VPC 설정에서 CIDR을 a.b.c.d/n 형식, /16~/28 범위로 입력하세요. 예: 10.0.0.0/16"],
             impact: "CIDR이 올바르면 서브넷 포함 여부 검사와 VPC 내부(local) 라우팅이 계산되어 VPC 내부 통신을 시뮬레이션할 수 있습니다.",
           },
@@ -157,7 +157,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
           {
             resourceIds: [s.id],
             cause: r.error,
-            condition: `서브넷 ${s.name}의 CIDR = "${s.config.cidr}"`,
+            condition: `서브넷 ${displayName(s)}의 CIDR = "${s.config.cidr}"`,
             fix: ["서브넷 설정에서 VPC 범위 안의 CIDR(/16~/28)을 입력하세요. 예: 10.0.1.0/24"],
             impact: "CIDR이 올바르면 이 서브넷의 리소스에 IP가 배정되고 통신 시뮬레이션이 가능해집니다.",
           },
@@ -176,7 +176,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
         .filter((s) => !topo.vpcOfSubnet(s.id))
         .map((s) => ({
           resourceIds: [s.id],
-          cause: `서브넷 ${s.name}이(가) 어떤 VPC와도 연결되어 있지 않습니다.`,
+          cause: `서브넷 ${displayName(s)}이(가) 어떤 VPC와도 연결되어 있지 않습니다.`,
           condition: "VPC → Subnet 소속 연결이 없음",
           fix: ["캔버스에서 VPC와 서브넷을 연결하거나 서브넷 설정에서 VPC를 선택하세요."],
           impact: "VPC에 속하면 라우팅 테이블과 NACL이 적용되고 이 서브넷의 리소스가 통신할 수 있습니다.",
@@ -197,7 +197,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
         return [
           {
             resourceIds: [s.id, vpcId],
-            cause: `서브넷 ${s.name}(${cidr.text})이 VPC ${topo.name(vpcId)}(${vpcCidr.text}) 범위 밖에 있습니다.`,
+            cause: `서브넷 ${displayName(s)}(${cidr.text})이 VPC ${topo.name(vpcId)}(${vpcCidr.text}) 범위 밖에 있습니다.`,
             condition: `${cidr.text} ⊄ ${vpcCidr.text}`,
             fix: [`서브넷 CIDR을 ${vpcCidr.text} 안의 범위로 변경하세요.`],
             impact: "범위를 맞추면 서브넷의 리소스가 VPC local 경로로 서로 통신할 수 있습니다.",
@@ -223,8 +223,8 @@ export const VALIDATION_RULES: ValidationRule[] = [
               drafts.push({
                 key: `${subnets[i].id}-${subnets[j].id}`,
                 resourceIds: [subnets[i].id, subnets[j].id],
-                cause: `${subnets[i].name}(${a.text})과 ${subnets[j].name}(${b.text})의 주소 범위가 겹칩니다.`,
-                condition: `VPC ${vpc.name} 내부 서브넷 CIDR 충돌`,
+                cause: `${displayName(subnets[i])}(${a.text})과 ${displayName(subnets[j])}(${b.text})의 주소 범위가 겹칩니다.`,
+                condition: `VPC ${displayName(vpc)} 내부 서브넷 CIDR 충돌`,
                 fix: ["겹치지 않는 CIDR로 서브넷 중 하나를 변경하세요. 예: 10.0.1.0/24, 10.0.2.0/24"],
                 impact: "충돌을 없애면 각 IP가 하나의 서브넷에만 속하게 되어 경로 계산이 명확해집니다.",
               });
@@ -252,7 +252,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
             drafts.push({
               key: `${vpcs[i].id}-${vpcs[j].id}`,
               resourceIds: [vpcs[i].id, vpcs[j].id],
-              cause: `${vpcs[i].name}(${a.text})과 ${vpcs[j].name}(${b.text})의 범위가 겹칩니다.`,
+              cause: `${displayName(vpcs[i])}(${a.text})과 ${displayName(vpcs[j])}(${b.text})의 범위가 겹칩니다.`,
               condition: "서로 다른 VPC의 CIDR 중복",
               fix: ["한쪽 VPC의 CIDR을 겹치지 않는 범위로 변경하세요. 예: 10.0.0.0/16과 10.1.0.0/16"],
               impact: "현재 시뮬레이션 결과에는 영향이 없지만, 실제 환경에서 VPC 간 연결이 가능해집니다.",
@@ -275,7 +275,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
         .filter((s) => !(AVAILABILITY_ZONES as readonly string[]).includes(s.config.availabilityZone))
         .map((s) => ({
           resourceIds: [s.id],
-          cause: `서브넷 ${s.name}의 가용 영역 "${s.config.availabilityZone}"은(는) 가상 리전에 없습니다.`,
+          cause: `서브넷 ${displayName(s)}의 가용 영역 "${s.config.availabilityZone}"은(는) 가상 리전에 없습니다.`,
           condition: "availabilityZone 값이 목록에 없음",
           fix: [`가용 영역을 ${AVAILABILITY_ZONES.join(", ")} 중에서 선택하세요.`],
           impact: "올바른 가용 영역을 지정하면 ALB와 DB 서브넷 그룹의 가용 영역 요구 사항을 검사할 수 있습니다.",
@@ -293,7 +293,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
         .filter((igw) => !topo.vpcOfIgw(igw.id))
         .map((igw) => ({
           resourceIds: [igw.id],
-          cause: `${igw.name}이(가) 어떤 VPC에도 연결되어 있지 않습니다.`,
+          cause: `${displayName(igw)}이(가) 어떤 VPC에도 연결되어 있지 않습니다.`,
           condition: "VPC → Internet Gateway 연결 없음",
           fix: ["캔버스에서 VPC와 Internet Gateway를 연결하세요. (VPC당 IGW는 하나)"],
           impact: "VPC에 연결하면 이 IGW를 대상으로 하는 경로가 실제로 인터넷과 통신할 수 있게 됩니다.",
@@ -313,7 +313,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
           .map((r) => ({
             key: r.key,
             resourceIds: [rt.id, r.targetId],
-            cause: `라우팅 테이블 ${rt.name}의 경로 대상 CIDR "${r.destinationCidr}"이(가) 올바르지 않습니다.`,
+            cause: `라우팅 테이블 ${displayName(rt)}의 경로 대상 CIDR "${r.destinationCidr}"이(가) 올바르지 않습니다.`,
             condition: `${r.destinationCidr} → ${topo.routeTargetLabel(r)}`,
             fix: ["경로의 Destination을 올바른 CIDR로 수정하세요. 예: 0.0.0.0/0"],
             impact: "유효한 경로가 되면 라우팅 결정(Longest Prefix Match)에 포함됩니다.",
@@ -340,7 +340,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
               cause: attached
                 ? `${topo.name(r.targetId)}은(는) 다른 VPC(${topo.name(attached)})에 연결되어 있습니다.`
                 : `${topo.name(r.targetId)}이(가) VPC에 연결되지 않은 상태에서 인터넷 경로가 정의되었습니다.`,
-              condition: `${rt.name}: ${r.destinationCidr} → ${topo.name(r.targetId)}`,
+              condition: `${displayName(rt)}: ${r.destinationCidr} → ${topo.name(r.targetId)}`,
               fix: [`${topo.name(r.targetId)}을(를) ${vpcId ? `VPC ${topo.name(vpcId)}` : "라우팅 테이블의 VPC"}에 연결하세요.`],
               impact: "IGW가 연결되면 이 경로를 사용하는 서브넷이 퍼블릭 서브넷이 되어 인터넷 통신이 가능해집니다.",
             };
@@ -369,7 +369,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
                 cause: !natVpc
                   ? `${topo.name(r.targetId)}이(가) 서브넷에 배치되지 않아 VPC를 알 수 없습니다.`
                   : `${topo.name(r.targetId)}은(는) 다른 VPC(${topo.name(natVpc)})에 있습니다.`,
-                condition: `${rt.name}: ${r.destinationCidr} → ${topo.name(r.targetId)}`,
+                condition: `${displayName(rt)}: ${r.destinationCidr} → ${topo.name(r.targetId)}`,
                 fix: ["같은 VPC의 퍼블릭 서브넷에 배치된 NAT Gateway를 경로 대상으로 지정하세요."],
                 impact: "올바른 NAT를 지정하면 프라이빗 서브넷의 아웃바운드 인터넷 통신이 가능해집니다.",
               },
@@ -388,7 +388,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
         findDuplicateDestinations(topo.routesOf(rt.id, topo.vpcOf(rt.id))).map((group) => ({
           key: group[0].cidr?.text,
           resourceIds: [rt.id, ...group.map((g) => g.targetId)],
-          cause: `${rt.name}에 Destination ${group[0].cidr?.text} 경로가 ${group.length}개 있습니다: ${group.map((g) => topo.routeTargetLabel(g)).join(", ")}`,
+          cause: `${displayName(rt)}에 Destination ${group[0].cidr?.text} 경로가 ${group.length}개 있습니다: ${group.map((g) => topo.routeTargetLabel(g)).join(", ")}`,
           condition: "같은 Destination의 경로 중복",
           fix: ["중복된 경로 중 하나를 삭제하거나 Destination을 변경하세요."],
           impact: "충돌을 없애면 해당 목적지로 가는 경로가 하나로 결정됩니다. (현재 시뮬레이터는 local → 정의 순서로 선택)",
@@ -407,7 +407,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
         .filter((rt) => !topo.vpcOf(rt.id))
         .map((rt) => ({
           resourceIds: [rt.id],
-          cause: `라우팅 테이블 ${rt.name}이(가) VPC에 속해 있지 않습니다.`,
+          cause: `라우팅 테이블 ${displayName(rt)}이(가) VPC에 속해 있지 않습니다.`,
           condition: "VPC → Route Table 소속 연결 없음",
           fix: ["캔버스에서 VPC와 라우팅 테이블을 연결하세요."],
           impact: "VPC에 속하면 local 경로가 생기고 서브넷과 연결해 사용할 수 있습니다.",
@@ -454,7 +454,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
           {
             severity: instances.length ? "warning" : "info",
             resourceIds: [s.id, ...instances.map((i) => i.id)],
-            cause: `${cls.reason}${instances.length ? ` 이 서브넷의 EC2 ${instances.map((i) => i.name).join(", ")}은(는) 외부와 통신할 수 없습니다.` : ""}`,
+            cause: `${cls.reason}${instances.length ? ` 이 서브넷의 EC2 ${instances.map((i) => displayName(i)).join(", ")}은(는) 외부와 통신할 수 없습니다.` : ""}`,
             condition: "서브넷 라우팅 테이블에 IGW/NAT 경로 없음",
             fix: [
               "외부 통신이 필요한 프라이빗 서브넷: 퍼블릭 서브넷에 NAT Gateway를 만들고 0.0.0.0/0 → NAT 경로를 추가하세요.",
@@ -480,7 +480,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
         return [
           {
             resourceIds: [nat.id, subnetId],
-            cause: `${nat.name}이(가) 배치된 서브넷 ${topo.name(subnetId)}은(는) 퍼블릭 서브넷이 아닙니다. ${cls.reason}`,
+            cause: `${displayName(nat)}이(가) 배치된 서브넷 ${topo.name(subnetId)}은(는) 퍼블릭 서브넷이 아닙니다. ${cls.reason}`,
             condition: "NAT Gateway 서브넷에 IGW 경로 없음",
             fix: ["NAT Gateway를 0.0.0.0/0 → IGW 경로가 있는 퍼블릭 서브넷으로 옮기세요."],
             impact: "NAT를 퍼블릭 서브넷에 두면 NAT를 경유하는 프라이빗 서브넷의 인터넷 통신이 성공합니다.",
@@ -500,7 +500,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
         .filter((nat) => !topo.subnetOf(nat.id))
         .map((nat) => ({
           resourceIds: [nat.id],
-          cause: `${nat.name}이(가) 서브넷에 배치되어 있지 않습니다.`,
+          cause: `${displayName(nat)}이(가) 서브넷에 배치되어 있지 않습니다.`,
           condition: "NAT Gateway → Subnet 배치 연결 없음",
           fix: ["캔버스에서 NAT Gateway를 퍼블릭 서브넷과 연결하세요."],
           impact: "서브넷에 배치하면 NAT의 가상 사설 IP와 Elastic IP가 결정되어 경로 대상으로 사용할 수 있습니다.",
@@ -523,7 +523,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
           .map((r) => ({
             key: r.key,
             resourceIds: [rt.id, r.targetId],
-            cause: `${rt.name}의 경로 ${r.destinationCidr} → ${topo.routeTargetLabel(r)}이(가) VPC 범위(${vpcCidr.text}) 안의 주소를 외부 게이트웨이로 보냅니다.`,
+            cause: `${displayName(rt)}의 경로 ${r.destinationCidr} → ${topo.routeTargetLabel(r)}이(가) VPC 범위(${vpcCidr.text}) 안의 주소를 외부 게이트웨이로 보냅니다.`,
             condition: `${r.destinationCidr} ⊂ ${vpcCidr.text}`,
             fix: ["이 경로를 삭제하세요. VPC 내부 통신은 local 경로가 처리합니다."],
             impact: "경로를 삭제하면 해당 범위의 VPC 내부 통신이 local로 전달됩니다.",
@@ -545,7 +545,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
         return [
           {
             resourceIds: [ec2.id, subnetId],
-            cause: `${ec2.name}에는 퍼블릭 IP가 할당되지만 서브넷 ${topo.name(subnetId)}은(는) 퍼블릭 서브넷이 아닙니다. ${cls.reason}`,
+            cause: `${displayName(ec2)}에는 퍼블릭 IP가 할당되지만 서브넷 ${topo.name(subnetId)}은(는) 퍼블릭 서브넷이 아닙니다. ${cls.reason}`,
             condition: "퍼블릭 IP 활성화 + IGW 경로 없음",
             fix: [
               "서브넷의 라우팅 테이블에 0.0.0.0/0 → Internet Gateway 경로를 추가하세요.",
@@ -571,8 +571,8 @@ export const VALIDATION_RULES: ValidationRule[] = [
             resourceIds: ref.kind === "main" ? [s.id, ref.routeTableId] : [s.id],
             cause:
               ref.kind === "main"
-                ? `서브넷 ${s.name}은(는) 기본 라우팅 테이블 ${topo.name(ref.routeTableId)}을(를) 사용합니다.`
-                : `서브넷 ${s.name}은(는) 명시적 라우팅 테이블이 없고, VPC에 기본 라우팅 테이블도 지정되지 않아 local 경로만 사용합니다.`,
+                ? `서브넷 ${displayName(s)}은(는) 기본 라우팅 테이블 ${topo.name(ref.routeTableId)}을(를) 사용합니다.`
+                : `서브넷 ${displayName(s)}은(는) 명시적 라우팅 테이블이 없고, VPC에 기본 라우팅 테이블도 지정되지 않아 local 경로만 사용합니다.`,
             condition: "Route Table → Subnet 명시적 연결 없음",
             fix: ["의도한 라우팅을 명확히 하려면 서브넷을 라우팅 테이블과 명시적으로 연결하세요."],
             impact: "명시적으로 연결하면 그 라우팅 테이블의 경로가 이 서브넷에 적용됩니다.",
@@ -592,7 +592,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
         .filter((s) => topo.vpcOfSubnet(s.id) && !topo.naclOf(s.id))
         .map((s) => ({
           resourceIds: [s.id],
-          cause: `서브넷 ${s.name}은(는) 기본 NACL(모두 허용)을 사용한다고 가정합니다.`,
+          cause: `서브넷 ${displayName(s)}은(는) 기본 NACL(모두 허용)을 사용한다고 가정합니다.`,
           condition: "Network ACL → Subnet 연결 없음",
           fix: ["서브넷 경계에서 트래픽을 제한하려면 NACL을 만들고 서브넷과 연결하세요."],
           impact: "NACL을 연결하면 그 규칙(요청과 응답 각각)이 시뮬레이션에 적용됩니다.",
@@ -611,7 +611,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
         return [
           {
             resourceIds: [vpc.id, ...mains.map((m) => m.id)],
-            cause: `VPC ${vpc.name}에 기본 라우팅 테이블로 지정된 테이블이 ${mains.length}개 있습니다: ${mains.map((m) => m.name).join(", ")}`,
+            cause: `VPC ${displayName(vpc)}에 기본 라우팅 테이블로 지정된 테이블이 ${mains.length}개 있습니다: ${mains.map((m) => displayName(m)).join(", ")}`,
             condition: "main = true인 라우팅 테이블 중복",
             fix: ["하나를 제외한 라우팅 테이블의 '기본 라우팅 테이블' 설정을 끄세요."],
             impact: "하나로 정리하면 명시적 연결이 없는 서브넷이 사용할 테이블이 명확해집니다. (현재는 첫 번째 테이블 사용)",
@@ -632,13 +632,69 @@ export const VALIDATION_RULES: ValidationRule[] = [
         return [
           {
             resourceIds: [vpc.id],
-            cause: `VPC ${vpc.name}의 CIDR ${cidr.text}은(는) RFC 1918 사설 대역이 아닙니다.`,
+            cause: `VPC ${displayName(vpc)}의 CIDR ${cidr.text}은(는) RFC 1918 사설 대역이 아닙니다.`,
             condition: "VPC CIDR ⊄ 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16",
             fix: ["가능하면 10.0.0.0/16 같은 사설 대역을 사용하세요."],
             impact: "사설 대역을 사용하면 인터넷 주소와의 충돌 가능성이 없어집니다.",
           },
         ];
       }),
+  },
+
+  {
+    id: "NET-024",
+    category: "network",
+    severity: "warning",
+    title: "탄력적 IP가 없는 NAT Gateway",
+    concept: "퍼블릭 NAT 게이트웨이는 만들 때 탄력적 IP 하나를 지정해야 하며, 프라이빗 서브넷의 트래픽을 이 주소로 변환합니다.",
+    check: ({ topo }) =>
+      topo
+        .ofType("nat-gateway")
+        .filter((nat) => !topo.elasticIpOf(nat.id))
+        .map((nat) => ({
+          resourceIds: [nat.id],
+          cause: `${topo.name(nat.id)}에 연결된 탄력적 IP가 없습니다. (이전 버전에서 만든 프로젝트는 가상 주소를 자동으로 사용합니다.)`,
+          condition: "Elastic IP → NAT Gateway 연결 없음",
+          fix: ["탄력적 IP를 할당한 뒤 그 주소를 지정해 NAT 게이트웨이를 다시 만드세요."],
+          impact: "탄력적 IP를 사용하면 NAT를 거친 트래픽의 출발지 주소가 고정된 할당 주소로 표시됩니다.",
+        })),
+  },
+  {
+    id: "NET-025",
+    category: "network",
+    severity: "warning",
+    title: "사용할 수 없는 상태의 NAT Gateway",
+    concept: "NAT 게이트웨이는 Available 상태에서만 트래픽을 처리합니다. 생성 직후에는 Pending 상태이며, Failed 상태의 NAT는 사용할 수 없습니다.",
+    check: ({ topo }) =>
+      topo
+        .ofType("nat-gateway")
+        .filter((nat) => nat.config.state !== "available")
+        .map((nat) => ({
+          severity: nat.config.state === "pending" ? ("info" as const) : ("warning" as const),
+          resourceIds: [nat.id],
+          cause: `${topo.name(nat.id)}의 상태가 ${nat.config.state}입니다.`,
+          condition: `state = ${nat.config.state}`,
+          fix: nat.config.state === "pending" ? ["잠시 기다리면 Available 상태가 됩니다."] : ["NAT 게이트웨이를 삭제하고 다시 만드세요."],
+          impact: "Available 상태가 되면 이 NAT를 경유하는 아웃바운드 통신이 가능해집니다.",
+        })),
+  },
+  {
+    id: "EIP-001",
+    category: "network",
+    severity: "info",
+    title: "연결되지 않은 탄력적 IP",
+    concept: "탄력적 IP는 인스턴스나 NAT 게이트웨이에 연결해야 사용됩니다. 실제 AWS에서는 사용하지 않는 퍼블릭 IPv4 주소도 요금이 발생하므로 필요 없으면 릴리스합니다.",
+    check: ({ topo }) =>
+      topo
+        .ofType("elastic-ip")
+        .filter((eip) => !topo.elasticIpTarget(eip.id))
+        .map((eip) => ({
+          resourceIds: [eip.id],
+          cause: `탄력적 IP ${eip.config.publicIp}(${topo.name(eip.id)})이(가) 어떤 리소스에도 연결되어 있지 않습니다.`,
+          condition: "Elastic IP 연결 없음",
+          fix: ["인스턴스에 연결하거나(작업 → 탄력적 IP 주소 연결), 필요 없으면 릴리스하세요."],
+          impact: "시뮬레이션 결과에는 영향이 없고, 가상 비용 추정치에서 퍼블릭 IPv4 비용이 줄어듭니다.",
+        })),
   },
 
   // ------------------------------------------------------------ 보안
@@ -655,7 +711,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
           .map((r) => ({
             key: r.id,
             resourceIds: [sg.id],
-            cause: `${sg.name}의 인바운드 규칙 "${sgRuleText(topo, r)}"이(가) 모든 IPv4 주소에서 모든 포트를 허용합니다.`,
+            cause: `${displayName(sg)}의 인바운드 규칙 "${sgRuleText(topo, r)}"이(가) 모든 IPv4 주소에서 모든 포트를 허용합니다.`,
             condition: "출발지 0.0.0.0/0 + 모든 포트",
             fix: ["필요한 포트(예: TCP 80, 443)만 허용하도록 규칙을 좁히세요.", "내부 통신은 보안 그룹 참조 규칙을 사용하세요."],
             impact: "통신 성공 여부에는 영향이 없을 수 있지만, 불필요한 포트가 외부에 노출되는 보안 위험이 줄어듭니다.",
@@ -678,7 +734,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
               .map(([port, name]) => ({
                 key: `${r.id}-${port}`,
                 resourceIds: [sg.id],
-                cause: `${sg.name}이(가) ${name}(TCP ${port})을 0.0.0.0/0에 허용합니다.`,
+                cause: `${displayName(sg)}이(가) ${name}(TCP ${port})을 0.0.0.0/0에 허용합니다.`,
                 condition: `인바운드 TCP ${formatPortRange(r.fromPort, r.toPort)} ← 0.0.0.0/0`,
                 fix: [`출발지를 관리자 IP(예: 203.0.113.0/24)나 Bastion 보안 그룹으로 제한하세요.`],
                 impact: "통신 성공 여부와 별개로, 외부에서 관리 포트로의 무차별 접속 위험이 사라집니다.",
@@ -702,7 +758,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
               .map(([port, name]) => ({
                 key: `${r.id}-${port}`,
                 resourceIds: [sg.id],
-                cause: `${sg.name}이(가) ${name} 포트(TCP ${port})를 0.0.0.0/0에 허용합니다.`,
+                cause: `${displayName(sg)}이(가) ${name} 포트(TCP ${port})를 0.0.0.0/0에 허용합니다.`,
                 condition: `인바운드 TCP ${formatPortRange(r.fromPort, r.toPort)} ← 0.0.0.0/0`,
                 fix: ["출발지를 애플리케이션 서버의 보안 그룹(SG 참조 규칙)으로 바꾸세요."],
                 impact: "애플리케이션 → DB 통신은 그대로 유지하면서 외부 노출을 막을 수 있습니다.",
@@ -728,7 +784,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
               {
                 key: r.id,
                 resourceIds: [sg.id],
-                cause: `${sg.name}의 ${dir} 규칙: ${problems.join(" ")}`,
+                cause: `${displayName(sg)}의 ${dir} 규칙: ${problems.join(" ")}`,
                 condition: `${dir} 규칙 ${rulePortsLabel(r)}`,
                 fix: ["규칙을 수정하거나 삭제하세요."],
                 impact: "잘못된 규칙은 평가에서 제외됩니다. 수정하면 의도한 트래픽이 허용됩니다.",
@@ -757,8 +813,8 @@ export const VALIDATION_RULES: ValidationRule[] = [
               key: r.id,
               resourceIds: [sg.id, ref?.id],
               cause: ref
-                ? `${sg.name}의 규칙이 다른 VPC(${topo.name(refVpc)})의 보안 그룹 ${ref.name}을(를) 참조합니다.`
-                : `${sg.name}의 규칙이 존재하지 않는 보안 그룹을 참조합니다.`,
+                ? `${displayName(sg)}의 규칙이 다른 VPC(${topo.name(refVpc)})의 보안 그룹 ${displayName(ref)}을(를) 참조합니다.`
+                : `${displayName(sg)}의 규칙이 존재하지 않는 보안 그룹을 참조합니다.`,
               condition: `규칙 ${sgRuleText(topo, r)}`,
               fix: ["같은 VPC의 보안 그룹을 참조하거나 CIDR 규칙으로 바꾸세요."],
               impact: "같은 VPC의 보안 그룹을 참조하면 해당 그룹이 연결된 리소스의 트래픽이 허용됩니다.",
@@ -781,7 +837,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
           resourceIds: [r.id],
           cause: `${topo.label(r.id)}에 연결된 보안 그룹이 없습니다.`,
           condition: "리소스 → Security Group 연결 없음",
-          fix: [`같은 VPC의 보안 그룹을 만들어 ${r.name}에 연결하세요.`],
+          fix: [`같은 VPC의 보안 그룹을 만들어 ${displayName(r)}에 연결하세요.`],
           impact: "보안 그룹을 연결하고 필요한 규칙을 추가하면 해당 리소스와의 통신이 허용됩니다.",
         })),
   },
@@ -801,7 +857,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
           .map((sg) => ({
             key: sg.id,
             resourceIds: [r.id, sg.id],
-            cause: `${topo.label(r.id)}(VPC ${topo.name(vpcId)})에 다른 VPC(${topo.name(topo.vpcOf(sg.id))})의 보안 그룹 ${sg.name}이(가) 연결되어 있습니다.`,
+            cause: `${topo.label(r.id)}(VPC ${topo.name(vpcId)})에 다른 VPC(${topo.name(topo.vpcOf(sg.id))})의 보안 그룹 ${displayName(sg)}이(가) 연결되어 있습니다.`,
             condition: "리소스와 보안 그룹의 VPC 불일치",
             fix: ["리소스와 같은 VPC의 보안 그룹으로 교체하세요."],
             impact: "같은 VPC의 보안 그룹을 연결하면 규칙이 의도대로 평가됩니다.",
@@ -834,10 +890,10 @@ export const VALIDATION_RULES: ValidationRule[] = [
     check: ({ topo }) =>
       topo
         .ofType("security-group")
-        .filter((sg) => topo.resourcesUsingSecurityGroup(sg.id).length === 0)
+        .filter((sg) => !sg.config.isDefault && topo.resourcesUsingSecurityGroup(sg.id).length === 0)
         .map((sg) => ({
           resourceIds: [sg.id],
-          cause: `${sg.name}이(가) 어떤 EC2/ALB/RDS에도 연결되어 있지 않습니다.`,
+          cause: `${displayName(sg)}이(가) 어떤 EC2/ALB/RDS에도 연결되어 있지 않습니다.`,
           condition: "리소스 → Security Group 연결 없음",
           fix: ["필요한 리소스에 연결하거나, 사용하지 않는다면 삭제하세요."],
           impact: "연결하면 해당 리소스의 트래픽에 이 그룹의 규칙이 적용됩니다.",
@@ -874,10 +930,10 @@ export const VALIDATION_RULES: ValidationRule[] = [
               severity: all ? "warning" : "info",
               resourceIds: [nacl.id, ...subnets],
               title: all ? undefined : "일부 임시 포트의 응답이 Network ACL에 의해 차단될 수 있음",
-              cause: `${nacl.name}의 ${label} 규칙 ${describeNaclRule(rule)}은(는) 허용되지만, ${responseDir === "outbound" ? "아웃바운드" : "인바운드"} 규칙이 ${rule.cidr} 방향의 응답 임시 포트(${blocked.join(", ")})를 허용하지 않습니다.`,
+              cause: `${displayName(nacl)}의 ${label} 규칙 ${describeNaclRule(rule)}은(는) 허용되지만, ${responseDir === "outbound" ? "아웃바운드" : "인바운드"} 규칙이 ${rule.cidr} 방향의 응답 임시 포트(${blocked.join(", ")})를 허용하지 않습니다.`,
               condition: `${responseDir === "outbound" ? "아웃바운드" : "인바운드"} ${protocol.toUpperCase()} 1024-65535 ↔ ${rule.cidr} 허용 규칙 없음`,
               fix: [
-                `${nacl.name}의 ${responseDir === "outbound" ? "아웃바운드" : "인바운드"} 규칙에 ${protocol.toUpperCase()} 1024-65535 (${rule.cidr}) ALLOW 규칙을 추가하세요.`,
+                `${displayName(nacl)}의 ${responseDir === "outbound" ? "아웃바운드" : "인바운드"} 규칙에 ${protocol.toUpperCase()} 1024-65535 (${rule.cidr}) ALLOW 규칙을 추가하세요.`,
               ],
               impact: "임시 포트를 허용하면 요청은 통과했지만 응답이 막혀 실패하던 시뮬레이션이 성공합니다.",
             });
@@ -910,7 +966,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
             {
               key: dir,
               resourceIds: [nacl.id],
-              cause: `${nacl.name} ${dir === "inbound" ? "인바운드" : "아웃바운드"}: ${problems.join(" ")}`,
+              cause: `${displayName(nacl)} ${dir === "inbound" ? "인바운드" : "아웃바운드"}: ${problems.join(" ")}`,
               condition: "규칙 번호 중복 또는 잘못된 값",
               fix: ["규칙 번호를 고유하게 바꾸고 CIDR/포트를 수정하세요."],
               impact: "잘못된 규칙은 평가에서 제외되거나 순서가 모호해집니다. 수정하면 평가 순서가 명확해집니다.",
@@ -931,7 +987,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
           findShadowedRules(dir === "inbound" ? nacl.config.inboundRules : nacl.config.outboundRules).map(({ rule, shadowedBy }) => ({
             key: `${dir}-${rule.id}`,
             resourceIds: [nacl.id],
-            cause: `${nacl.name} ${dir === "inbound" ? "인바운드" : "아웃바운드"} 규칙 ${describeNaclRule(rule)}은(는) 앞선 ${describeNaclRule(shadowedBy)}에 가려져 적용되지 않습니다.`,
+            cause: `${displayName(nacl)} ${dir === "inbound" ? "인바운드" : "아웃바운드"} 규칙 ${describeNaclRule(rule)}은(는) 앞선 ${describeNaclRule(shadowedBy)}에 가려져 적용되지 않습니다.`,
             condition: "더 낮은 번호의 규칙이 같은 트래픽을 먼저 결정",
             fix: [`의도한 규칙이라면 #${shadowedBy.ruleNumber}보다 낮은 번호로 바꾸세요.`],
             impact: "번호를 조정하면 해당 규칙이 먼저 평가되어 시뮬레이션 결과가 달라질 수 있습니다.",
@@ -956,7 +1012,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
             {
               key: dir,
               resourceIds: [nacl.id, ...subnets],
-              cause: `${nacl.name}의 ${dir === "inbound" ? "인바운드" : "아웃바운드"} 규칙에 ALLOW가 없어 연결된 서브넷의 모든 트래픽이 거부됩니다.`,
+              cause: `${displayName(nacl)}의 ${dir === "inbound" ? "인바운드" : "아웃바운드"} 규칙에 ALLOW가 없어 연결된 서브넷의 모든 트래픽이 거부됩니다.`,
               condition: "ALLOW 규칙 0개",
               fix: ["필요한 트래픽(서비스 포트와 응답용 임시 포트)을 허용하는 규칙을 추가하세요."],
               impact: "허용 규칙을 추가하면 해당 서브넷을 지나는 통신이 가능해집니다.",
@@ -979,7 +1035,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
         .filter((e) => !topo.subnetOf(e.id))
         .map((e) => ({
           resourceIds: [e.id],
-          cause: `${e.name}이(가) 서브넷에 배치되어 있지 않습니다.`,
+          cause: `${displayName(e)}이(가) 서브넷에 배치되어 있지 않습니다.`,
           condition: "EC2 → Subnet 배치 연결 없음",
           fix: ["캔버스에서 EC2와 서브넷을 연결하거나 EC2 설정에서 서브넷을 선택하세요."],
           impact: "서브넷에 배치하면 사설 IP가 정해지고 통신 시뮬레이션의 출발지/목적지로 사용할 수 있습니다.",
@@ -1000,7 +1056,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
         const value = parseIpv4(e.config.privateIp);
         let cause: string | null = null;
         if (value === null) cause = `사설 IP "${e.config.privateIp}"이(가) 올바른 IPv4 주소가 아닙니다.`;
-        else if (!cidrContainsIp(cidr, value)) cause = `사설 IP ${e.config.privateIp}이(가) 서브넷 ${subnet.name}(${cidr.text}) 범위 밖입니다.`;
+        else if (!cidrContainsIp(cidr, value)) cause = `사설 IP ${e.config.privateIp}이(가) 서브넷 ${displayName(subnet)}(${cidr.text}) 범위 밖입니다.`;
         else {
           const reserved = awsReservedReason(cidr, value);
           if (reserved) cause = `사설 IP ${e.config.privateIp}은(는) AWS 예약 주소(${reserved})입니다.`;
@@ -1010,7 +1066,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
           {
             resourceIds: [e.id, subnet.id],
             cause,
-            condition: `${e.name}.privateIp = "${e.config.privateIp}"`,
+            condition: `${displayName(e)}.privateIp = "${e.config.privateIp}"`,
             fix: [`${cidr.text} 범위에서 예약되지 않은 주소를 사용하세요. ${topo.suggestPrivateIp(subnet.id, e.id) ? `예: ${topo.suggestPrivateIp(subnet.id, e.id)}` : ""}`.trim()],
             impact: "올바른 IP를 지정하면 이 인스턴스를 출발지/목적지로 한 시뮬레이션이 가능해집니다.",
           },
@@ -1056,7 +1112,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
         .filter((e) => e.config.state !== "running")
         .map((e) => ({
           resourceIds: [e.id],
-          cause: `${e.name}이(가) ${e.config.state} 상태입니다.`,
+          cause: `${displayName(e)}이(가) ${e.config.state} 상태입니다.`,
           condition: `state = ${e.config.state}`,
           fix: e.config.state === "terminated" ? ["종료된 인스턴스는 다시 시작할 수 없습니다. 필요하면 새 인스턴스를 만드세요."] : ["EC2 설정에서 인스턴스를 시작하세요."],
           impact: "Running으로 바꾸면 이 인스턴스로의 요청과 헬스 체크가 성공할 수 있습니다.",
@@ -1094,7 +1150,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
         .filter((a) => a.config.listeners.length === 0)
         .map((a) => ({
           resourceIds: [a.id],
-          cause: `${a.name}에 리스너가 없습니다.`,
+          cause: `${displayName(a)}에 리스너가 없습니다.`,
           condition: "listeners = []",
           fix: ["ALB 설정에서 리스너(예: HTTP:80)를 추가하고 대상 그룹을 지정하세요."],
           impact: "리스너를 추가하면 '인터넷 → ALB' 요청이 리스너 단계를 통과합니다.",
@@ -1114,7 +1170,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
           .map((b) => ({
             key: b.listener.id,
             resourceIds: [a.id],
-            cause: `${a.name}의 리스너 ${b.listener.protocol}:${b.listener.port}에 전달할 대상 그룹이 없습니다.`,
+            cause: `${displayName(a)}의 리스너 ${b.listener.protocol}:${b.listener.port}에 전달할 대상 그룹이 없습니다.`,
             condition: "ALB → Target Group 전달 연결 없음",
             fix: ["캔버스에서 ALB와 대상 그룹을 연결하거나 ALB 설정의 리스너에서 대상 그룹을 선택하세요."],
             impact: "대상 그룹을 지정하면 요청이 등록된 EC2로 전달됩니다.",
@@ -1133,7 +1189,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
         .filter((tg) => topo.targetGroupTargets(tg.id).length === 0)
         .map((tg) => ({
           resourceIds: [tg.id],
-          cause: `대상 그룹 ${tg.name}에 등록된 EC2가 없습니다.`,
+          cause: `대상 그룹 ${displayName(tg)}에 등록된 EC2가 없습니다.`,
           condition: "Target Group → EC2 등록 없음",
           fix: ["캔버스에서 대상 그룹과 EC2를 연결해 대상을 등록하세요."],
           impact: "대상을 등록하면 ALB 요청이 그 대상으로 분산됩니다.",
@@ -1153,7 +1209,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
         return [
           {
             resourceIds: [tg.id, ...entries.map((h) => h.targetId)],
-            cause: `대상 그룹 ${tg.name}의 정상 대상이 없습니다: ${entries.map((h) => `${h.targetName} — ${h.reason}`).join(" / ")}`,
+            cause: `대상 그룹 ${displayName(tg)}의 정상 대상이 없습니다: ${entries.map((h) => `${h.targetName} — ${h.reason}`).join(" / ")}`,
             condition: "Healthy 대상 0개",
             fix: [
               "대상 인스턴스를 Running 상태로 만드세요.",
@@ -1199,7 +1255,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
         return [
           {
             resourceIds: [a.id, ...subnets.map((s) => s.id)],
-            cause: `${a.name}이(가) ${subnets.length}개 서브넷(가용 영역 ${azs.size}개)에만 배치되어 있습니다.`,
+            cause: `${displayName(a)}이(가) ${subnets.length}개 서브넷(가용 영역 ${azs.size}개)에만 배치되어 있습니다.`,
             condition: "서로 다른 가용 영역의 서브넷 2개 미만",
             fix: ["서로 다른 가용 영역의 서브넷을 2개 이상 ALB와 연결하세요."],
             impact: "가용 영역을 2개 이상 지정하면 ALB 구성이 유효해지고 해당 영역의 대상이 사용 가능(In use) 상태가 됩니다.",
@@ -1218,7 +1274,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
         const subnets = topo.albSubnets(a.id);
         const problems: string[] = [];
         const byAz = new Map<string, string[]>();
-        for (const s of subnets) byAz.set(s.config.availabilityZone, [...(byAz.get(s.config.availabilityZone) ?? []), s.name]);
+        for (const s of subnets) byAz.set(s.config.availabilityZone, [...(byAz.get(s.config.availabilityZone) ?? []), displayName(s)]);
         for (const [az, names] of byAz) if (names.length > 1) problems.push(`가용 영역 ${az}에 서브넷이 ${names.length}개(${names.join(", ")}) 지정되었습니다.`);
         const vpcs = topo.vpcsOf(a.id);
         if (vpcs.length > 1) problems.push(`서브넷이 여러 VPC(${vpcs.map((v) => topo.name(v)).join(", ")})에 걸쳐 있습니다.`);
@@ -1250,7 +1306,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
           return [
             {
               resourceIds: [a.id, ...privateSubnets.map((s) => s.id)],
-              cause: `internet-facing ALB ${a.name}의 서브넷 ${privateSubnets.map((s) => s.name).join(", ")}이(가) 퍼블릭 서브넷이 아닙니다.`,
+              cause: `internet-facing ALB ${displayName(a)}의 서브넷 ${privateSubnets.map((s) => displayName(s)).join(", ")}이(가) 퍼블릭 서브넷이 아닙니다.`,
               condition: "ALB 서브넷에 IGW 경로 없음",
               fix: ["ALB를 0.0.0.0/0 → IGW 경로가 있는 퍼블릭 서브넷에 배치하세요."],
               impact: "퍼블릭 서브넷에 배치하면 '인터넷 → ALB' 요청과 응답 경로가 성립합니다.",
@@ -1279,7 +1335,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
             {
               key: l.id,
               resourceIds: [a.id, ...groups.map((g) => g.id)],
-              cause: `${a.name}의 보안 그룹(${groups.map((g) => g.name).join(", ")})이 리스너 포트 TCP ${l.port}을(를) ${a.config.scheme === "internet-facing" ? "인터넷 클라이언트" : "어떤 출발지"}에게도 허용하지 않습니다.`,
+              cause: `${displayName(a)}의 보안 그룹(${groups.map((g) => displayName(g)).join(", ")})이 리스너 포트 TCP ${l.port}을(를) ${a.config.scheme === "internet-facing" ? "인터넷 클라이언트" : "어떤 출발지"}에게도 허용하지 않습니다.`,
               condition: `리스너 ${l.protocol}:${l.port} / 인바운드 규칙 없음`,
               fix: [`ALB 보안 그룹 인바운드에 TCP ${l.port} ← ${a.config.scheme === "internet-facing" ? "0.0.0.0/0" : "클라이언트 CIDR 또는 보안 그룹"} 규칙을 추가하세요.`],
               impact: "규칙을 추가하면 요청이 ALB 보안 그룹 단계를 통과합니다.",
@@ -1323,7 +1379,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
           .map(([port, n]) => ({
             key: String(port),
             resourceIds: [a.id],
-            cause: `${a.name}에 포트 ${port} 리스너가 ${n}개 있습니다.`,
+            cause: `${displayName(a)}에 포트 ${port} 리스너가 ${n}개 있습니다.`,
             condition: "리스너 포트 중복",
             fix: ["중복된 리스너를 삭제하세요."],
             impact: "중복을 없애면 요청을 처리할 리스너가 하나로 결정됩니다. (현재는 첫 번째 리스너 사용)",
@@ -1344,7 +1400,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
           {
             resourceIds: [tg.id],
             cause: problems.join(" "),
-            condition: `대상 그룹 ${tg.name} 헬스 체크 설정`,
+            condition: `대상 그룹 ${displayName(tg)} 헬스 체크 설정`,
             fix: ["대상 그룹 설정에서 헬스 체크 값을 허용 범위로 수정하세요."],
             impact: "유효한 설정이 되면 헬스 상태 계산이 AWS 규칙과 일치합니다.",
           },
@@ -1363,7 +1419,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
         .filter((tg) => topo.targetGroupAlbs(tg.id).length === 0)
         .map((tg) => ({
           resourceIds: [tg.id],
-          cause: `대상 그룹 ${tg.name}이(가) 어떤 ALB 리스너에도 연결되어 있지 않습니다.`,
+          cause: `대상 그룹 ${displayName(tg)}이(가) 어떤 ALB 리스너에도 연결되어 있지 않습니다.`,
           condition: "ALB → Target Group 전달 연결 없음",
           fix: ["ALB와 대상 그룹을 연결하세요."],
           impact: "연결하면 대상에 헬스 체크가 수행되고 요청을 받을 수 있습니다.",
@@ -1382,7 +1438,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
           .map((l) => ({
             key: l.id,
             resourceIds: [a.id],
-            cause: `${a.name}의 HTTPS:${l.port} 리스너는 인증서 없이 포트 수준으로만 시뮬레이션됩니다.`,
+            cause: `${displayName(a)}의 HTTPS:${l.port} 리스너는 인증서 없이 포트 수준으로만 시뮬레이션됩니다.`,
             condition: "리스너 프로토콜 HTTPS",
             fix: ["실제 환경에서는 인증서를 연결해야 합니다."],
             impact: "시뮬레이션 결과에는 영향이 없습니다.",
@@ -1413,6 +1469,25 @@ export const VALIDATION_RULES: ValidationRule[] = [
       ),
   },
 
+  {
+    id: "ELB-016",
+    category: "load-balancing",
+    severity: "info",
+    title: "프로비저닝 중인 로드 밸런서",
+    concept: "로드 밸런서는 생성 직후 Provisioning 상태이며, Active가 된 뒤부터 요청을 받습니다.",
+    check: ({ topo }) =>
+      topo
+        .ofType("alb")
+        .filter((a) => a.config.state !== "active")
+        .map((a) => ({
+          resourceIds: [a.id],
+          cause: `${topo.name(a.id)}이(가) 아직 프로비저닝 중입니다.`,
+          condition: `state = ${a.config.state}`,
+          fix: ["잠시 기다리면 Active 상태가 됩니다."],
+          impact: "Active가 되면 DNS 이름이 해석되고 리스너가 요청을 받습니다.",
+        })),
+  },
+
   // ------------------------------------------------------------ 데이터베이스
   {
     id: "RDS-001",
@@ -1426,7 +1501,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
         .filter((r) => !topo.dbSubnetGroupOf(r.id))
         .map((r) => ({
           resourceIds: [r.id],
-          cause: `${r.name}에 DB 서브넷 그룹이 연결되어 있지 않습니다.`,
+          cause: `${displayName(r)}에 DB 서브넷 그룹이 연결되어 있지 않습니다.`,
           condition: "RDS → DB Subnet Group 연결 없음",
           fix: ["DB 서브넷 그룹을 만들고 서로 다른 가용 영역의 서브넷 2개 이상을 추가한 뒤 RDS와 연결하세요."],
           impact: "배치되면 RDS 엔드포인트가 사설 IP로 해석되어 연결 시뮬레이션이 가능해집니다.",
@@ -1446,7 +1521,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
         return [
           {
             resourceIds: [g.id, ...subnets.map((s) => s.id)],
-            cause: `DB 서브넷 그룹 ${g.name}에 서브넷 ${subnets.length}개(가용 영역 ${azs.size}개)만 있습니다.`,
+            cause: `DB 서브넷 그룹 ${displayName(g)}에 서브넷 ${subnets.length}개(가용 영역 ${azs.size}개)만 있습니다.`,
             condition: "서브넷 2개 미만 또는 가용 영역 2개 미만",
             fix: ["서로 다른 가용 영역의 서브넷을 2개 이상 추가하세요."],
             impact: "요구 사항을 충족하면 Multi-AZ 구성과 장애 조치를 준비할 수 있습니다.",
@@ -1467,7 +1542,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
         return [
           {
             resourceIds: [g.id, ...topo.dbSubnetGroupSubnets(g.id).map((s) => s.id)],
-            cause: `DB 서브넷 그룹 ${g.name}의 서브넷이 여러 VPC(${vpcs.map((v) => topo.name(v)).join(", ")})에 있습니다.`,
+            cause: `DB 서브넷 그룹 ${displayName(g)}의 서브넷이 여러 VPC(${vpcs.map((v) => topo.name(v)).join(", ")})에 있습니다.`,
             condition: "서브넷 VPC 불일치",
             fix: ["같은 VPC의 서브넷만 남기세요."],
             impact: "같은 VPC로 정리하면 RDS의 네트워크 위치가 명확해집니다.",
@@ -1491,7 +1566,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
             {
               severity: "info",
               resourceIds: [rds.id],
-              cause: `${rds.name}과(와) 같은 VPC에 Running 상태의 애플리케이션 서버(EC2)가 없습니다.`,
+              cause: `${displayName(rds)}과(와) 같은 VPC에 Running 상태의 애플리케이션 서버(EC2)가 없습니다.`,
               condition: "같은 VPC의 EC2 없음",
               fix: ["애플리케이션 서버를 추가하고 RDS 보안 그룹에서 그 서버의 보안 그룹을 허용하세요."],
               impact: "EC2를 추가하면 애플리케이션 → DB 연결을 시뮬레이션할 수 있습니다.",
@@ -1512,8 +1587,8 @@ export const VALIDATION_RULES: ValidationRule[] = [
         return [
           {
             resourceIds: [rds.id, ...apps.map((a) => a.id), ...(first.failure?.resourceIds ?? [])],
-            cause: `어떤 EC2도 ${rds.name}의 TCP ${rds.config.port}에 연결할 수 없습니다. 예: ${results[0].app.name} → ${first.failure?.reason ?? first.summary}`,
-            condition: `EC2 ${apps.map((a) => a.name).join(", ")} → ${rds.name}:${rds.config.port}`,
+            cause: `어떤 EC2도 ${displayName(rds)}의 TCP ${rds.config.port}에 연결할 수 없습니다. 예: ${displayName(results[0].app)} → ${first.failure?.reason ?? first.summary}`,
+            condition: `EC2 ${apps.map((a) => displayName(a)).join(", ")} → ${displayName(rds)}:${rds.config.port}`,
             fix: first.failure?.fixes.length
               ? first.failure.fixes
               : [`RDS 보안 그룹 인바운드에 TCP ${rds.config.port} ← 애플리케이션 보안 그룹 규칙을 추가하세요.`],
@@ -1540,7 +1615,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
           return [
             {
               resourceIds: [r.id, primary.id],
-              cause: `${r.name}은(는) Publicly Accessible이지만 배치된 서브넷 ${primary.name}이(가) 퍼블릭 서브넷이 아닙니다. ${cls.reason}`,
+              cause: `${displayName(r)}은(는) Publicly Accessible이지만 배치된 서브넷 ${displayName(primary)}이(가) 퍼블릭 서브넷이 아닙니다. ${cls.reason}`,
               condition: "publiclyAccessible = true + 프라이빗 서브넷",
               fix: [
                 "외부 접근이 필요 없다면 Publicly Accessible을 끄세요 (권장).",
@@ -1569,7 +1644,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
         return [
           {
             resourceIds: [r.id, ...open.map((o) => o.g.id)],
-            cause: `${r.name}의 보안 그룹이 DB 포트 TCP ${r.config.port}을(를) 0.0.0.0/0에 허용합니다 (${open.map((o) => `${o.g.name}: ${sgRuleText(topo, o.rule)}`).join(", ")}).`,
+            cause: `${displayName(r)}의 보안 그룹이 DB 포트 TCP ${r.config.port}을(를) 0.0.0.0/0에 허용합니다 (${open.map((o) => `${displayName(o.g)}: ${sgRuleText(topo, o.rule)}`).join(", ")}).`,
             condition: `인바운드 TCP ${r.config.port} ← 0.0.0.0/0`,
             fix: ["출발지를 애플리케이션 서버의 보안 그룹으로 제한하세요."],
             impact: "애플리케이션 → DB 연결은 유지하면서 외부 노출 위험을 줄입니다.",
@@ -1598,7 +1673,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
           return [
             {
               resourceIds: [r.id],
-              cause: `시뮬레이션 결과 인터넷 클라이언트(${DEFAULT_INTERNET_CLIENT_IP})가 ${r.name}의 TCP ${r.config.port}에 연결할 수 있습니다.`,
+              cause: `시뮬레이션 결과 인터넷 클라이언트(${DEFAULT_INTERNET_CLIENT_IP})가 ${displayName(r)}의 TCP ${r.config.port}에 연결할 수 있습니다.`,
               condition: "Publicly Accessible + 퍼블릭 서브넷 + 보안 그룹 허용",
               fix: ["Publicly Accessible을 끄고, DB 서브넷 그룹을 프라이빗 서브넷으로 구성하세요.", "보안 그룹 출발지를 애플리케이션 보안 그룹으로 제한하세요."],
               impact: "수정하면 '인터넷 → RDS' 시뮬레이션이 실패(차단)하게 됩니다.",
@@ -1622,7 +1697,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
           return [
             {
               resourceIds: [r.id, vpc.id],
-              cause: `VPC ${vpc.name}의 DNS 확인=${vpc.config.enableDnsSupport ? "켬" : "끔"}, DNS 호스트 이름=${vpc.config.enableDnsHostnames ? "켬" : "끔"}입니다.`,
+              cause: `VPC ${displayName(vpc)}의 DNS 확인=${vpc.config.enableDnsSupport ? "켬" : "끔"}, DNS 호스트 이름=${vpc.config.enableDnsHostnames ? "켬" : "끔"}입니다.`,
               condition: "publiclyAccessible = true + VPC DNS 설정 꺼짐",
               fix: ["VPC 설정에서 DNS 확인과 DNS 호스트 이름을 모두 켜거나 Publicly Accessible을 끄세요."],
               impact: "설정을 맞추면 AWS에서 허용되는 구성이 됩니다.",
@@ -1642,7 +1717,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
         .filter((r) => !r.config.multiAz)
         .map((r) => ({
           resourceIds: [r.id],
-          cause: `${r.name}은(는) 단일 가용 영역에 배치됩니다.`,
+          cause: `${displayName(r)}은(는) 단일 가용 영역에 배치됩니다.`,
           condition: "multiAz = false",
           fix: ["운영 환경이라면 Multi-AZ를 켜는 것을 고려하세요."],
           impact: "연결 시뮬레이션 결과에는 영향이 없고, 가상 비용 추정치가 증가합니다.",
@@ -1660,7 +1735,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
         .filter((r) => r.config.state !== "available")
         .map((r) => ({
           resourceIds: [r.id],
-          cause: `${r.name}이(가) ${r.config.state} 상태입니다.`,
+          cause: `${displayName(r)}이(가) ${r.config.state} 상태입니다.`,
           condition: `state = ${r.config.state}`,
           fix: ["RDS 설정에서 상태를 Available로 변경하세요."],
           impact: "Available로 바꾸면 DB 포트 연결 검사가 성공할 수 있습니다.",
@@ -1679,7 +1754,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
         return [
           {
             resourceIds: [g.id, ...publicSubnets.map((s) => s.id)],
-            cause: `DB 서브넷 그룹 ${g.name}에 퍼블릭 서브넷(${publicSubnets.map((s) => s.name).join(", ")})이 포함되어 있습니다.`,
+            cause: `DB 서브넷 그룹 ${displayName(g)}에 퍼블릭 서브넷(${publicSubnets.map((s) => displayName(s)).join(", ")})이 포함되어 있습니다.`,
             condition: "DB 서브넷 그룹 ⊃ 퍼블릭 서브넷",
             fix: ["DB 전용 프라이빗 서브넷을 만들어 그룹을 구성하세요."],
             impact: "DB가 프라이빗 서브넷에 있으면 Publicly Accessible을 잘못 켜도 인터넷에서 접근할 수 없습니다.",
@@ -1697,7 +1772,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
     concept: "리소스는 관계(소속, 배치, 연결)를 통해 아키텍처에 참여합니다. 연결이 없는 리소스는 시뮬레이션에 영향을 주지 않습니다.",
     check: ({ topo }) =>
       topo.project.resources
-        .filter((r) => r.type !== "vpc" && topo.connectionsOf(r.id).length === 0)
+        .filter((r) => r.type !== "vpc" && r.type !== "elastic-ip" && topo.connectionsOf(r.id).length === 0)
         .map((r) => ({
           resourceIds: [r.id],
           cause: `${topo.label(r.id)}이(가) 다른 리소스와 연결되어 있지 않습니다.`,

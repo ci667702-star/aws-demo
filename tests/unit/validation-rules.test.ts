@@ -149,6 +149,9 @@ const triggers: Record<string, () => Project> = {
       b.routeTable("main-2", vpc, { main: true });
     }),
   "NET-023": () => single(() => {}, "172.32.0.0/16"),
+  "NET-024": () => single((b, { subnet }) => b.nat("legacy-nat", subnet, { eip: false })),
+  "NET-025": () => single((b, { subnet }) => b.nat("broken-nat", subnet, { state: "failed" })),
+  "EIP-001": () => single((b) => b.elasticIp("spare-eip")),
   "SEC-001": () => single((b, { vpc }) => b.securityGroup("open", vpc, { inbound: [SG.all("0.0.0.0/0")] })),
   "SEC-002": () => single((b, { vpc }) => b.securityGroup("ssh", vpc, { inbound: [SG.tcp(22, "0.0.0.0/0")] })),
   "SEC-003": () => single((b, { vpc }) => b.securityGroup("db", vpc, { inbound: [SG.tcp([3000, 4000], "0.0.0.0/0")] })),
@@ -221,6 +224,12 @@ const triggers: Record<string, () => Project> = {
   },
   "ELB-014": () => webTier({ listeners: [{ protocol: "HTTPS", port: 443, targetGroup: true }], albInbound: [SG.tcp(443, "0.0.0.0/0")] }),
   "ELB-015": () => webTier({ httpResponseCode: 500 }),
+  "ELB-016": () => {
+    const p = webTier();
+    const alb = p.resources.find((r) => r.type === "alb");
+    if (alb?.type === "alb") alb.config.state = "provisioning";
+    return p;
+  },
   "RDS-001": () => {
     const b = new ProjectBuilder("rds-alone");
     b.rds("db");
@@ -248,7 +257,7 @@ describe("검증 규칙", () => {
   it("모든 규칙은 고유 ID를 가진다", () => {
     const ids = VALIDATION_RULES.map((r) => r.id);
     expect(new Set(ids).size).toBe(ids.length);
-    for (const id of ids) expect(id).toMatch(/^(NET|SEC|EC2|ELB|RDS|GEN)-\d{3}$/);
+    for (const id of ids) expect(id).toMatch(/^(NET|SEC|EC2|ELB|RDS|GEN|EIP)-\d{3}$/);
   });
 
   it("모든 규칙에 트리거 테스트가 있다", () => {

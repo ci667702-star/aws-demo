@@ -1,70 +1,80 @@
 "use client";
 
+/**
+ * 첫 화면: 샌드박스(가상 계정) 목록.
+ * 앱이 미리 만들어 두는 프로젝트는 없다. 사용자가 빈 샌드박스를 만들고 콘솔에서 직접 구성한다.
+ */
+import { Cloud, Moon, Sun, SunMoon } from "lucide-react";
+import { useTheme } from "next-themes";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
-import { toast } from "sonner";
-import {
-  BookOpen,
-  CircleCheck,
-  FileJson,
-  FlaskConical,
-  GraduationCap,
-  LayoutGrid,
-  Plus,
-  Search,
-  TriangleAlert,
-  X,
-} from "lucide-react";
-import { Brand, DISCLAIMER } from "@/components/app/brand";
+import { DISCLAIMER } from "@/components/app/brand";
 import { ClientGate } from "@/components/app/client-gate";
 import { ImportDialog } from "@/components/app/import-dialog";
-import { TextPromptDialog } from "@/components/app/text-prompt-dialog";
-import { ThemeToggle } from "@/components/app/theme-toggle";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { createLabContext, evaluateLab, LABS } from "@/lib/labs/labs";
+import { Alert } from "@/components/console/ui/alert";
+import { Button, ButtonDropdown } from "@/components/console/ui/button";
+import { FormField, TextInput } from "@/components/console/ui/form";
+import { Container, ContainerHeader, EmptyState, ExpandableSection, PageHeader, SpaceBetween } from "@/components/console/ui/layout";
+import { DeleteModal, Modal } from "@/components/console/ui/overlay";
+import { ResourceTable } from "@/components/console/ui/table";
+import { Badge } from "@/components/console/ui/status";
 import type { Project } from "@/lib/engine/resource-models";
+import { LABS } from "@/lib/labs/labs";
 import { SAMPLES } from "@/lib/project/samples";
 import { exportFileName, exportProjectJson } from "@/lib/project/serialization";
 import { useProjectStore } from "@/lib/store/project-store";
 import { downloadTextFile } from "@/lib/ui/download";
-import { ProjectCard } from "./project-card";
+import { formatDateTime, formatRelativeTime } from "@/lib/ui/format";
 
 export function Dashboard() {
   return (
-    <div className="flex min-h-full flex-col bg-muted/30">
-      <header className="sticky top-0 z-20 flex h-14 items-center justify-between border-b bg-background/90 px-4 backdrop-blur">
-        <Brand />
-        <nav className="flex items-center gap-1" aria-label="주 메뉴">
-          <Button asChild variant="ghost" size="sm">
-            <Link href="/about">
-              <BookOpen /> <span className="hidden sm:inline">지원 범위</span>
-            </Link>
-          </Button>
-          <ThemeToggle />
-        </nav>
-      </header>
-      <ClientGate>
-        <DashboardContent />
-      </ClientGate>
-      <footer className="border-t bg-background px-4 py-4 text-center text-xs text-muted-foreground">{DISCLAIMER}</footer>
+    <div className="flex min-h-dvh flex-col bg-aws-page text-aws-text">
+      <SiteHeader />
+      <main className="mx-auto w-full max-w-[1200px] flex-1 px-4 py-6 sm:px-6">
+        <ClientGate>
+          <DashboardContent />
+        </ClientGate>
+      </main>
+      <footer className="border-t border-aws-border px-4 py-4 text-center text-xs text-aws-text-2">{DISCLAIMER}</footer>
     </div>
   );
 }
 
-type SortKey = "updated" | "name";
+function SiteHeader() {
+  const { theme, setTheme } = useTheme();
+  const next = theme === "light" ? "dark" : theme === "dark" ? "system" : "light";
+  const Icon = theme === "light" ? Sun : theme === "dark" ? Moon : SunMoon;
+  return (
+    <header className="sticky top-0 z-30 flex h-11 items-center gap-3 bg-aws-nav px-3 text-aws-nav-fg">
+      <Link href="/" className="flex items-center gap-2 rounded-md px-1 py-1 hover:bg-aws-nav-hover">
+        <span className="inline-flex size-6 items-center justify-center rounded bg-gradient-to-br from-sky-400 to-indigo-500 text-white">
+          <Cloud className="size-3.5" aria-hidden />
+        </span>
+        <span className="flex flex-col leading-none">
+          <span className="text-[13px] font-bold">AWS Playground</span>
+          <span className="text-[10px] text-aws-nav-muted">비공식 학습용 · 가상 환경</span>
+        </span>
+      </Link>
+      <nav className="ml-auto flex items-center gap-1" aria-label="사이트 메뉴">
+        <Link href="/about" className="rounded-md px-2 py-1 text-sm hover:bg-aws-nav-hover">
+          지원 범위
+        </Link>
+        <button type="button" onClick={() => setTheme(next)} className="rounded-md p-1.5 hover:bg-aws-nav-hover" aria-label={`화면 테마 바꾸기 (현재: ${theme ?? "system"})`}>
+          <Icon className="size-4" aria-hidden />
+        </button>
+      </nav>
+    </header>
+  );
+}
+
+function stats(p: Project) {
+  return {
+    resources: p.resources.length,
+    vpcs: p.resources.filter((r) => r.type === "vpc").length,
+    running: p.resources.filter((r) => r.type === "ec2" && r.config.state === "running").length,
+  };
+}
 
 function DashboardContent() {
   const router = useRouter();
@@ -73,320 +83,292 @@ function DashboardContent() {
   const saveStatus = useProjectStore((s) => s.saveStatus);
   const saveError = useProjectStore((s) => s.saveError);
   const dismissLoadErrors = useProjectStore((s) => s.dismissLoadErrors);
-  const store = useProjectStore.getState;
+  const projects = useMemo(() => Object.values(projectsMap).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)), [projectsMap]);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [creating, setCreating] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [renaming, setRenaming] = useState<Project | null>(null);
+  const [deleting, setDeleting] = useState<Project | null>(null);
+  const current = projects.find((p) => p.id === selected[0]);
 
-  const [newOpen, setNewOpen] = useState(false);
-  const [importOpen, setImportOpen] = useState(false);
-  const [renameTarget, setRenameTarget] = useState<Project | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
-  const [query, setQuery] = useState("");
-  const [sort, setSort] = useState<SortKey>("updated");
+  const open = (id: string, hash = "#/") => router.push(`/console/${id}${hash}`);
 
-  const projects = useMemo(
-    () => Object.values(projectsMap).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
-    [projectsMap],
-  );
-  const recent = projects.slice(0, 3);
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const list = q
-      ? projects.filter((p) => p.name.toLowerCase().includes(q) || p.description.toLowerCase().includes(q))
-      : projects;
-    return sort === "name" ? [...list].sort((a, b) => a.name.localeCompare(b.name, "ko")) : list;
-  }, [projects, query, sort]);
-
-  const labProgress = useMemo(() => {
-    const map = new Map<string, { projectId: string; done: number; total: number; completed: boolean }>();
-    for (const lab of LABS) {
-      const project = projects.find((p) => p.labId === lab.id);
-      if (!project) continue;
-      const progress = evaluateLab(lab, createLabContext(project));
-      map.set(lab.id, {
-        projectId: project.id,
-        done: progress.completedCount,
-        total: lab.steps.length,
-        completed: progress.completed,
-      });
+  const onAction = (action: string, p: Project | undefined) => {
+    if (!p) return;
+    const store = useProjectStore.getState();
+    if (action === "open") open(p.id);
+    if (action === "rename") setRenaming(p);
+    if (action === "duplicate") {
+      const id = store.duplicateProject(p.id);
+      if (id) setSelected([id]);
     }
-    return map;
-  }, [projects]);
-
-  const open = (id: string | null) => {
-    if (id) router.push(`/projects/${id}`);
-  };
-
-  const exportProject = (p: Project) => {
-    downloadTextFile(exportFileName(p), exportProjectJson(p));
-    toast.success(`"${p.name}"을(를) JSON으로 내보냈습니다.`);
+    if (action === "export") downloadTextFile(exportFileName(p), exportProjectJson(p));
+    if (action === "delete") setDeleting(p);
   };
 
   return (
-    <main className="mx-auto w-full max-w-6xl flex-1 space-y-10 px-4 py-8">
+    <SpaceBetween>
       {loadErrors.length > 0 && (
-        <div role="alert" className="flex items-start gap-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
-          <TriangleAlert className="mt-0.5 size-4 shrink-0 text-amber-600" aria-hidden />
-          <div className="flex-1 space-y-1">
-            <p className="font-medium">저장된 데이터 일부를 불러오지 못했습니다.</p>
-            <ul className="list-disc pl-4 text-xs text-muted-foreground">
-              {loadErrors.map((e, i) => (
-                <li key={i}>{e}</li>
-              ))}
-            </ul>
-          </div>
-          <Button variant="ghost" size="icon-sm" onClick={dismissLoadErrors} aria-label="알림 닫기">
-            <X />
-          </Button>
-        </div>
-      )}
-      {saveStatus === "error" && saveError && (
-        <div role="alert" className="rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
-          {saveError}
-        </div>
-      )}
-      {saveStatus === "unavailable" && (
-        <div role="alert" className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
-          브라우저 저장소를 사용할 수 없어 변경 사항이 저장되지 않습니다. (비공개 창 또는 저장소 차단 설정을 확인하세요.)
-        </div>
-      )}
-
-      <section className="flex flex-col gap-6 rounded-2xl border bg-card p-6 md:flex-row md:items-center md:justify-between">
-        <div className="max-w-2xl space-y-2">
-          <Badge variant="outline" className="gap-1">
-            <FlaskConical className="size-3" aria-hidden /> 실제 AWS 리소스를 만들지 않는 가상 실습
-          </Badge>
-          <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">클라우드 인프라를 설계하고, 깨뜨리고, 고쳐 보세요</h1>
-          <p className="text-sm text-muted-foreground">
-            VPC·서브넷·라우팅·보안 그룹·NACL·ALB·RDS를 캔버스에 배치하면 설정값을 바탕으로 검증과 통신 시뮬레이션이 실행됩니다.
-            계정 연결, 자격 증명, 요금이 필요하지 않습니다.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button onClick={() => setNewOpen(true)}>
-            <Plus /> 새 프로젝트
-          </Button>
-          <Button variant="outline" onClick={() => setImportOpen(true)}>
-            <FileJson /> JSON 가져오기
-          </Button>
-        </div>
-      </section>
-
-      {recent.length > 0 && (
-        <section aria-labelledby="recent-heading" className="space-y-3">
-          <h2 id="recent-heading" className="text-sm font-semibold text-muted-foreground">
-            최근 작업
-          </h2>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {recent.map((p) => (
-              <ProjectCard
-                key={p.id}
-                project={p}
-                onRename={() => setRenameTarget(p)}
-                onDuplicate={() => {
-                  store().duplicateProject(p.id);
-                  toast.success(`"${p.name}"을(를) 복제했습니다.`);
-                }}
-                onExport={() => exportProject(p)}
-                onDelete={() => setDeleteTarget(p)}
-              />
+        <Alert type="warning" header="일부 저장 데이터를 불러오지 못했습니다" onDismiss={dismissLoadErrors}>
+          <ul className="list-disc pl-5">
+            {loadErrors.map((e, i) => (
+              <li key={i}>{e}</li>
             ))}
-          </div>
-        </section>
+          </ul>
+        </Alert>
       )}
+      {saveStatus === "error" && <Alert type="error" header="저장 실패">{saveError}</Alert>}
+      {saveStatus === "unavailable" && <Alert type="warning">브라우저 저장소를 사용할 수 없어 새로고침하면 작업 내용이 사라집니다. 필요하면 JSON으로 내보내세요.</Alert>}
 
-      <section aria-labelledby="projects-heading" className="space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 id="projects-heading" className="flex items-center gap-2 font-semibold">
-            <LayoutGrid className="size-4" aria-hidden /> 내 프로젝트
-            <Badge variant="secondary">{projects.length}</Badge>
-          </h2>
-          <div className="flex items-center gap-2">
-            <div className="relative">
-              <Search className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
-              <Input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="프로젝트 검색"
-                aria-label="프로젝트 검색"
-                className="h-8 w-44 pl-7"
-              />
-            </div>
-            <select
-              value={sort}
-              onChange={(e) => setSort(e.target.value as SortKey)}
-              aria-label="정렬"
-              className="h-8 rounded-lg border border-input bg-transparent px-2 text-sm dark:bg-input/30"
-            >
-              <option value="updated">최근 수정순</option>
-              <option value="name">이름순</option>
-            </select>
-          </div>
-        </div>
-        {projects.length === 0 ? (
-          <div className="rounded-xl border border-dashed bg-card p-10 text-center">
-            <p className="font-medium">아직 프로젝트가 없습니다</p>
-            <p className="mt-1 text-sm text-muted-foreground">빈 프로젝트를 만들거나 아래의 샘플·실습으로 시작해 보세요.</p>
-            <Button className="mt-4" onClick={() => setNewOpen(true)}>
-              <Plus /> 새 프로젝트
-            </Button>
-          </div>
-        ) : filtered.length === 0 ? (
-          <p className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
-            &quot;{query}&quot;와(과) 일치하는 프로젝트가 없습니다.
-          </p>
-        ) : (
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {filtered.map((p) => (
-              <ProjectCard
-                key={p.id}
-                project={p}
-                onRename={() => setRenameTarget(p)}
-                onDuplicate={() => {
-                  store().duplicateProject(p.id);
-                  toast.success(`"${p.name}"을(를) 복제했습니다.`);
-                }}
-                onExport={() => exportProject(p)}
-                onDelete={() => setDeleteTarget(p)}
-              />
-            ))}
-          </div>
-        )}
-      </section>
+      <PageHeader
+        title="AWS Playground"
+        description="실제 AWS 계정이나 요금 없이, AWS 콘솔과 비슷한 화면에서 VPC·EC2·ALB·RDS를 직접 만들고 통신을 분석해 보는 학습용 시뮬레이터입니다."
+      />
+      <Alert type="info" header="비공식 학습용 시뮬레이터">
+        Amazon Web Services와 제휴하지 않은 독립 프로젝트입니다. 실제 AWS 계정·액세스 키·리소스를 사용하지 않으며, 모든 리소스와 통신 결과는 이 브라우저 안에서 계산되는 가상 결과입니다.
+      </Alert>
 
-      <section aria-labelledby="labs-heading" className="space-y-3">
-        <h2 id="labs-heading" className="flex items-center gap-2 font-semibold">
-          <GraduationCap className="size-4" aria-hidden /> Guided Labs
-        </h2>
-        <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-          {LABS.map((lab) => {
-            const progress = labProgress.get(lab.id);
-            return (
-              <article key={lab.id} className="flex flex-col rounded-xl border bg-card p-4" data-testid="lab-card">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-xs font-medium text-muted-foreground">
-                    Lab {lab.order} · {lab.level}
-                  </span>
-                  {progress &&
-                    (progress.completed ? (
-                      <Badge className="gap-1 bg-emerald-600 text-white">
-                        <CircleCheck className="size-3" aria-hidden /> 완료
-                      </Badge>
-                    ) : (
-                      <Badge variant="secondary">
-                        {progress.done}/{progress.total} 단계
-                      </Badge>
-                    ))}
-                </div>
-                <h3 className="mt-1 font-medium">{lab.title}</h3>
-                <p className="mt-1 flex-1 text-sm text-muted-foreground">{lab.summary}</p>
-                <div className="mt-3 flex gap-2">
-                  {progress ? (
-                    <>
-                      <Button size="sm" onClick={() => open(progress.projectId)}>
-                        이어하기
-                      </Button>
-                      <Button size="sm" variant="outline" onClick={() => open(store().startLab(lab.id))}>
-                        처음부터
-                      </Button>
-                    </>
-                  ) : (
-                    <Button size="sm" onClick={() => open(store().startLab(lab.id))}>
-                      실습 시작
-                    </Button>
-                  )}
-                </div>
-              </article>
-            );
-          })}
-        </div>
-      </section>
-
-      <section aria-labelledby="samples-heading" className="space-y-3">
-        <h2 id="samples-heading" className="font-semibold">
-          샘플 아키텍처
-        </h2>
-        <div className="grid gap-3 md:grid-cols-3">
-          {SAMPLES.map((sample) => (
-            <article key={sample.id} className="flex flex-col rounded-xl border bg-card p-4">
-              <h3 className="font-medium">{sample.title}</h3>
-              <p className="mt-1 flex-1 text-sm text-muted-foreground">{sample.description}</p>
-              <Button
-                size="sm"
-                variant="outline"
-                className="mt-3 self-start"
-                onClick={() => {
-                  const id = store().createFromSample(sample.id);
-                  if (id) toast.success(`샘플 "${sample.title}"을(를) 새 프로젝트로 불러왔습니다.`);
-                  open(id);
-                }}
-              >
-                불러오기
+      <ResourceTable<Project>
+        ariaLabel="샌드박스 목록"
+        items={projects}
+        trackBy={(p) => p.id}
+        selectionType="single"
+        selectedIds={selected}
+        onSelectionChange={setSelected}
+        rowLabel={(p) => p.name}
+        header={
+          <PageHeader
+            title="샌드박스"
+            counter={`(${projects.length})`}
+            description="샌드박스는 서로 독립된 가상 AWS 환경입니다. 새 샌드박스는 비어 있으며, VPC부터 직접 구성합니다."
+            actions={
+              <>
+                <ButtonDropdown
+                  label="작업"
+                  disabled={!current}
+                  items={[
+                    { id: "open", text: "콘솔 열기" },
+                    { id: "rename", text: "이름 변경" },
+                    { id: "duplicate", text: "복제" },
+                    { id: "export", text: "JSON으로 내보내기" },
+                    { id: "delete", text: "삭제", danger: true },
+                  ]}
+                  onItemClick={(a) => onAction(a, current)}
+                />
+                <Button onClick={() => setImporting(true)}>가져오기</Button>
+                <Button variant="primary" onClick={() => setCreating(true)}>
+                  샌드박스 생성
+                </Button>
+              </>
+            }
+          />
+        }
+        empty={
+          <EmptyState
+            title="샌드박스 없음"
+            description="빈 샌드박스를 만들어 AWS 콘솔처럼 리소스를 하나씩 직접 만들어 보세요."
+            action={
+              <Button variant="primary" onClick={() => setCreating(true)}>
+                샌드박스 생성
               </Button>
-            </article>
-          ))}
-        </div>
-      </section>
+            }
+          />
+        }
+        columns={[
+          {
+            id: "name",
+            header: "이름",
+            cell: (p) => (
+              <a href={`/console/${p.id}#/`} className="font-bold text-aws-link hover:underline" data-testid="sandbox-link">
+                {p.name}
+              </a>
+            ),
+            sortValue: (p) => p.name,
+            filterValue: (p) => `${p.name} ${p.description}`,
+          },
+          { id: "lab", header: "실습", cell: (p) => (p.labId ? <Badge color="blue">{LABS.find((l) => l.id === p.labId)?.title ?? p.labId}</Badge> : "–") },
+          { id: "resources", header: "리소스", cell: (p) => `${stats(p).resources}개`, sortValue: (p) => stats(p).resources },
+          { id: "vpcs", header: "VPC", cell: (p) => stats(p).vpcs },
+          { id: "running", header: "실행 중인 인스턴스", cell: (p) => stats(p).running },
+          { id: "updated", header: "마지막 수정", cell: (p) => <span title={formatDateTime(p.updatedAt)}>{formatRelativeTime(p.updatedAt)}</span>, sortValue: (p) => p.updatedAt },
+          { id: "created", header: "생성일", cell: (p) => formatDateTime(p.createdAt), sortValue: (p) => p.createdAt },
+        ]}
+      />
 
-      <TextPromptDialog
-        open={newOpen}
-        onOpenChange={setNewOpen}
-        title="새 아키텍처 프로젝트"
-        description="빈 캔버스로 시작합니다. 프로젝트는 이 브라우저에 저장됩니다."
-        submitLabel="만들기"
-        initialName="새 프로젝트"
-        withDescription
-        onSubmit={({ name, description }) => {
-          const id = store().createProject(name, description);
-          setNewOpen(false);
+      <Container header={<ContainerHeader title="실습 가이드" description="실습을 시작하면 빈 샌드박스가 만들어지고, 오른쪽 패널에 단계별 목표가 표시됩니다. 완료 여부는 실제 설정과 분석 결과로 자동 판정합니다." />}>
+        <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {LABS.map((lab) => (
+            <li key={lab.id} className="flex flex-col gap-2 rounded-xl border border-aws-border p-4" data-testid="lab-card">
+              <div className="flex items-start justify-between gap-2">
+                <p className="font-bold">
+                  {lab.order}. {lab.title}
+                </p>
+                <Badge color="blue">{lab.level}</Badge>
+              </div>
+              <p className="flex-1 text-[13px] text-aws-text-2">{lab.summary}</p>
+              {lab.id === "lab-5-security" && <p className="text-xs text-aws-warning">문제를 찾아 고치는 실습이라 잘못된 구성이 미리 만들어집니다.</p>}
+              <div>
+                <Button
+                  onClick={() => {
+                    const id = useProjectStore.getState().startLab(lab.id);
+                    if (id) open(id, "#/?tools=labs");
+                  }}
+                >
+                  실습 시작
+                </Button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </Container>
+
+      <ExpandableSection variant="container" header="완성된 예시 아키텍처 살펴보기">
+        <SpaceBetween size="m">
+          <p className="text-sm text-aws-text-2">직접 구성하기 전에 완성된 구성을 보고 싶을 때만 사용하세요. 예시를 열면 구성이 모두 갖춰진 새 샌드박스가 만들어집니다.</p>
+          <ul className="grid gap-4 md:grid-cols-3">
+            {SAMPLES.map((s) => (
+              <li key={s.id} className="flex flex-col gap-2 rounded-xl border border-aws-border p-4">
+                <p className="font-bold">{s.title}</p>
+                <p className="flex-1 text-[13px] text-aws-text-2">{s.description}</p>
+                <div>
+                  <Button
+                    onClick={() => {
+                      const id = useProjectStore.getState().createFromSample(s.id);
+                      if (id) open(id, "#/map");
+                    }}
+                  >
+                    예시 열기
+                  </Button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </SpaceBetween>
+      </ExpandableSection>
+
+      <CreateSandboxModal
+        open={creating}
+        count={projects.length}
+        onClose={() => setCreating(false)}
+        onCreate={(name, description) => {
+          const id = useProjectStore.getState().createProject(name, description);
+          setCreating(false);
           open(id);
         }}
       />
-      <TextPromptDialog
-        open={!!renameTarget}
-        onOpenChange={(o) => !o && setRenameTarget(null)}
-        title="프로젝트 이름 변경"
-        submitLabel="변경"
-        initialName={renameTarget?.name ?? ""}
-        onSubmit={({ name }) => {
-          if (!renameTarget) return;
-          const r = store().renameProject(renameTarget.id, name);
-          if (!r.ok) return r.error;
-          toast.success("이름을 변경했습니다.");
-          setRenameTarget(null);
-        }}
-      />
+      <RenameModal project={renaming} onClose={() => setRenaming(null)} />
+      {deleting && (
+        <DeleteModal
+          open
+          onClose={() => setDeleting(null)}
+          title="샌드박스 삭제"
+          confirmText="delete"
+          onConfirm={() => {
+            useProjectStore.getState().deleteProject(deleting.id);
+            setSelected([]);
+            return null;
+          }}
+        >
+          <p>
+            샌드박스 <strong>{deleting.name}</strong>과(와) 그 안의 가상 리소스 {deleting.resources.length}개를 이 브라우저에서 삭제합니다. 필요하면 먼저 JSON으로 내보내세요.
+          </p>
+        </DeleteModal>
+      )}
       <ImportDialog
-        open={importOpen}
-        onOpenChange={setImportOpen}
+        open={importing}
+        onOpenChange={setImporting}
         onImport={(project) => {
-          const id = store().addImportedProject(project);
-          toast.success(`"${project.name}"을(를) 가져왔습니다.`);
-          open(id);
+          const id = useProjectStore.getState().addImportedProject(project);
+          setImporting(false);
+          setSelected([id]);
         }}
       />
-      <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>프로젝트를 삭제할까요?</AlertDialogTitle>
-            <AlertDialogDescription>
-              &quot;{deleteTarget?.name}&quot;이(가) 이 브라우저에서 삭제됩니다. 필요하면 먼저 JSON으로 내보내세요. 이 작업은 되돌릴 수 없습니다.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>취소</AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructive"
-              onClick={() => {
-                if (!deleteTarget) return;
-                store().deleteProject(deleteTarget.id);
-                toast.success(`"${deleteTarget.name}"을(를) 삭제했습니다.`);
-                setDeleteTarget(null);
-              }}
-            >
-              삭제
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </main>
+    </SpaceBetween>
+  );
+}
+
+function CreateSandboxModal({ open, count, onClose, onCreate }: { open: boolean; count: number; onClose: () => void; onCreate: (name: string, description: string) => void }) {
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const submit = () => {
+    const n = name.trim() || `샌드박스 ${count + 1}`;
+    if (n.length > 80) return setError("이름은 80자 이하여야 합니다.");
+    onCreate(n, description.trim());
+    setName("");
+    setDescription("");
+    setError(null);
+  };
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="샌드박스 생성"
+      footer={
+        <>
+          <Button variant="link" onClick={onClose}>
+            취소
+          </Button>
+          <Button variant="primary" onClick={submit}>
+            생성 후 콘솔 열기
+          </Button>
+        </>
+      }
+    >
+      <form
+        className="space-y-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          submit();
+        }}
+      >
+        <p className="text-aws-text-2">빈 가상 환경을 만듭니다. 기본 VPC도 없으므로 네트워크부터 직접 구성합니다.</p>
+        <FormField label="이름" constraint="최대 80자" error={error ?? undefined}>
+          <TextInput autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={`샌드박스 ${count + 1}`} maxLength={80} />
+        </FormField>
+        <FormField label="설명" optional>
+          <TextInput value={description} onChange={(e) => setDescription(e.target.value)} maxLength={500} />
+        </FormField>
+        <button type="submit" hidden />
+      </form>
+    </Modal>
+  );
+}
+
+function RenameModal({ project, onClose }: { project: Project | null; onClose: () => void }) {
+  const [name, setName] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [prev, setPrev] = useState<Project | null>(null);
+  if (project !== prev) {
+    setPrev(project);
+    setName(project?.name ?? "");
+    setError(null);
+  }
+  if (!project) return null;
+  const save = () => {
+    const r = useProjectStore.getState().renameProject(project.id, name);
+    if (r.ok) onClose();
+    else setError(r.error);
+  };
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="샌드박스 이름 변경"
+      footer={
+        <>
+          <Button variant="link" onClick={onClose}>
+            취소
+          </Button>
+          <Button variant="primary" onClick={save}>
+            저장
+          </Button>
+        </>
+      }
+    >
+      <FormField label="이름" error={error ?? undefined}>
+        <TextInput value={name} onChange={(e) => setName(e.target.value)} maxLength={80} />
+      </FormField>
+    </Modal>
   );
 }
