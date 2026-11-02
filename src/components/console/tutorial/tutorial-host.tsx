@@ -68,13 +68,14 @@ interface ViewState {
 }
 
 function describe(step: TutorialStep, s: ViewState): string {
-  const parts = step.body.map((p) => `<p>${escapeHtml(p)}</p>`);
+  // 작업 단계에서는 행동 지침만 보여 설명과 할 일이 같은 화면에 중복되지 않게 한다.
+  const parts = step.task ? [] : step.body.map((p) => `<p>${escapeHtml(p)}</p>`);
   if (step.task) parts.push(`<div class="pg-tour-task"><strong>지금 할 일</strong><p>${escapeHtml(step.task)}</p></div>`);
   if (step.isDone) {
     parts.push(
       s.done
-        ? `<div class="pg-tour-status pg-tour-status-done" role="status">✓ 완료했습니다. 준비되면 '다음'을 눌러 다음 단계로 가세요.</div>`
-        : `<div class="pg-tour-status" role="status">할 일을 마치면 여기에 '완료'가 표시되고 '다음' 버튼이 켜집니다.</div>`,
+        ? `<div class="pg-tour-status pg-tour-status-done" role="status">✓ 완료 · 다음을 눌러 계속하세요.</div>`
+        : `<div class="pg-tour-status" role="status">저장하면 완료 여부를 확인합니다.</div>`,
     );
   }
   if (s.expected && !s.onRightPage && !s.done) {
@@ -250,7 +251,7 @@ export function TutorialHost() {
       driverRef.current?.destroy();
       driverRef.current = null;
       popoverRef.current = null;
-      body.classList.remove("pg-tour-on", "pg-tour-light", "pg-tour-dock-space");
+      body.classList.remove("pg-tour-on", "pg-tour-spotlight", "pg-tour-dock-space");
     };
     const st = step;
     if (!tutorial || !st || !active) {
@@ -269,9 +270,9 @@ export function TutorialHost() {
       const placement = placementFor(st, element);
       placementRef.current = placement;
       const practice = isPractice(st);
-      const overlayOpacity = placement.mode === "center" ? 0.45 : !element ? 0 : practice ? 0.15 : 0.35;
+      const overlayOpacity = placement.mode === "center" ? 0.5 : !element ? 0 : practice ? 0.58 : 0.48;
       body.classList.add("pg-tour-on");
-      body.classList.toggle("pg-tour-light", practice && !!element);
+      body.classList.toggle("pg-tour-spotlight", practice && !!element);
       const store = useTutorialStore.getState();
       const d = driver({
         animate: firstShow,
@@ -392,7 +393,7 @@ export function TutorialHost() {
     () => () => {
       driverRef.current?.destroy();
       driverRef.current = null;
-      document.body.classList.remove("pg-tour-on", "pg-tour-light", "pg-tour-dock-space");
+      document.body.classList.remove("pg-tour-on", "pg-tour-spotlight", "pg-tour-dock-space");
     },
     [],
   );

@@ -150,15 +150,17 @@ export function CreateVpcPage() {
           <FormField label="생성할 리소스" description="이 시뮬레이터는 VPC만 생성합니다. 서브넷과 게이트웨이는 각 메뉴에서 직접 만드세요.">
             <RadioGroup value="vpc-only" onChange={() => undefined} items={[{ value: "vpc-only", label: "VPC만" }]} aria-label="생성할 리소스" />
           </FormField>
-          <FormField help={{ docKey: "vpc", field: "name" }} label="이름 태그" optional description="키가 'Name'이고 값이 입력한 이름인 태그를 만듭니다." constraint="최대 128자">
-            <TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="my-vpc-01" maxLength={128} />
-          </FormField>
-          <FormField label="IPv4 CIDR 블록" info={<InfoLink topic="cidr" />}>
-            <RadioGroup value="manual" onChange={() => undefined} items={[{ value: "manual", label: "IPv4 CIDR 수동 입력" }]} aria-label="IPv4 CIDR 블록" />
-          </FormField>
-          <FormField help={{ docKey: "vpc", field: "cidr" }} label="IPv4 CIDR" constraint="CIDR 블록 크기는 /16에서 /28 사이여야 합니다." error={error && /CIDR/.test(error) ? error : undefined}>
-            <TextInput value={cidr} onChange={(e) => setCidr(e.target.value)} placeholder="10.0.0.0/16" />
-          </FormField>
+          <div className="space-y-4" data-tour="vpc-fields">
+            <FormField help={{ docKey: "vpc", field: "name" }} label="이름 태그" optional description="키가 'Name'이고 값이 입력한 이름인 태그를 만듭니다." constraint="최대 128자">
+              <TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="my-vpc-01" maxLength={128} />
+            </FormField>
+            <FormField label="IPv4 CIDR 블록" info={<InfoLink topic="cidr" />}>
+              <RadioGroup value="manual" onChange={() => undefined} items={[{ value: "manual", label: "IPv4 CIDR 수동 입력" }]} aria-label="IPv4 CIDR 블록" />
+            </FormField>
+            <FormField help={{ docKey: "vpc", field: "cidr" }} label="IPv4 CIDR" constraint="CIDR 블록 크기는 /16에서 /28 사이여야 합니다." error={error && /CIDR/.test(error) ? error : undefined}>
+              <TextInput value={cidr} onChange={(e) => setCidr(e.target.value)} placeholder="10.0.0.0/16" />
+            </FormField>
+          </div>
           <FormField label="IPv6 CIDR 블록">
             <RadioGroup value="none" onChange={() => undefined} items={[{ value: "none", label: "IPv6 CIDR 블록 없음", description: "이 시뮬레이터는 IPv6를 지원하지 않습니다." }]} aria-label="IPv6 CIDR 블록" />
           </FormField>

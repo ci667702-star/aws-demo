@@ -3,7 +3,7 @@ import { expect, test, type Page } from "@playwright/test";
 /** 첫 화면에서 빈 샌드박스를 만들고 콘솔 홈으로 이동한다 */
 async function createSandbox(page: Page, name: string) {
   await page.goto("/");
-  await page.getByRole("button", { name: "샌드박스 생성" }).first().click();
+  await page.getByRole("button", { name: "생성" }).first().click();
   await page.getByRole("dialog").getByLabel("이름").fill(name);
   await page.getByRole("button", { name: "생성 후 열기" }).click();
   await expect(page).toHaveURL(/\/console\/proj-[^#]+#\/$/);

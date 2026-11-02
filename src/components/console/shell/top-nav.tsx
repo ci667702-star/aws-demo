@@ -71,7 +71,7 @@ export function TopNav() {
           <Cloud className="size-4" aria-hidden />
         </span>
         <span className="hidden flex-col leading-tight md:flex">
-          <span className="text-[14px] font-bold">AWS Playground</span>
+          <span className="text-[14px] font-bold">AWSP</span>
           <span className="text-[11px] text-aws-nav-muted">학습용 가상 콘솔 · 심화 모드</span>
         </span>
       </Link>
