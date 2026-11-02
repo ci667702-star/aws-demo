@@ -187,7 +187,7 @@ function RuleModal({ alb, listener, rule, onClose }: { alb: Alb; listener: Liste
       <SpaceBetween size="m">
         <p className="text-[15px] text-aws-text-2">요청 경로가 조건과 맞으면 기본 작업 대신 이 규칙의 작업을 합니다. 예: /api/* 요청은 API 서버 대상 그룹으로, 나머지는 웹 서버로.</p>
         <div className="grid gap-4 md:grid-cols-[160px_1fr]">
-          <FormField label="우선순위" constraint="1~50000 · 작을수록 먼저">
+          <FormField help={{ docKey: "alb", field: "listenerRules" }} label="우선순위" constraint="1~50000 · 작을수록 먼저">
             <TextInput value={priority} onChange={(e) => setPriority(e.target.value)} inputMode="numeric" />
           </FormField>
           <FormField label="조건: 경로 패턴" description="한 줄에 하나씩, 최대 5개. *는 아무 글자(0자 이상), ?는 한 글자" constraint="예: /api/*  ·  /images/*.png  ·  /health">

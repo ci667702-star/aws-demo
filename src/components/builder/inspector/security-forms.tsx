@@ -4,7 +4,7 @@ import type { ResourceOfType } from "@/lib/engine/resource-models";
 import { displayName } from "@/lib/engine/topology-engine";
 import { SG } from "@/lib/project/factory";
 import { setSingleRelation } from "@/lib/project/mutations";
-import { Callout, CheckList, Section, SelectField, TextField } from "./fields";
+import { Callout, CheckList, InfoRow, Section, SelectField, TextField } from "./fields";
 import { ResourceList, type FormContext } from "./form-shared";
 import { NaclRulesEditor, SgRulesEditor, type SgPreset } from "./rule-editors";
 
@@ -49,19 +49,24 @@ export function SecurityGroupForm({ sg, ctx }: { sg: ResourceOfType<"security-gr
           value={vpcId ?? ""}
           options={vpcSelect(ctx)}
           onChange={(v) => ctx.actions.setRelation(sg.id, "vpc-security-group", v || null, "보안 그룹 VPC 변경")}
+          help="vpc"
         />
         <TextField
           label="설명"
+          help="description"
           value={sg.config.description}
           maxLength={255}
           onCommit={(v) => ctx.actions.updateConfig(sg, { description: v }, "보안 그룹 설명 변경")}
         />
+        <InfoRow label="기본 보안 그룹" help="isDefault">
+          {sg.config.isDefault ? "예 (VPC 기본 보안 그룹)" : "아니요"}
+        </InfoRow>
         <Callout>
           보안 그룹은 <b>상태 저장형</b>입니다. 허용 규칙만 있고, 일치하는 규칙이 없으면 거부됩니다. 허용된 연결의 응답은 규칙과 관계없이 자동으로
           허용됩니다.
         </Callout>
       </Section>
-      <Section title="인바운드 규칙">
+      <Section title="인바운드 규칙" help="inboundRules">
         <SgRulesEditor
           title="인바운드"
           direction="inbound"
@@ -71,7 +76,7 @@ export function SecurityGroupForm({ sg, ctx }: { sg: ResourceOfType<"security-gr
           onChange={(rules) => ctx.actions.updateConfig(sg, { inboundRules: rules }, `${displayName(sg)} 인바운드 규칙 변경`)}
         />
       </Section>
-      <Section title="아웃바운드 규칙">
+      <Section title="아웃바운드 규칙" help="outboundRules">
         <SgRulesEditor
           title="아웃바운드"
           direction="outbound"
@@ -81,7 +86,7 @@ export function SecurityGroupForm({ sg, ctx }: { sg: ResourceOfType<"security-gr
           onChange={(rules) => ctx.actions.updateConfig(sg, { outboundRules: rules }, `${displayName(sg)} 아웃바운드 규칙 변경`)}
         />
       </Section>
-      <Section title="연결된 리소스">
+      <Section title="연결된 리소스" help="attachedTo">
         <ResourceList ctx={ctx} resources={t.resourcesUsingSecurityGroup(sg.id)} empty="연결된 EC2/ALB/RDS가 없습니다." />
       </Section>
     </>
@@ -114,7 +119,11 @@ export function NetworkAclForm({ nacl, ctx }: { nacl: ResourceOfType<"network-ac
           value={vpcId ?? ""}
           options={vpcSelect(ctx)}
           onChange={(v) => ctx.actions.setRelation(nacl.id, "vpc-network-acl", v || null, "NACL VPC 변경")}
+          help="vpc"
         />
+        <InfoRow label="기본 네트워크 ACL" help="isDefault">
+          {nacl.config.isDefault ? "예 (VPC 기본 NACL)" : "아니요"}
+        </InfoRow>
         <Callout tone="warn">
           Network ACL은 <b>상태 비저장형</b>입니다. 규칙 번호가 낮은 것부터 평가해 처음 일치한 규칙을 적용하고, 요청과 응답을 각각 평가합니다. 응답은
           보통 임시 포트(1024-65535)를 사용하므로 반대 방향 규칙도 필요합니다. 새로 만든 NACL은 규칙이 없어 모든 트래픽을 거부합니다.
@@ -123,6 +132,7 @@ export function NetworkAclForm({ nacl, ctx }: { nacl: ResourceOfType<"network-ac
       <Section title={`연결된 서브넷 (${associated.size})`}>
         <CheckList
           label="서브넷 연결(Association)"
+          help="subnets"
           items={items}
           empty="서브넷이 없습니다."
           onToggle={(subnetId, checked) =>
@@ -132,7 +142,7 @@ export function NetworkAclForm({ nacl, ctx }: { nacl: ResourceOfType<"network-ac
           }
         />
       </Section>
-      <Section title="인바운드 규칙">
+      <Section title="인바운드 규칙" help="inboundRules">
         <NaclRulesEditor
           title="인바운드"
           direction="inbound"
@@ -141,7 +151,7 @@ export function NetworkAclForm({ nacl, ctx }: { nacl: ResourceOfType<"network-ac
           onChange={(rules) => ctx.actions.updateConfig(nacl, { inboundRules: rules }, `${nacl.name} 인바운드 규칙 변경`)}
         />
       </Section>
-      <Section title="아웃바운드 규칙">
+      <Section title="아웃바운드 규칙" help="outboundRules">
         <NaclRulesEditor
           title="아웃바운드"
           direction="outbound"

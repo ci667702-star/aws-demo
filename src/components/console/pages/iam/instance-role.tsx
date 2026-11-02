@@ -69,7 +69,7 @@ export function ModifyInstanceRolePage({ id }: { id: string }) {
       />
       <Container header={<ContainerHeader title="IAM 역할" description="역할을 바꾸면 실행 중인 인스턴스에도 바로 적용됩니다 (실제 AWS에서는 몇 초 걸릴 수 있음)." />}>
         <SpaceBetween size="m">
-          <FormField label="IAM 역할" description="신뢰할 수 있는 엔터티가 'AWS 서비스: EC2'인 역할만 고를 수 있습니다." error={error ?? undefined}>
+          <FormField help={{ docKey: "iam", field: "instanceProfile" }} label="IAM 역할" description="신뢰할 수 있는 엔터티가 'AWS 서비스: EC2'인 역할만 고를 수 있습니다." error={error ?? undefined}>
             <Ec2RoleSelect value={roleId} onChange={setRoleId} />
           </FormField>
           <p className="text-sm">

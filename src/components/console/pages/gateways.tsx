@@ -170,7 +170,7 @@ export function CreateIgwPage() {
       <PageHeader title="인터넷 게이트웨이 생성" info={<InfoLink topic="igw" />} description="인터넷 게이트웨이는 VPC와 인터넷을 연결하는 가상 라우터입니다. 만든 뒤 VPC에 연결해야 합니다." />
       <PageGuide topic="igw" />
       <Container header={<ContainerHeader title="인터넷 게이트웨이 설정" />}>
-        <FormField label="이름 태그" optional constraint="최대 128자">
+        <FormField help={{ docKey: "internet-gateway", field: "name" }} label="이름 태그" optional constraint="최대 128자">
           <TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="my-internet-gateway-01" maxLength={128} />
         </FormField>
       </Container>
@@ -203,7 +203,7 @@ export function AttachIgwPage({ id }: { id: string }) {
     <div className="flex flex-col gap-6" data-tour="igw-attach">
       <PageHeader title="VPC에 연결" info={<InfoLink topic="igw" />} description={`${igw.id} (${displayName(igw)})`} />
       <Container header={<ContainerHeader title="VPC" description="인터넷 게이트웨이를 VPC에 연결해 VPC와 인터넷 간 통신을 활성화합니다." />}>
-        <FormField label="사용 가능한 VPC" description="인터넷 게이트웨이가 연결되지 않은 VPC만 표시됩니다." error={error ?? undefined}>
+        <FormField help={{ docKey: "internet-gateway", field: "vpc" }} label="사용 가능한 VPC" description="인터넷 게이트웨이가 연결되지 않은 VPC만 표시됩니다." error={error ?? undefined}>
           <SelectInput value={vpcId} onChange={setVpcId} placeholder="VPC 선택" options={vpcs.map((v) => ({ value: v.id, label: `${v.id} (${displayName(v)})`, description: v.config.cidr }))} />
         </FormField>
         {!vpcs.length && (
@@ -383,7 +383,7 @@ export function AllocateEipPage({ base = "/vpc" }: { base?: "/vpc" | "/ec2" }) {
           <FormField label="네트워크 경계 그룹">
             <TextInput value="ap-northeast-2 (가상)" disabled readOnly />
           </FormField>
-          <FormField label="퍼블릭 IPv4 주소 풀">
+          <FormField help={{ docKey: "elastic-ip", field: "publicIp" }} label="퍼블릭 IPv4 주소 풀">
             <RadioGroup
               value="amazon"
               onChange={() => undefined}
@@ -391,7 +391,7 @@ export function AllocateEipPage({ base = "/vpc" }: { base?: "/vpc" | "/ec2" }) {
               items={[{ value: "amazon", label: "가상 IPv4 주소 풀", description: "198.51.100.0/24(문서용 예약 대역)에서 주소를 할당합니다. 실제 공인 IP가 아닙니다." }]}
             />
           </FormField>
-          <FormField label="Name 태그" optional>
+          <FormField help={{ docKey: "elastic-ip", field: "name" }} label="Name 태그" optional>
             <TextInput value={name} onChange={(e) => setName(e.target.value)} maxLength={128} placeholder="my-eip" />
           </FormField>
         </SpaceBetween>
@@ -427,10 +427,10 @@ export function AssociateEipPage({ id }: { id: string }) {
       <PageHeader title="탄력적 IP 주소 연결" info={<InfoLink topic="eip" />} description={`${eip.config.publicIp} (${eip.id})`} />
       <Container header={<ContainerHeader title="탄력적 IP 주소" />}>
         <SpaceBetween size="m">
-          <FormField label="리소스 유형">
+          <FormField help={{ docKey: "elastic-ip", field: "association" }} label="리소스 유형">
             <RadioGroup value="instance" onChange={() => undefined} aria-label="리소스 유형" items={[{ value: "instance", label: "인스턴스", description: "네트워크 인터페이스 직접 연결은 지원하지 않습니다." }]} />
           </FormField>
-          <FormField label="인스턴스" description="탄력적 IP가 연결되지 않은, 종료되지 않은 인스턴스" error={error ?? undefined}>
+          <FormField help={{ docKey: "elastic-ip", field: "association" }} label="인스턴스" description="탄력적 IP가 연결되지 않은, 종료되지 않은 인스턴스" error={error ?? undefined}>
             <SelectInput
               value={instanceId}
               onChange={setInstanceId}
@@ -641,10 +641,10 @@ export function CreateNatPage() {
       <PageGuide topic="nat" />
       <Container header={<ContainerHeader title="NAT 게이트웨이 설정" />}>
         <SpaceBetween size="m">
-          <FormField label="이름" optional constraint="최대 128자">
+          <FormField help={{ docKey: "nat-gateway", field: "name" }} label="이름" optional constraint="최대 128자">
             <TextInput value={name} onChange={(e) => setName(e.target.value)} maxLength={128} placeholder="my-nat-gateway-01" />
           </FormField>
-          <FormField label="서브넷" description="NAT 게이트웨이를 만들 서브넷을 선택합니다. 퍼블릭 NAT는 퍼블릭 서브넷(IGW 경로가 있는 서브넷)에 두어야 합니다.">
+          <FormField help={{ docKey: "nat-gateway", field: "subnet" }} label="서브넷" description="NAT 게이트웨이를 만들 서브넷을 선택합니다. 퍼블릭 NAT는 퍼블릭 서브넷(IGW 경로가 있는 서브넷)에 두어야 합니다.">
             <SelectInput
               value={subnetId}
               onChange={setSubnetId}
@@ -660,7 +660,7 @@ export function CreateNatPage() {
           <FormField label="연결 유형">
             <RadioGroup value="public" onChange={() => undefined} aria-label="연결 유형" items={[{ value: "public", label: "퍼블릭", description: "프라이빗 NAT 게이트웨이는 지원하지 않습니다." }]} />
           </FormField>
-          <FormField label="탄력적 IP 할당 ID" info={<InfoLink topic="eip" />} description="NAT 게이트웨이에 연결할 탄력적 IP를 선택합니다.">
+          <FormField help={{ docKey: "nat-gateway", field: "elasticIp" }} label="탄력적 IP 할당 ID" info={<InfoLink topic="eip" />} description="NAT 게이트웨이에 연결할 탄력적 IP를 선택합니다.">
             <div className="flex flex-wrap gap-2">
               <SelectInput
                 className="min-w-64 flex-1"

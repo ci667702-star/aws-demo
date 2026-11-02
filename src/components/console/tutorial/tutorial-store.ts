@@ -1,6 +1,6 @@
 "use client";
 
-/** 진행 중인 튜토리얼 (화면 상태라 저장하지 않는다. 판정 단계는 설정으로 다시 확인되므로 다시 시작해도 이어진다) */
+/** 진행 중인 튜토리얼 (화면 상태라 저장하지 않는다. 판정 단계는 설정으로 다시 확인하므로 '이어서 하기'로 남은 단계부터 다시 시작할 수 있다) */
 import { create } from "zustand";
 
 export interface ActiveTutorial {
@@ -10,7 +10,7 @@ export interface ActiveTutorial {
 
 interface TutorialState {
   active: ActiveTutorial | null;
-  start: (tutorialId: string) => void;
+  start: (tutorialId: string, stepIndex?: number) => void;
   next: () => void;
   prev: () => void;
   goTo: (stepIndex: number) => void;
@@ -19,7 +19,7 @@ interface TutorialState {
 
 export const useTutorialStore = create<TutorialState>()((set) => ({
   active: null,
-  start: (tutorialId) => set({ active: { tutorialId, stepIndex: 0 } }),
+  start: (tutorialId, stepIndex = 0) => set({ active: { tutorialId, stepIndex } }),
   next: () => set((s) => (s.active ? { active: { ...s.active, stepIndex: s.active.stepIndex + 1 } } : s)),
   prev: () => set((s) => (s.active && s.active.stepIndex > 0 ? { active: { ...s.active, stepIndex: s.active.stepIndex - 1 } } : s)),
   goTo: (stepIndex) => set((s) => (s.active ? { active: { ...s.active, stepIndex } } : s)),

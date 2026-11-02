@@ -186,7 +186,7 @@ function AlarmWizard({ initial, alarmId }: { initial: AlarmInput; alarmId?: stri
           <Container header={<ContainerHeader title="지표" description="경보가 지켜볼 지표 하나를 고릅니다." />}>
             <SpaceBetween size="m">
               <div className="grid gap-4 md:grid-cols-2">
-                <FormField label="네임스페이스">
+                <FormField help={{ docKey: "cloudwatch", field: "namespace" }} label="네임스페이스">
                   <SelectInput
                     value={value.metric.namespace}
                     onChange={(ns) => {
@@ -196,7 +196,7 @@ function AlarmWizard({ initial, alarmId }: { initial: AlarmInput; alarmId?: stri
                     options={(["AWS/EC2", "AWS/ApplicationELB", "AWS/RDS", "AWS/NATGateway"] as const).map((n) => ({ value: n, label: n }))}
                   />
                 </FormField>
-                <FormField label="리소스">
+                <FormField help={{ docKey: "cloudwatch", field: "resourceDimension" }} label="리소스">
                   <SelectInput
                     value={value.metric.resourceId}
                     onChange={(id) => setMetric({ resourceId: id })}
@@ -204,7 +204,7 @@ function AlarmWizard({ initial, alarmId }: { initial: AlarmInput; alarmId?: stri
                     options={resources.map((r) => ({ value: r.id, label: `${displayName(r)} (${r.id})` }))}
                   />
                 </FormField>
-                <FormField label="지표 이름">
+                <FormField help={{ docKey: "cloudwatch", field: "metricName" }} label="지표 이름">
                   <SelectInput
                     value={value.metric.metricName}
                     onChange={(m) => {
@@ -216,10 +216,10 @@ function AlarmWizard({ initial, alarmId }: { initial: AlarmInput; alarmId?: stri
                   />
                 </FormField>
                 <div className="grid grid-cols-2 gap-4">
-                  <FormField label="통계">
+                  <FormField help={{ docKey: "cloudwatch", field: "statistic" }} label="통계">
                     <SelectInput value={value.metric.stat} onChange={(s) => setMetric({ stat: s as MetricRef["stat"] })} options={STAT_OPTIONS} />
                   </FormField>
-                  <FormField label="기간">
+                  <FormField help={{ docKey: "cloudwatch", field: "period" }} label="기간">
                     <SelectInput value={String(value.period)} onChange={(p) => set({ period: Number(p) as AlarmInput["period"] })} options={PERIOD_OPTIONS} />
                   </FormField>
                 </div>
@@ -247,18 +247,18 @@ function AlarmWizard({ initial, alarmId }: { initial: AlarmInput; alarmId?: stri
               <FormField label={`${def?.label ?? "지표"} 값이 다음과 같을 때 경보`}>
                 <RadioGroup aria-label="비교 연산자" value={value.comparison} onChange={(c) => set({ comparison: c as Alarm["comparison"] })} items={Object.entries(COMPARISON_LABEL).map(([v, label]) => ({ value: v, label }))} />
               </FormField>
-              <FormField label="임계값" constraint={def?.unit === "Percent" ? "0~100 (%)" : def?.unit === "Seconds" ? "초 단위 (예: 0.5 = 500ms)" : def?.unit === "Bytes" ? "바이트 단위" : "숫자"}>
+              <FormField help={{ docKey: "cloudwatch", field: "threshold" }} label="임계값" constraint={def?.unit === "Percent" ? "0~100 (%)" : def?.unit === "Seconds" ? "초 단위 (예: 0.5 = 500ms)" : def?.unit === "Bytes" ? "바이트 단위" : "숫자"}>
                 <TextInput value={thresholdText} onChange={(e) => setThresholdText(e.target.value)} inputMode="decimal" className="max-w-40" />
               </FormField>
               <div className="grid gap-4 md:grid-cols-2">
-                <FormField label="경보를 울릴 데이터 포인트 (M / N)" description="최근 N개 기간 중 M개가 조건을 넘으면 경보가 됩니다. 순간적인 튐을 거르려면 M을 2 이상으로 하세요.">
+                <FormField help={{ docKey: "cloudwatch", field: "datapointsToAlarm" }} label="경보를 울릴 데이터 포인트 (M / N)" description="최근 N개 기간 중 M개가 조건을 넘으면 경보가 됩니다. 순간적인 튐을 거르려면 M을 2 이상으로 하세요.">
                   <div className="flex items-center gap-2">
                     <TextInput aria-label="M" value={String(value.datapointsToAlarm)} onChange={(e) => set({ datapointsToAlarm: Math.max(1, Math.min(10, Number(e.target.value) || 1)) })} inputMode="numeric" className="w-20" />
                     <span>/</span>
                     <TextInput aria-label="N" value={String(value.evaluationPeriods)} onChange={(e) => set({ evaluationPeriods: Math.max(1, Math.min(10, Number(e.target.value) || 1)) })} inputMode="numeric" className="w-20" />
                   </div>
                 </FormField>
-                <FormField label="누락된 데이터 처리" description="인스턴스가 중지되었거나 요청이 없으면 데이터가 비어 있습니다.">
+                <FormField help={{ docKey: "cloudwatch", field: "treatMissingData" }} label="누락된 데이터 처리" description="인스턴스가 중지되었거나 요청이 없으면 데이터가 비어 있습니다.">
                   <SelectInput value={value.treatMissingData} onChange={(t) => set({ treatMissingData: t as Alarm["treatMissingData"] })} options={Object.entries(MISSING_LABEL).map(([v, label]) => ({ value: v, label }))} />
                 </FormField>
               </div>

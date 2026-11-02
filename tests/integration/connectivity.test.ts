@@ -3,7 +3,7 @@ import { simulate } from "@/lib/engine/connectivity-engine";
 import { ProjectBuilder } from "@/lib/project/builder";
 import { NACL, SG } from "@/lib/project/factory";
 import { createThreeTierSample } from "@/lib/project/samples";
-import { idOf, internet, privateNatProject, publicWebProject, res, useDeterministicIds } from "../helpers";
+import { idOf, internet, natInstanceProject, privateNatProject, publicWebProject, res, useDeterministicIds } from "../helpers";
 
 beforeEach(useDeterministicIds);
 
@@ -73,6 +73,82 @@ describe("Private Subnet의 NAT 경유 통신", () => {
     const r = simulate(p, { source: res(idOf(p, "worker")), destination: internet("203.0.113.200"), protocol: "tcp", port: 443 });
     expect(r.outcome).toBe("failure");
     expect(r.failure?.reason).toMatch(/NAT/);
+  });
+});
+
+describe("NAT 인스턴스를 통한 프라이빗 서브넷의 아웃바운드 통신", () => {
+  const toInternet = (p: ReturnType<typeof natInstanceProject>) =>
+    simulate(p, { source: res(idOf(p, "worker")), destination: internet("203.0.113.200"), protocol: "tcp", port: 443 });
+
+  it("올바르게 구성하면 프라이빗 EC2 → NAT 인스턴스 → IGW → 인터넷이 성공한다", () => {
+    const p = natInstanceProject();
+    const r = toInternet(p);
+    expect(r.outcome).toBe("success");
+    expect(r.path.map((h) => h.label).join(" > ")).toMatch(/nat-instance.*igw/);
+    expect(r.steps.some((s) => s.kind === "nat" && s.title.includes("MASQUERADE"))).toBe(true);
+    expect(r.steps.some((s) => s.phase === "response" && s.title.includes("응답 주소 복원"))).toBe(true);
+  });
+
+  it("소스/대상 확인이 켜져 있으면 NAT 인스턴스가 패킷을 버린다", () => {
+    const r = toInternet(natInstanceProject({ sourceDestCheck: true }));
+    expect(r.outcome).toBe("failure");
+    expect(r.steps[r.failure!.stepIndex].title).toContain("소스/대상 확인");
+    expect(r.failure?.fields).toEqual({ ec2: "sourceDestCheck" });
+  });
+
+  it("IP 포워딩·MASQUERADE 설정이 없으면 실패하고 사용자 데이터 설정으로 안내한다", () => {
+    const r = toInternet(natInstanceProject({ script: false }));
+    expect(r.outcome).toBe("failure");
+    expect(r.failure?.reason).toContain("IP 포워딩");
+    expect(r.failure?.fields).toEqual({ ec2: "userData" });
+  });
+
+  it("NAT 인스턴스 보안 그룹이 프라이빗 서브넷을 허용하지 않으면 보안 그룹 단계에서 실패한다", () => {
+    const r = toInternet(natInstanceProject({ natSgInbound: [SG.tcp(22, "203.0.113.0/24")] }));
+    expect(r.outcome).toBe("failure");
+    expect(r.failure?.category).toBe("security-group");
+  });
+
+  it("NAT 인스턴스가 중지되면 블랙홀 경로로 실패한다", () => {
+    const r = toInternet(natInstanceProject({ state: "stopped" }));
+    expect(r.failure?.category).toBe("state");
+    expect(r.steps[r.failure!.stepIndex].title).toContain("블랙홀");
+  });
+
+  it("퍼블릭 IP가 없으면 인터넷으로 나갈 수 없다", () => {
+    const r = toInternet(natInstanceProject({ publicIp: false }));
+    expect(r.outcome).toBe("failure");
+    expect(r.failure?.fields).toEqual({ ec2: "publicIpMode" });
+  });
+
+  it("NAT 인스턴스가 프라이빗 서브넷에 있으면 경로 루프로 실패한다", () => {
+    const r = toInternet(natInstanceProject({ natInPrivate: true }));
+    expect(r.outcome).toBe("failure");
+    expect(r.failure?.category).toBe("routing");
+    expect(r.failure?.reason).toContain("경로 루프");
+  });
+
+  it("인터넷 → 프라이빗 EC2는 퍼블릭 IP가 없어 실패한다 (NAT 인스턴스는 나가는 통신만 대신한다)", () => {
+    const p = natInstanceProject();
+    const r = simulate(p, { source: internet(), destination: res(idOf(p, "worker"), "public"), protocol: "tcp", port: 80 });
+    expect(r.outcome).toBe("failure");
+  });
+
+  it("퍼블릭 IP가 있어도 응답 경로가 NAT 인스턴스를 가리키면 비대칭 라우팅으로 실패한다", () => {
+    const b = new ProjectBuilder("asymmetric");
+    const vpc = b.vpc("vpc", "10.0.0.0/16");
+    const pub = b.subnet("public-a", vpc, "10.0.1.0/24", "ap-northeast-2a");
+    const priv = b.subnet("private-a", vpc, "10.0.11.0/24", "ap-northeast-2a");
+    const igw = b.igw("igw", vpc);
+    b.routeTable("public-rt", vpc, { subnets: [pub], routes: [{ destination: "0.0.0.0/0", igw }] });
+    const nat = b.ec2("nat", pub, { ip: "10.0.1.5", publicIp: "enabled", sgs: [b.securityGroup("nat-sg", vpc, { inbound: [SG.tcp(80, "10.0.11.0/24")] })], sourceDestCheck: false });
+    b.routeTable("private-rt", vpc, { subnets: [priv], routes: [{ destination: "0.0.0.0/0", instance: nat }] });
+    b.ec2("web", priv, { ip: "10.0.11.10", publicIp: "enabled", sgs: [b.securityGroup("web-sg", vpc, { inbound: [SG.tcp(80, "0.0.0.0/0")] })] });
+    const p = b.build();
+    const r = simulate(p, { source: internet(), destination: res(idOf(p, "web"), "public"), protocol: "tcp", port: 80 });
+    expect(r.outcome).toBe("failure");
+    expect(r.failure?.category).toBe("routing");
+    expect(r.steps[r.failure!.stepIndex].title).toContain("NAT 인스턴스로 향함");
   });
 });
 

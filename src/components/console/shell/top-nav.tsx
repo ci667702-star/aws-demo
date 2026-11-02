@@ -10,19 +10,24 @@ import { DropdownMenu as Menu_ } from "radix-ui";
 import { RESOURCE_TYPE_INFO } from "@/lib/engine/resource-models";
 import { displayName } from "@/lib/engine/topology-engine";
 import { exportFileName, exportProjectJson } from "@/lib/project/serialization";
-import { useCanRedo, useCanUndo, useProjectStore } from "@/lib/store/project-store";
+import { useCanRedo, useCanUndo, useProjectStore, type HistoryResult } from "@/lib/store/project-store";
 import { downloadTextFile } from "@/lib/ui/download";
 import { useAnalysis } from "../analysis-context";
 import { useConsoleProjectId, useProject } from "../console-context";
 import { useConsoleUi } from "../console-store";
+import { notify } from "../notify";
 import { href, navigate, resourceHref } from "../router";
 import { TutorialMenu } from "../tutorial/tutorial-menu";
+import { IdentityMenu } from "./identity-menu";
 import { NAV_GROUPS } from "./navigation";
-import { navButton } from "./nav-styles";
+import { menuContent, menuItem, navButton } from "./nav-styles";
 
-const menuContent = "z-50 min-w-64 rounded-xl border border-aws-border bg-aws-surface p-1.5 text-aws-text shadow-xl";
-const menuItem =
-  "flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 text-[15px] outline-none data-[highlighted]:bg-aws-info-bg data-[highlighted]:text-aws-link-hover data-[disabled]:cursor-not-allowed data-[disabled]:text-aws-text-3";
+/** 실행 취소·다시 실행 결과 알림 (권한이 없어 거부되면 이유와 해결 방법을 보여 준다) */
+function notifyHistory(result: HistoryResult, kind: "undo" | "redo") {
+  if (result.ok) return;
+  if (result.reason === "empty") notify({ type: "info", title: kind === "undo" ? "실행 취소할 작업이 없습니다." : "다시 실행할 작업이 없습니다." });
+  else notify({ type: "error", title: kind === "undo" ? "실행 취소할 수 없습니다" : "다시 실행할 수 없습니다", description: result.error, notes: result.hint ? [result.hint] : [] });
+}
 
 export function TopNav() {
   const projectId = useConsoleProjectId();
@@ -34,8 +39,8 @@ export function TopNav() {
   const canUndo = useCanUndo(projectId);
   const canRedo = useCanRedo(projectId);
   const saveStatus = useProjectStore((s) => s.saveStatus);
-  const undo = () => useProjectStore.getState().undo(projectId);
-  const redo = () => useProjectStore.getState().redo(projectId);
+  const undo = () => notifyHistory(useProjectStore.getState().undo(projectId), "undo");
+  const redo = () => notifyHistory(useProjectStore.getState().redo(projectId), "redo");
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -44,10 +49,10 @@ export function TopNav() {
       const mod = e.ctrlKey || e.metaKey;
       if (mod && e.key.toLowerCase() === "z" && !e.shiftKey) {
         e.preventDefault();
-        useProjectStore.getState().undo(projectId);
+        notifyHistory(useProjectStore.getState().undo(projectId), "undo");
       } else if (mod && (e.key.toLowerCase() === "y" || (e.key.toLowerCase() === "z" && e.shiftKey))) {
         e.preventDefault();
-        useProjectStore.getState().redo(projectId);
+        notifyHistory(useProjectStore.getState().redo(projectId), "redo");
       }
     };
     window.addEventListener("keydown", onKey);
@@ -104,6 +109,7 @@ export function TopNav() {
         >
           {saveLabel}
         </span>
+        <IdentityMenu />
         <ThemeMenu />
         <SandboxMenu name={project.name} onExport={() => downloadTextFile(exportFileName(project), exportProjectJson(project))} />
       </div>

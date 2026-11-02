@@ -183,16 +183,16 @@ function HealthCheckFields({ draft, onChange }: { draft: HcDraft; onChange: (d: 
   return (
     <SpaceBetween size="m">
       <div className="grid gap-4 sm:grid-cols-2">
-        <FormField label="상태 검사 프로토콜">
+        <FormField help={{ docKey: "target-group", field: "healthCheck" }} label="상태 검사 프로토콜">
           <SelectInput value={draft.protocol} onChange={(v) => set({ protocol: v as "HTTP" | "HTTPS" })} options={[{ value: "HTTP", label: "HTTP" }, { value: "HTTPS", label: "HTTPS" }]} />
         </FormField>
-        <FormField label="상태 검사 경로" constraint="/로 시작, 최대 1024자">
+        <FormField help={{ docKey: "target-group", field: "healthCheckPath" }} label="상태 검사 경로" constraint="/로 시작, 최대 1024자">
           <TextInput value={draft.path} onChange={(e) => set({ path: e.target.value })} placeholder="/" />
         </FormField>
       </div>
       <ExpandableSection header="고급 상태 검사 설정">
         <div className="grid gap-4 sm:grid-cols-2">
-          <FormField label="상태 검사 포트">
+          <FormField help={{ docKey: "target-group", field: "healthCheckPort" }} label="상태 검사 포트">
             <SelectInput value={draft.portMode} onChange={(v) => set({ portMode: v as HcDraft["portMode"] })} options={[{ value: "traffic-port", label: "트래픽 포트" }, { value: "override", label: "재정의" }]} />
           </FormField>
           {draft.portMode === "override" && (
@@ -200,19 +200,19 @@ function HealthCheckFields({ draft, onChange }: { draft: HcDraft; onChange: (d: 
               <TextInput value={draft.port} onChange={(e) => set({ port: e.target.value })} inputMode="numeric" />
             </FormField>
           )}
-          <FormField label="정상 임계값" constraint="2~10">
+          <FormField help={{ docKey: "target-group", field: "healthyThreshold" }} label="정상 임계값" constraint="2~10">
             <TextInput value={draft.healthy} onChange={(e) => set({ healthy: e.target.value })} inputMode="numeric" />
           </FormField>
-          <FormField label="비정상 임계값" constraint="2~10">
+          <FormField help={{ docKey: "target-group", field: "unhealthyThreshold" }} label="비정상 임계값" constraint="2~10">
             <TextInput value={draft.unhealthy} onChange={(e) => set({ unhealthy: e.target.value })} inputMode="numeric" />
           </FormField>
-          <FormField label="제한 시간 (초)" constraint="2~120">
+          <FormField help={{ docKey: "target-group", field: "timeoutSeconds" }} label="제한 시간 (초)" constraint="2~120">
             <TextInput value={draft.timeout} onChange={(e) => set({ timeout: e.target.value })} inputMode="numeric" />
           </FormField>
-          <FormField label="간격 (초)" constraint="5~300, 제한 시간보다 커야 함">
+          <FormField help={{ docKey: "target-group", field: "intervalSeconds" }} label="간격 (초)" constraint="5~300, 제한 시간보다 커야 함">
             <TextInput value={draft.interval} onChange={(e) => set({ interval: e.target.value })} inputMode="numeric" />
           </FormField>
-          <FormField label="성공 코드" constraint='예: 200, 200-299, 200,302'>
+          <FormField help={{ docKey: "target-group", field: "matcher" }} label="성공 코드" constraint='예: 200, 200-299, 200,302'>
             <TextInput value={draft.matcher} onChange={(e) => set({ matcher: e.target.value })} />
           </FormField>
         </div>
@@ -274,18 +274,18 @@ export function CreateTargetGroupPage() {
               <FormField label="대상 유형 선택">
                 <Tiles aria-label="대상 유형" value="instance" onChange={() => undefined} columns={2} items={[{ value: "instance", label: "인스턴스", description: "특정 VPC 안의 인스턴스로 로드 밸런싱" }]} />
               </FormField>
-              <FormField label="대상 그룹 이름" constraint="1~32자의 영문자, 숫자, 하이픈. 하이픈으로 시작하거나 끝날 수 없습니다. 만든 뒤에는 바꿀 수 없습니다.">
+              <FormField help={{ docKey: "target-group", field: "name" }} label="대상 그룹 이름" constraint="1~32자의 영문자, 숫자, 하이픈. 하이픈으로 시작하거나 끝날 수 없습니다. 만든 뒤에는 바꿀 수 없습니다.">
                 <TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="my-target-group" maxLength={32} />
               </FormField>
               <div className="grid gap-4 sm:grid-cols-2">
-                <FormField label="프로토콜">
+                <FormField help={{ docKey: "target-group", field: "protocol" }} label="프로토콜">
                   <SelectInput value={protocol} onChange={(v) => setProtocol(v as "HTTP" | "HTTPS")} options={[{ value: "HTTP", label: "HTTP" }, { value: "HTTPS", label: "HTTPS" }]} />
                 </FormField>
-                <FormField label="포트" constraint="대상이 트래픽을 받는 포트">
+                <FormField help={{ docKey: "target-group", field: "port" }} label="포트" constraint="대상이 트래픽을 받는 포트">
                   <TextInput value={port} onChange={(e) => setPort(e.target.value)} inputMode="numeric" />
                 </FormField>
               </div>
-              <FormField label="VPC" description="대상으로 등록할 인스턴스가 있는 VPC">
+              <FormField help={{ docKey: "target-group", field: "vpc" }} label="VPC" description="대상으로 등록할 인스턴스가 있는 VPC">
                 <SelectInput value={vpcId} onChange={(v) => { setVpcId(v); setPending([]); setChecked([]); }} placeholder="VPC 선택" options={vpcs.map((v) => ({ value: v.id, label: `${v.id} (${displayName(v)})` }))} />
               </FormField>
             </SpaceBetween>
@@ -317,7 +317,7 @@ export function CreateTargetGroupPage() {
                   ))}
                 </ul>
                 <div className="flex flex-wrap items-end gap-3">
-                  <FormField label="선택한 인스턴스용 포트">
+                  <FormField help={{ docKey: "target-group", field: "targets" }} label="선택한 인스턴스용 포트">
                     <TextInput value={port} disabled readOnly className="max-w-28" />
                   </FormField>
                   <Button onClick={() => { setPending([...new Set([...pending, ...checked])]); setChecked([]); }} disabled={!checked.length}>

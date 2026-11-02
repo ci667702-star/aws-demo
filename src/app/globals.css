@@ -309,10 +309,32 @@
   animation: node-pulse 1.2s ease-in-out infinite;
 }
 
+/* '설정으로 이동'으로 찾아간 설정 항목을 잠깐 강조한다 (field-help.tsx revealElement) */
+@keyframes field-flash {
+  0%,
+  35% {
+    box-shadow: 0 0 0 3px oklch(0.685 0.169 237.323 / 0.55);
+    background-color: oklch(0.685 0.169 237.323 / 0.08);
+  }
+  100% {
+    box-shadow: 0 0 0 3px oklch(0.685 0.169 237.323 / 0);
+    background-color: transparent;
+  }
+}
+
+[data-field-flash] {
+  border-radius: 0.5rem;
+  animation: field-flash 1.6s ease-out;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .node-pulse,
   .react-flow__edge.path-active .react-flow__edge-path {
     animation: none;
+  }
+  [data-field-flash] {
+    animation: none;
+    box-shadow: 0 0 0 2px oklch(0.685 0.169 237.323);
   }
 }
 
@@ -433,4 +455,83 @@
 }
 .driver-popover.pg-tour .driver-popover-arrow-side-bottom.driver-popover-arrow {
   border-bottom-color: var(--aws-surface);
+}
+.driver-popover.pg-tour .pg-tour-status {
+  margin-top: 10px;
+  border-radius: 12px;
+  border: 1px dashed var(--aws-border);
+  background: var(--aws-surface-2);
+  padding: 8px 12px;
+  font-size: 14px;
+  color: var(--aws-text-2);
+}
+.driver-popover.pg-tour .pg-tour-status-done {
+  border: 1px solid color-mix(in oklch, var(--aws-success) 45%, transparent);
+  background: var(--aws-success-bg);
+  color: var(--aws-success);
+  font-weight: 700;
+}
+.driver-popover.pg-tour .driver-popover-footer button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+/* 양식을 덮지 않도록 화면 왼쪽 아래에 붙인 팝업 (양식 옆에 자리가 없을 때) */
+.driver-popover.pg-tour.pg-tour-docked {
+  top: auto !important;
+  right: auto !important;
+  bottom: 16px !important;
+  left: 16px !important;
+  width: min(380px, calc(100vw - 32px)) !important;
+  min-width: 0;
+  max-width: none;
+  max-height: min(62vh, 560px);
+  flex-direction: column;
+  overflow: hidden;
+}
+/* 설명이 길면 설명만 스크롤하고, 아래 버튼(다음·이 단계 화면으로 이동)은 항상 보이게 한다
+   (driver.js가 보일 때 인라인으로 display: block을 넣으므로 !important. 숨긴 팝업은 그대로 둔다) */
+.driver-popover.pg-tour.pg-tour-docked:not([style*="display: none"]) {
+  display: flex !important;
+}
+.driver-popover.pg-tour.pg-tour-docked .driver-popover-description {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+.driver-popover.pg-tour.pg-tour-docked .driver-popover-footer {
+  flex: none;
+}
+.driver-popover.pg-tour.pg-tour-docked .driver-popover-arrow {
+  display: none;
+}
+@media (max-width: 640px) {
+  .driver-popover.pg-tour.pg-tour-docked {
+    max-height: 50vh;
+  }
+}
+/* 아래에 붙은 팝업 높이만큼 페이지 끝에 여백을 둔다 (맨 아래 버튼을 팝업 위로 올려 누를 수 있게) */
+body.pg-tour-dock-space {
+  padding-bottom: var(--pg-tour-dock-space, 0px);
+}
+.driver-popover.pg-tour.pg-tour-collapsed .driver-popover-description {
+  display: none;
+}
+/* 튜토리얼 중에도 화면을 그대로 쓸 수 있게 한다: driver.js가 강조 영역 밖의 클릭을 막는 규칙을 되돌린다
+   (revert-layer라 원래 pointer-events-none인 아이콘 등은 그대로 둔다) */
+.driver-active.pg-tour-on * {
+  pointer-events: revert-layer;
+}
+/* driver.js가 오버레이 경로에 인라인으로 pointer-events: auto를 넣으므로 !important로 통과시킨다 */
+.driver-active.pg-tour-on .driver-overlay,
+.driver-active.pg-tour-on .driver-overlay * {
+  pointer-events: none !important;
+}
+/* 튜토리얼이 양식으로 스크롤할 때 고정된 콘솔 상단 메뉴 밑에 가려지지 않게 한다 */
+[data-tour] {
+  scroll-margin-top: 72px;
+}
+/* 실습 단계는 화면을 어둡게 덮지 않고, 해야 할 영역에 테두리를 둘러 알려 준다 */
+.pg-tour-light .driver-active-element {
+  outline: 3px solid var(--aws-link);
+  outline-offset: 6px;
 }

@@ -145,7 +145,7 @@ function StatementBuilder({ document, onChange }: { document: string; onChange: 
   return (
     <SpaceBetween size="m">
       <div className="grid gap-4 md:grid-cols-2">
-        <FormField label="효과 (Effect)">
+        <FormField help={{ docKey: "iam", field: "effect" }} label="효과 (Effect)">
           <RadioGroup
             aria-label="효과"
             value={effect}
@@ -168,7 +168,7 @@ function StatementBuilder({ document, onChange }: { document: string; onChange: 
           />
         </FormField>
       </div>
-      <FormField label="작업 (Action)">
+      <FormField help={{ docKey: "iam", field: "action" }} label="작업 (Action)">
         <div className="space-y-2 rounded-xl border border-aws-border p-3">
           <Checkbox checked={allActions} onChange={setAllActions} description="편하지만 필요 이상으로 넓은 권한이 됩니다.">
             모든 {service} 작업 ({service}:*)
@@ -182,7 +182,7 @@ function StatementBuilder({ document, onChange }: { document: string; onChange: 
           </div>
         </div>
       </FormField>
-      <FormField label="리소스 (Resource)">
+      <FormField help={{ docKey: "iam", field: "resource" }} label="리소스 (Resource)">
         {service === "s3" ? (
           <SpaceBetween size="s">
             <RadioGroup
@@ -285,7 +285,7 @@ export function CreatePolicyPage() {
         <>
           <Container header={<ContainerHeader title="정책 세부 정보" />}>
             <SpaceBetween size="m">
-              <FormField label="정책 이름" constraint="최대 128자. 영문자, 숫자, + = , . @ _ - 사용 가능">
+              <FormField help={{ docKey: "iam", field: "managedPolicy" }} label="정책 이름" constraint="최대 128자. 영문자, 숫자, + = , . @ _ - 사용 가능">
                 <TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="예: SiteBucketReadOnly" maxLength={128} />
               </FormField>
               <FormField label="설명" optional>

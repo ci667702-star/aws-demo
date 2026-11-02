@@ -7,6 +7,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ResourceIcon } from "@/components/resource-visuals";
 import type { Severity, ValidationCategory, ValidationFinding } from "@/lib/engine/validation-engine";
+import { getFieldHelp } from "@/lib/docs";
+import { fieldForFinding } from "@/lib/docs/rule-fields";
+import { displayName } from "@/lib/engine/topology-engine";
 import { useEditorStore } from "@/lib/store/editor-store";
 import { formatTime } from "@/lib/ui/format";
 import { useAnalysis } from "@/components/console/analysis-context";
@@ -127,8 +130,16 @@ function FindingItem({
   onFocus: (ids: string[]) => void;
 }) {
   const analysis = useAnalysis();
+  const focusField = useEditorStore((s) => s.focusField);
   const meta = SEVERITY_META[finding.severity];
   const Icon = meta.icon;
+  // 이 검증 규칙이 가리키는 설정 항목 (리소스 유형별). 설정 키는 src/lib/docs/rule-fields.ts에서 관리한다.
+  const related = finding.resourceIds.flatMap((id) => {
+    const r = analysis.topology.get(id);
+    if (!r) return [];
+    const field = fieldForFinding(finding, r.type);
+    return [{ resource: r, field, help: field ? getFieldHelp(r.type, field) : null }];
+  });
   return (
     <li data-testid="finding" data-rule={finding.ruleId}>
       <div className="flex flex-col gap-1 px-3 py-2 hover:bg-muted/40 sm:flex-row sm:items-start sm:gap-2">
@@ -170,34 +181,61 @@ function FindingItem({
         </div>
       </div>
       {expanded && (
-        <dl className="grid gap-2 px-10 pb-3 text-xs sm:grid-cols-2">
-          <div>
-            <dt className="font-medium">문제 원인</dt>
-            <dd className="text-muted-foreground">{finding.cause}</dd>
+        <div className="space-y-2 px-10 pb-3 text-xs">
+          <div className="rounded-md border border-violet-500/30 bg-violet-500/[0.03] p-2" data-testid="finding-project-analysis">
+            <p className="mb-1.5 text-[10px] font-semibold text-violet-700 dark:text-violet-300">현재 프로젝트 분석</p>
+            <dl className="grid gap-2 sm:grid-cols-2">
+              <div>
+                <dt className="font-medium">문제 원인</dt>
+                <dd className="text-muted-foreground">{finding.cause}</dd>
+              </div>
+              <div>
+                <dt className="font-medium">발생 조건 (문제가 되는 설정)</dt>
+                <dd className="font-mono text-[11px] text-muted-foreground">{finding.condition}</dd>
+              </div>
+              <div>
+                <dt className="font-medium">수정 방법</dt>
+                <dd>
+                  <ul className="list-disc pl-4 text-muted-foreground">
+                    {finding.fix.map((x, i) => (
+                      <li key={i}>{x}</li>
+                    ))}
+                  </ul>
+                </dd>
+              </div>
+              <div>
+                <dt className="font-medium">수정하면 달라지는 결과</dt>
+                <dd className="text-muted-foreground">{finding.impact}</dd>
+              </div>
+              {related.length > 0 && (
+                <div className="sm:col-span-2" data-testid="finding-related-settings">
+                  <dt className="font-medium">관련 리소스와 설정 항목</dt>
+                  <dd className="mt-1 flex flex-wrap gap-1.5">
+                    {related.map(({ resource, field, help }) => (
+                      <span key={resource.id} className="inline-flex flex-wrap items-center gap-1 rounded-md border bg-background px-1.5 py-1">
+                        <ResourceIcon type={resource.type} size="sm" className="size-4 [&_svg]:size-2.5" />
+                        <span className="font-medium">{displayName(resource)}</span>
+                        {help && <span className="text-muted-foreground">· {help.title}</span>}
+                        {field && help && (
+                          <Button variant="outline" size="xs" className="h-6" onClick={() => focusField(resource.id, field)}>
+                            설정으로 이동
+                          </Button>
+                        )}
+                        <Button variant="ghost" size="xs" className="h-6" onClick={() => onFocus([resource.id])}>
+                          리소스 설명 보기
+                        </Button>
+                      </span>
+                    ))}
+                  </dd>
+                </div>
+              )}
+            </dl>
           </div>
-          <div>
-            <dt className="font-medium">발생 조건 (문제가 되는 설정)</dt>
-            <dd className="font-mono text-[11px] text-muted-foreground">{finding.condition}</dd>
+          <div className="rounded-md bg-muted/50 p-2">
+            <p className="mb-1 text-[10px] font-semibold text-muted-foreground">관련 AWS 개념 (일반 설명)</p>
+            <p className="text-muted-foreground">{finding.concept}</p>
           </div>
-          <div>
-            <dt className="font-medium">수정 방법</dt>
-            <dd>
-              <ul className="list-disc pl-4 text-muted-foreground">
-                {finding.fix.map((x, i) => (
-                  <li key={i}>{x}</li>
-                ))}
-              </ul>
-            </dd>
-          </div>
-          <div>
-            <dt className="font-medium">수정하면 달라지는 결과</dt>
-            <dd className="text-muted-foreground">{finding.impact}</dd>
-          </div>
-          <div className="sm:col-span-2">
-            <dt className="font-medium">관련 AWS 개념</dt>
-            <dd className="rounded-md bg-muted/50 p-2 text-muted-foreground">{finding.concept}</dd>
-          </div>
-        </dl>
+        </div>
       )}
     </li>
   );

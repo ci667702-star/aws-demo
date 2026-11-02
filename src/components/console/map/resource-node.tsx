@@ -1,70 +1,97 @@
 "use client";
 
 import { memo } from "react";
-import { Handle, Position, type NodeProps } from "@xyflow/react";
+import { Handle, Position, useStore, type NodeProps, type ReactFlowState } from "@xyflow/react";
 import { CircleX, TriangleAlert } from "lucide-react";
 import { cn } from "cn";
 import { CATEGORY_STYLES, ResourceIcon, ToneBadge } from "@/components/resource-visuals";
 import { RESOURCE_TYPE_INFO } from "@/lib/engine/resource-models";
 import { displayName } from "@/lib/engine/topology-engine";
 import { NODE_WIDTH } from "@/lib/project/layout";
-import type { ResourceFlowNode, ZoneFlowNode } from "./canvas-model";
+import { COMPACT_ZOOM, type ResourceFlowNode, type ZoneFlowNode } from "./canvas-model";
+
+/** 멀리서 볼 때(축소) 작은 글자 대신 이름만 크게 보여 준다 */
+const zoomedOut = (s: ReactFlowState) => s.transform[2] < COMPACT_ZOOM;
 
 export const ResourceNode = memo(function ResourceNode({ data, selected }: NodeProps<ResourceFlowNode>) {
-  const { resource, subtitle, badges, errors, warnings, pathState, pathOrder, typeLabel } = data;
+  const { resource, subtitle, badges, errors, warnings, pathState, pathOrder, typeLabel, focus } = data;
   const category = CATEGORY_STYLES[RESOURCE_TYPE_INFO[resource.type].category];
   const name = displayName(resource);
+  const compact = useStore(zoomedOut);
   return (
     <div
       className={cn(
-        "relative rounded-lg border border-l-4 bg-card text-card-foreground shadow-sm transition-shadow",
+        "relative rounded-lg border border-l-4 bg-card text-card-foreground shadow-sm transition-[box-shadow,opacity]",
         category.border,
         selected && "ring-2 ring-primary ring-offset-1 ring-offset-background",
         pathState === "active" && "node-pulse border-sky-500 ring-2 ring-sky-500/70",
         pathState === "failed" && "border-red-500 ring-2 ring-red-500/80",
         pathState === "pending" && "opacity-60",
+        focus === "dim" && "opacity-35",
       )}
       style={{ width: NODE_WIDTH }}
       data-testid={`node-${name}`}
+      data-focus={focus ?? undefined}
       aria-label={`${typeLabel} ${name}`}
     >
       <Handle type="target" position={Position.Top} aria-label={`${name} 연결점 (위)`} />
-      <div className="flex items-start gap-2 p-2">
-        <ResourceIcon type={resource.type} size="sm" />
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1">
-            <span className="truncate text-[13px] leading-tight font-medium" title={name}>
+      {compact ? (
+        <div className="flex items-center gap-2 p-2" data-testid="node-compact">
+          <ResourceIcon type={resource.type} size="lg" />
+          <div className="min-w-0 flex-1">
+            <div className="line-clamp-2 text-[22px] leading-tight font-semibold break-all" title={name}>
               {name}
-            </span>
-          </div>
-          <div className="truncate text-[11px] text-muted-foreground" title={subtitle}>
-            {typeLabel} · {subtitle}
-          </div>
-          {badges.length > 0 && (
-            <div className="mt-1 flex flex-wrap gap-1">
-              {badges.map((b) => (
-                <ToneBadge key={b.label} tone={b.tone} title={b.title}>
-                  {b.label}
-                </ToneBadge>
-              ))}
             </div>
-          )}
-        </div>
-        <div className="flex flex-col items-end gap-0.5">
-          {errors > 0 && (
-            <span className="inline-flex items-center gap-0.5 text-[11px] font-medium text-red-600 dark:text-red-400" title={`오류 ${errors}개`}>
-              <CircleX className="size-3" aria-hidden />
-              {errors}
-            </span>
-          )}
-          {warnings > 0 && (
-            <span className="inline-flex items-center gap-0.5 text-[11px] font-medium text-amber-600 dark:text-amber-400" title={`경고 ${warnings}개`}>
-              <TriangleAlert className="size-3" aria-hidden />
-              {warnings}
+            <div className="truncate text-[15px] text-muted-foreground">{typeLabel}</div>
+          </div>
+          {(errors > 0 || warnings > 0) && (
+            <span
+              className={cn("inline-flex items-center gap-0.5 text-[18px] font-semibold", errors > 0 ? "text-red-600 dark:text-red-400" : "text-amber-600 dark:text-amber-400")}
+              title={`오류 ${errors}개 · 경고 ${warnings}개`}
+            >
+              {errors > 0 ? <CircleX className="size-5" aria-hidden /> : <TriangleAlert className="size-5" aria-hidden />}
+              {errors || warnings}
             </span>
           )}
         </div>
-      </div>
+      ) : (
+        <div className="flex items-start gap-2 p-2">
+          <ResourceIcon type={resource.type} size="sm" />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1">
+              <span className="truncate text-[13px] leading-tight font-medium" title={name}>
+                {name}
+              </span>
+            </div>
+            <div className="truncate text-[11px] text-muted-foreground" title={subtitle}>
+              {typeLabel} · {subtitle}
+            </div>
+            {badges.length > 0 && (
+              <div className="mt-1 flex flex-wrap gap-1">
+                {badges.map((b) => (
+                  <ToneBadge key={b.label} tone={b.tone} title={b.title}>
+                    {b.label}
+                  </ToneBadge>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="flex flex-col items-end gap-0.5">
+            {errors > 0 && (
+              <span className="inline-flex items-center gap-0.5 text-[11px] font-medium text-red-600 dark:text-red-400" title={`오류 ${errors}개`}>
+                <CircleX className="size-3" aria-hidden />
+                {errors}
+              </span>
+            )}
+            {warnings > 0 && (
+              <span className="inline-flex items-center gap-0.5 text-[11px] font-medium text-amber-600 dark:text-amber-400" title={`경고 ${warnings}개`}>
+                <TriangleAlert className="size-3" aria-hidden />
+                {warnings}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
       {pathOrder !== null && (
         <span className="absolute -top-2 -left-2 inline-flex size-5 items-center justify-center rounded-full bg-sky-600 text-[10px] font-semibold text-white shadow">
           {pathOrder + 1}
@@ -84,16 +111,24 @@ const ZONE_STYLES: Record<string, string> = {
 };
 
 export const ZoneNode = memo(function ZoneNode({ data, width, height }: NodeProps<ZoneFlowNode>) {
+  const compact = useStore(zoomedOut);
   return (
     <div
       className={cn("rounded-xl border-2 border-dashed", ZONE_STYLES[data.tone])}
       style={{ width, height }}
       aria-hidden
     >
-      <div className="flex items-center gap-1.5 px-2 pt-1 text-[11px] font-medium text-muted-foreground">
-        <span className="text-foreground/80">{data.label}</span>
-        <span>· {data.detail}</span>
-      </div>
+      {compact ? (
+        // 서브넷 이름은 서브넷 노드에 크게 보이므로, 멀리서는 종류와 CIDR만 표시한다
+        <div className={cn("truncate px-2 pt-0.5 font-medium whitespace-nowrap text-muted-foreground", data.kind === "vpc" ? "text-[18px]" : "text-[14px]")}>
+          {data.kind === "vpc" ? `${data.label} · ${data.detail}` : data.detail}
+        </div>
+      ) : (
+        <div className="flex items-center gap-1.5 px-2 pt-1 text-[11px] font-medium text-muted-foreground">
+          <span className="text-foreground/80">{data.label}</span>
+          <span>· {data.detail}</span>
+        </div>
+      )}
     </div>
   );
 });

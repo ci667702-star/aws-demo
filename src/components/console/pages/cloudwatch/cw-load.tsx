@@ -95,7 +95,7 @@ export function LoadTestPage() {
               <FormField label="이름">
                 <TextInput value={name} onChange={(e) => setName(e.target.value)} maxLength={100} />
               </FormField>
-              <FormField label="대상">
+              <FormField help={{ docKey: "cloudwatch", field: "virtualLoad" }} label="대상">
                 <SelectInput
                   value={targetId}
                   onChange={(v) => {

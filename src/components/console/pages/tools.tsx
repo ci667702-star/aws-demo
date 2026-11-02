@@ -5,12 +5,13 @@ import { CircleX, Info, TriangleAlert } from "lucide-react";
 import { cn } from "cn";
 import { useMemo, useState } from "react";
 import { DEFAULT_COST_ASSUMPTIONS, estimateCost, resolveCostAssumptions } from "@/lib/engine/cost-engine";
+import { NatCostComparisonCard } from "@/components/docs/nat-cost-comparison";
 import { RESOURCE_TYPE_INFO, type CostAssumptions } from "@/lib/engine/resource-models";
 import { displayName } from "@/lib/engine/topology-engine";
 import type { Severity, ValidationCategory, ValidationFinding } from "@/lib/engine/validation-engine";
 import { setCostAssumptions } from "@/lib/project/mutations";
 import { useProjectStore } from "@/lib/store/project-store";
-import { formatDateTime, formatMoney } from "@/lib/ui/format";
+import { formatDateTime, formatMoney, formatRate } from "@/lib/ui/format";
 import { useAnalysis } from "../analysis-context";
 import { useConsoleProjectId, useProject, useRunAction } from "../console-context";
 import { resourceHref } from "../router";
@@ -274,7 +275,7 @@ export function BillingPage() {
                             <ul className="space-y-0.5">
                               {line.items.map((i) => (
                                 <li key={i.label}>
-                                  {i.label}: {i.quantity.toLocaleString()} {i.unit} × {formatMoney(i.rate)} = {formatMoney(i.amount)}
+                                  {i.label}: {i.quantity.toLocaleString()} {i.unit} × {formatRate(i.rate)} = {formatMoney(i.amount)}
                                 </li>
                               ))}
                               {line.note && <li>{line.note}</li>}
@@ -293,6 +294,7 @@ export function BillingPage() {
                 <li key={n}>{n}</li>
               ))}
             </ul>
+            <NatCostComparisonCard project={project} assumptions={assumptions} />
           </SpaceBetween>
         </Container>
         <Container header={<ContainerHeader title="가정값" actions={<Button variant="link" disabled={!project.costAssumptions} onClick={() => run("ResetCostAssumptions", (p) => setCostAssumptions(p, null))}>기본값</Button>} />}>

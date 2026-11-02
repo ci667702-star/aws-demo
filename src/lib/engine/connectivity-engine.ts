@@ -34,6 +34,7 @@ import {
   type SimStep,
 } from "./simulation-log";
 import { buildTopology, Topology, VIRTUAL_PUBLIC_POOL, type EffectiveRoute, type Eni, displayName } from "./topology-engine";
+import { hasNatSoftware } from "./nat-instance";
 
 export type EndpointSpec =
   | { kind: "internet"; ip: string }
@@ -114,6 +115,8 @@ const CONCEPT = {
   route: "라우팅 테이블은 목적지 IP를 포함하는 경로 중 가장 구체적인(접두사가 가장 긴) 경로를 사용합니다. VPC CIDR에 대한 local 경로는 항상 존재합니다.",
   igw: "인터넷 게이트웨이는 VPC에 연결(Attach)되어 있어야 하며, 퍼블릭 IPv4 주소가 있는 인터페이스에 대해 사설 IP ↔ 퍼블릭 IP 1:1 변환을 수행합니다. 라우팅 테이블에 IGW로 향하는 경로가 있는 서브넷이 퍼블릭 서브넷입니다.",
   nat: "NAT 게이트웨이는 프라이빗 서브넷 리소스의 아웃바운드 연결을 자신의 Elastic IP로 변환(SNAT)합니다. NAT는 퍼블릭 서브넷에 있어야 하며 외부에서 시작된 인바운드 연결은 받지 않습니다.",
+  natInstance:
+    "NAT 인스턴스는 퍼블릭 서브넷의 EC2가 NAT 게이트웨이 대신 주소 변환을 하는 방식입니다. 인스턴스 안에서 IP 포워딩과 iptables MASQUERADE를 켜고, 소스/대상 확인을 끄고, 프라이빗 서브넷 경로를 이 인스턴스로 보내야 합니다. 보안 그룹은 프라이빗 서브넷에서 오는 트래픽을 허용해야 합니다. 비용은 인스턴스 요금뿐이지만, 장애 대비·패치·대역폭은 직접 관리해야 합니다.",
   alb: "ALB는 리스너(프로토콜:포트)로 요청을 받고, 리스너의 기본 작업에 따라 대상 그룹의 정상(Healthy) 대상 중 하나로 요청을 전달합니다.",
   albRules:
     "리스너 규칙은 우선순위 숫자가 작은 것부터 평가하고, 처음 일치한 규칙 하나의 작업만 수행합니다. 어떤 규칙과도 맞지 않으면 리스너의 기본 작업을 사용합니다. 경로 패턴은 대소문자를 구분하며 *(0자 이상)와 ?(정확히 1자)를 쓸 수 있습니다.",
@@ -405,6 +408,7 @@ function fromEni(ctx: Ctx, src: Eni, destination: number, pkt: Packet): void {
   const route = lookupRoute(ctx, src, destination);
   if (route.targetKind === "local") deliverLocal(ctx, src, destination, pkt);
   else if (route.targetKind === "internet-gateway") egressViaIgw(ctx, src, route, destination, pkt);
+  else if (route.targetKind === "instance") egressViaNatInstance(ctx, src, route, destination, pkt);
   else egressViaNat(ctx, src, route, destination, pkt);
 }
 
@@ -639,6 +643,158 @@ function egressViaNat(ctx: Ctx, src: Eni, route: EffectiveRoute, destination: nu
   });
 }
 
+/** 경로 대상이 인스턴스인 경우: NAT 인스턴스로 동작하는지 확인하고 주소 변환해 인터넷으로 내보낸다 */
+function egressViaNatInstance(ctx: Ctx, src: Eni, route: EffectiveRoute, destination: number, pkt: Packet): void {
+  const topo = ctx.topo;
+  const log: SimulationLog = ctx.log;
+  const nat = topo.getOfType(route.targetId, "ec2");
+  if (!nat) {
+    log.fail({
+      kind: "nat",
+      category: "routing",
+      title: "경로의 인스턴스가 존재하지 않음 (블랙홀)",
+      reason: `${route.destinationCidr} 경로가 삭제된 인스턴스를 가리킵니다.`,
+      resourceIds: [src.subnetId],
+      fixes: ["라우팅 테이블의 경로 대상을 실행 중인 NAT 인스턴스나 NAT 게이트웨이로 바꾸세요."],
+      concept: CONCEPT.natInstance,
+      fields: { subnet: "routeTable" },
+    });
+  }
+  const label = topo.label(nat.id);
+  const natEni = topo.enisOf(nat.id)[0];
+  if (!natEni?.subnetId) {
+    log.fail({
+      kind: "nat",
+      category: "configuration",
+      title: `${label}이(가) 서브넷에 배치되지 않음`,
+      resourceIds: [nat.id],
+      fixes: [`${label}을(를) 퍼블릭 서브넷에 두세요.`],
+      concept: CONCEPT.natInstance,
+      fields: { ec2: "subnet" },
+    });
+  }
+  if (natEni.vpcId !== src.vpcId) {
+    log.fail({
+      kind: "nat",
+      category: "routing",
+      title: `${label}이(가) 다른 VPC에 있음`,
+      reason: "라우팅 테이블의 인스턴스 대상은 같은 VPC에 있어야 합니다.",
+      resourceIds: [nat.id],
+      fixes: ["같은 VPC의 퍼블릭 서브넷에 있는 인스턴스를 경로 대상으로 지정하세요."],
+      concept: CONCEPT.natInstance,
+      fields: { ec2: "subnet" },
+    });
+  }
+  if (nat.config.state !== "running") {
+    log.fail({
+      kind: "nat",
+      category: "state",
+      title: `NAT 인스턴스 ${label}이(가) ${nat.config.state} 상태 (블랙홀 경로)`,
+      reason: "경로가 가리키는 인스턴스가 실행 중이 아니어서 트래픽을 받을 수 없습니다. AWS에서는 이 경로가 blackhole로 표시됩니다.",
+      resourceIds: [nat.id],
+      fixes: [`${label}을(를) 시작하세요.`, "인스턴스 하나에 의존하면 장애 시 외부 통신이 모두 끊깁니다. 중요한 환경은 NAT 게이트웨이를 고려하세요."],
+      concept: CONCEPT.natInstance,
+    });
+  }
+  const crossing = src.subnetId !== natEni.subnetId;
+  if (crossing) {
+    checkNacl(ctx, src.subnetId!, "outbound", destination, pkt.protocol, pkt.port, "요청이 서브넷을 나가 NAT 인스턴스로 향함", false);
+    log.hop(natEni.subnetId, `Subnet ${topo.name(natEni.subnetId)}`);
+    checkNacl(ctx, natEni.subnetId, "inbound", src.privateIp!, pkt.protocol, pkt.port, "요청이 NAT 인스턴스 서브넷으로 들어옴", false);
+  }
+  log.hop(nat.id, label);
+  if (nat.config.sourceDestCheck !== false) {
+    log.fail({
+      kind: "nat",
+      category: "configuration",
+      title: `${label}의 소스/대상 확인이 켜져 있어 패킷을 버림`,
+      reason: `패킷의 목적지(${ip(destination)})가 인스턴스 자신이 아니므로, 소스/대상 확인이 켜진 인스턴스는 이 트래픽을 받지 않습니다.`,
+      resourceIds: [nat.id],
+      fixes: ["심화 모드: EC2 → 인스턴스 → 작업 → 네트워킹 → '소스/대상 확인 변경'에서 중지하세요.", "쉬운 모드: 인스턴스 설정의 '소스/대상 확인'을 끄세요."],
+      concept: CONCEPT.natInstance,
+      fields: { ec2: "sourceDestCheck" },
+    });
+  }
+  checkSecurityGroups(ctx, natEni, "inbound", src.privateIp!, src.securityGroupIds ?? [], pkt);
+  if (!hasNatSoftware(nat.config.userData)) {
+    log.fail({
+      kind: "nat",
+      category: "service",
+      title: `${label}에 NAT 설정(IP 포워딩·iptables MASQUERADE)이 없음`,
+      reason: "인스턴스 운영체제가 받은 패킷을 다른 곳으로 넘기고(IP 포워딩) 출발지 주소를 자기 주소로 바꾸도록(MASQUERADE) 설정되어 있지 않아 패킷이 버려집니다.",
+      resourceIds: [nat.id],
+      fixes: [
+        "심화 모드: 인스턴스를 중지한 뒤 '사용자 데이터 편집'에서 템플릿 'NAT 인스턴스'를 넣으세요. 쉬운 모드: 인스턴스 설정의 'NAT 설정 스크립트 넣기'를 누르세요.",
+        "스크립트에는 net.ipv4.ip_forward=1과 iptables -t nat -A POSTROUTING -o <인터페이스> -j MASQUERADE가 들어갑니다.",
+      ],
+      concept: CONCEPT.natInstance,
+      fields: { ec2: "userData" },
+    });
+  }
+  log.pass({
+    kind: "nat",
+    title: `${label} — 출발지 주소 변환 (iptables MASQUERADE)`,
+    detail: `출발지 ${ip(src.privateIp)} → ${ip(natEni.privateIp)} (NAT 인스턴스의 사설 IP)`,
+    resourceIds: [nat.id],
+    concept: CONCEPT.natInstance,
+  });
+  checkSecurityGroups(ctx, natEni, "outbound", destination, [], pkt);
+  const natRoute = lookupRoute(ctx, natEni, destination);
+  if (natRoute.targetKind !== "internet-gateway") {
+    log.fail({
+      kind: "nat",
+      category: "routing",
+      title: `NAT 인스턴스 서브넷(${topo.name(natEni.subnetId)})에 IGW 경로가 없음`,
+      reason:
+        natRoute.targetKind === "instance" || natRoute.targetKind === "nat-gateway"
+          ? "NAT 인스턴스가 있는 서브넷의 경로가 다시 NAT를 가리켜 트래픽이 인터넷으로 나갈 수 없습니다 (경로 루프)."
+          : `NAT 인스턴스가 있는 서브넷의 라우팅이 ${natRoute.destinationCidr} → ${topo.routeTargetLabel(natRoute)}입니다. NAT 인스턴스는 IGW 경로가 있는 퍼블릭 서브넷에 있어야 합니다.`,
+      resourceIds: [nat.id, natEni.subnetId],
+      fixes: ["NAT 인스턴스를 0.0.0.0/0 → IGW 경로가 있는 퍼블릭 서브넷에 두세요."],
+      concept: CONCEPT.natInstance,
+      fields: { ec2: "subnet", subnet: "routeTable" },
+    });
+  }
+  const igw = requireAttachedIgw(ctx, natRoute.targetId, natEni.vpcId, "NAT 인스턴스 서브넷의 인터넷");
+  if (natEni.publicIp === null) {
+    log.fail({
+      kind: "nat",
+      category: "configuration",
+      title: `${label}에 퍼블릭 IPv4 주소가 없음`,
+      reason: "NAT 인스턴스는 퍼블릭 IP(또는 탄력적 IP)가 있어야 인터넷 게이트웨이가 주소를 바꿔 내보낼 수 있습니다.",
+      resourceIds: [nat.id],
+      fixes: ["퍼블릭 IP 자동 할당을 켜고 시작하거나, 탄력적 IP를 할당해 연결하세요."],
+      concept: CONCEPT.natInstance,
+      fields: { ec2: "publicIpMode" },
+    });
+  }
+  checkNacl(ctx, natEni.subnetId, "outbound", destination, pkt.protocol, pkt.port, "NAT 인스턴스에서 IGW로 서브넷을 나감", false);
+  log.pass({
+    kind: "gateway",
+    title: `${topo.label(igw.id)} 통과 — 출발지 주소 변환`,
+    detail: `출발지 ${ip(natEni.privateIp)} → ${ip(natEni.publicIp)} (NAT 인스턴스의 퍼블릭 IP, 1:1 NAT)`,
+    resourceIds: [igw.id],
+  });
+  log.hop(igw.id, topo.label(igw.id));
+  deliverOnInternet(ctx, natEni.publicIp, destination, pkt);
+  inPhase(ctx, "response", () => {
+    checkNacl(ctx, natEni.subnetId!, "inbound", destination, pkt.protocol, responsePort(pkt), "응답이 NAT 인스턴스 서브넷으로 들어옴 (임시 포트)", true);
+    log.pass({
+      kind: "nat",
+      title: `${label} — 응답 주소 복원`,
+      detail: `목적지 ${ip(natEni.publicIp)} → ${ip(src.privateIp)} (iptables 연결 추적 정보 사용)`,
+      resourceIds: [nat.id],
+    });
+    sgStatefulNote(ctx, natEni);
+    if (crossing) {
+      checkNacl(ctx, natEni.subnetId!, "outbound", src.privateIp!, pkt.protocol, responsePort(pkt), "응답이 NAT 인스턴스 서브넷을 나감", true);
+      checkNacl(ctx, src.subnetId!, "inbound", destination, pkt.protocol, responsePort(pkt), "응답이 출발지 서브넷으로 들어옴", true);
+    }
+    sgStatefulNote(ctx, src);
+    log.pass({ kind: "service", title: `응답 도착 — ${src.label}`, detail: "NAT 인스턴스를 거쳐 응답이 도착했습니다.", resourceIds: [src.ownerId] });
+  });
+}
+
 function deliverOnInternet(ctx: Ctx, from: number, destination: number, pkt: Packet): void {
   const topo = ctx.topo;
   const log: SimulationLog = ctx.log;
@@ -735,12 +891,13 @@ function ingressFromInternet(ctx: Ctx, from: number, dst: Eni, pkt: Packet): voi
   inPhase(ctx, "response", () => {
     sgStatefulNote(ctx, dst);
     const back = lookupRoute(ctx, dst, from);
-    if (back.targetKind === "nat-gateway") {
+    if (back.targetKind === "nat-gateway" || back.targetKind === "instance") {
+      const via = back.targetKind === "instance" ? "NAT 인스턴스" : "NAT Gateway";
       log.fail({
         kind: "route",
         category: "routing",
-        title: "응답이 NAT Gateway로 향함 (비대칭 라우팅)",
-        reason: `요청은 IGW로 들어왔지만 서브넷 ${topo.name(dst.subnetId)}의 응답 경로가 NAT Gateway를 가리킵니다. 응답의 출발지 주소가 달라져 연결이 성립하지 않습니다.`,
+        title: `응답이 ${via}로 향함 (비대칭 라우팅)`,
+        reason: `요청은 IGW로 들어왔지만 서브넷 ${topo.name(dst.subnetId)}의 응답 경로가 ${via}를 가리킵니다. 응답의 출발지 주소가 달라져 연결이 성립하지 않습니다.`,
         resourceIds: [dst.subnetId, back.targetId],
         fixes: [
           "인터넷에 직접 노출할 리소스는 0.0.0.0/0 → IGW 경로가 있는 퍼블릭 서브넷에 배치하세요.",

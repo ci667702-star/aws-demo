@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { parseCidr } from "@/lib/engine/cidr-utils";
 import { createId } from "@/lib/engine/ids";
 import type { Listener, NaclRule, RuleProtocol, SgRule } from "@/lib/engine/resource-models";
+import { FieldHelpButton } from "@/components/docs/field-help";
 import { NativeSelect, type SelectOption } from "./fields";
 
 const PROTOCOL_OPTIONS: SelectOption[] = [
@@ -115,6 +116,20 @@ function InlineInput({
   );
 }
 
+/** 반복되는 규칙 행 위에 한 번만 두는 열 도움말. 각 항목의 data-field가 '설정으로 이동'의 도착점이 된다. */
+function HelpStrip({ items }: { items: [field: string, label: string][] }) {
+  return (
+    <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+      {items.map(([field, label]) => (
+        <span key={field} className="inline-flex items-center gap-1" data-field={field}>
+          {label}
+          <FieldHelpButton field={field} />
+        </span>
+      ))}
+    </p>
+  );
+}
+
 function portsText(rule: { protocol: RuleProtocol; fromPort: number; toPort: number }) {
   if (rule.protocol === "all" || rule.protocol === "icmp") return "";
   return rule.fromPort === rule.toPort ? String(rule.fromPort) : `${rule.fromPort}-${rule.toPort}`;
@@ -187,6 +202,13 @@ export function SgRulesEditor({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+      <HelpStrip
+        items={[
+          ["protocol", "프로토콜"],
+          ["portRange", "포트 범위"],
+          ["peer", peerWord],
+        ]}
+      />
       {rules.length === 0 && (
         <p className="rounded-md border border-dashed p-2 text-[11px] text-muted-foreground">
           규칙이 없습니다. {direction === "inbound" ? "모든 인바운드 연결이 거부됩니다." : "이 그룹을 가진 리소스는 연결을 시작할 수 없습니다."}
@@ -336,6 +358,15 @@ export function NaclRulesEditor({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+      <HelpStrip
+        items={[
+          ["ruleNumber", "규칙 번호"],
+          ["ruleAction", "ALLOW/DENY"],
+          ["protocol", "프로토콜"],
+          ["portRange", "포트 범위"],
+          ["cidr", direction === "inbound" ? "출발지 CIDR" : "대상 CIDR"],
+        ]}
+      />
       {sorted.map((rule) => (
         <div key={rule.id} className="space-y-1.5 rounded-md border bg-muted/30 p-2" data-testid="nacl-rule">
           <div className="flex items-start gap-1.5">
@@ -436,8 +467,12 @@ export function RoutesEditor({
     <div className="space-y-2" data-testid="routes-editor">
       <div className="overflow-hidden rounded-md border">
         <div className="grid grid-cols-[1fr_1fr_auto] gap-1.5 bg-muted/50 px-2 py-1 text-[11px] font-medium text-muted-foreground">
-          <span>Destination</span>
-          <span>Target</span>
+          <span className="inline-flex items-center gap-1" data-field="destinationCidr">
+            Destination <FieldHelpButton field="destinationCidr" />
+          </span>
+          <span className="inline-flex items-center gap-1" data-field="target">
+            Target <FieldHelpButton field="target" />
+          </span>
           <span className="w-6" />
         </div>
         <div className="grid grid-cols-[1fr_1fr_auto] items-center gap-1.5 border-t px-2 py-1.5 text-xs">
@@ -528,6 +563,13 @@ export function ListenersEditor({
   const nextPort = [80, 443, 8080, 8443].find((p) => !listeners.some((l) => l.port === p)) ?? 8000 + listeners.length;
   return (
     <div className="space-y-2" data-testid="listeners-editor">
+      <HelpStrip
+        items={[
+          ["listenerProtocol", "프로토콜"],
+          ["listenerPort", "포트"],
+          ["defaultTargetGroup", "기본 작업(전달)"],
+        ]}
+      />
       {listeners.length === 0 && (
         <p className="rounded-md border border-dashed p-2 text-[11px] text-muted-foreground">리스너가 없습니다. ALB가 어떤 연결도 받지 않습니다.</p>
       )}

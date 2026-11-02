@@ -24,6 +24,8 @@ export function seedStore(projects: Project[]) {
     runs: [],
     activeRunId: null,
     highlight: null,
+    inspectorDoc: null,
+    fieldFocus: null,
   });
   useProjectStore.setState({
     status: "ready",

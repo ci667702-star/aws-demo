@@ -10,7 +10,7 @@ export function Brand({ compact = false }: { compact?: boolean }) {
       {!compact && (
         <span className="flex flex-col leading-none">
           <span className="text-sm font-semibold tracking-tight">AWS Playground</span>
-          <span className="text-[10px] text-muted-foreground">비공식 학습용 시뮬레이터</span>
+          <span className="text-[10px] text-muted-foreground">학습용 시뮬레이터</span>
         </span>
       )}
     </Link>
@@ -18,4 +18,4 @@ export function Brand({ compact = false }: { compact?: boolean }) {
 }
 
 export const DISCLAIMER =
-  "AWS Playground는 Amazon Web Services와 제휴하지 않은 독립 학습용 시뮬레이터입니다. 실제 AWS 계정·자격 증명·리소스를 사용하지 않으며 요금이 발생하지 않습니다.";
+  "AWSP는 AWS를 실습해볼 수 있는 사이트로, 실제 AWS 계정·자격 증명·리소스를 사용하지 않으며 요금이 발생하지 않습니다.";

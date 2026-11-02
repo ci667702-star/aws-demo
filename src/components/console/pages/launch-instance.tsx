@@ -114,7 +114,7 @@ export function LaunchInstancePage() {
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
         <SpaceBetween>
           <Container header={<ContainerHeader title="이름 및 태그" />}>
-            <FormField label="이름">
+            <FormField help={{ docKey: "ec2", field: "name" }} label="이름">
               <TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="예: My Web Server" maxLength={128} />
             </FormField>
           </Container>
@@ -132,7 +132,7 @@ export function LaunchInstancePage() {
           </Container>
 
           <Container header={<ContainerHeader title="인스턴스 유형" />}>
-            <FormField label="인스턴스 유형" description="성능은 시뮬레이션하지 않으며 가상 비용 추정에만 사용됩니다.">
+            <FormField help={{ docKey: "ec2", field: "instanceType" }} label="인스턴스 유형" description="성능은 시뮬레이션하지 않으며 가상 비용 추정에만 사용됩니다.">
               <SelectInput
                 value={instanceType}
                 onChange={(v) => setInstanceType(v as typeof instanceType)}
@@ -166,7 +166,7 @@ export function LaunchInstancePage() {
                   VPC가 없습니다. 먼저 <a href={href("/vpc/vpcs/create")}>VPC</a>와 <a href={href("/vpc/subnets/create")}>서브넷</a>을 만드세요.
                 </Alert>
               )}
-              <FormField label="서브넷">
+              <FormField help={{ docKey: "ec2", field: "subnet" }} label="서브넷">
                 <SelectInput
                   value={subnetId}
                   onChange={setSubnetId}
@@ -179,7 +179,7 @@ export function LaunchInstancePage() {
                   }))}
                 />
               </FormField>
-              <FormField label="퍼블릭 IP 자동 할당" info={<InfoLink topic="public-ip" />}>
+              <FormField help={{ docKey: "ec2", field: "publicIpMode" }} label="퍼블릭 IP 자동 할당" info={<InfoLink topic="public-ip" />}>
                 <SelectInput
                   value={publicIpMode}
                   onChange={(v) => setPublicIpMode(v as typeof publicIpMode)}
@@ -190,7 +190,7 @@ export function LaunchInstancePage() {
                   ]}
                 />
               </FormField>
-              <FormField label="방화벽(보안 그룹)" info={<InfoLink topic="security-group" />} description="보안 그룹은 인스턴스에 대한 트래픽을 제어하는 방화벽 규칙 집합입니다.">
+              <FormField help={{ docKey: "ec2", field: "securityGroups" }} label="방화벽(보안 그룹)" info={<InfoLink topic="security-group" />} description="보안 그룹은 인스턴스에 대한 트래픽을 제어하는 방화벽 규칙 집합입니다.">
                 <RadioGroup
                   aria-label="방화벽"
                   value={sgMode}
@@ -203,7 +203,7 @@ export function LaunchInstancePage() {
               </FormField>
               {sgMode === "create" ? (
                 <div className="space-y-3 rounded-xl border border-aws-border p-4">
-                  <FormField label="보안 그룹 이름">
+                  <FormField help={{ docKey: "security-group", field: "name" }} label="보안 그룹 이름">
                     <TextInput value={newSgName} onChange={(e) => setNewSgName(e.target.value)} maxLength={255} />
                   </FormField>
                   <p className="text-[13px] text-aws-text-2">다음 규칙으로 새 보안 그룹을 만듭니다. 아무것도 선택하지 않으면 인바운드 트래픽이 모두 거부됩니다.</p>
@@ -211,7 +211,7 @@ export function LaunchInstancePage() {
                     {windows ? "RDP" : "SSH"} 트래픽 허용
                   </Checkbox>
                   {allowSsh && (
-                    <FormField label="소스 CIDR" constraint="0.0.0.0/0은 모든 IP에서 접근을 허용합니다. 보통 관리자 네트워크로 제한합니다.">
+                    <FormField help={{ docKey: "security-group", field: "peer" }} label="소스 CIDR" constraint="0.0.0.0/0은 모든 IP에서 접근을 허용합니다. 보통 관리자 네트워크로 제한합니다.">
                       <TextInput value={sshFrom} onChange={(e) => setSshFrom(e.target.value)} className="max-w-64" />
                     </FormField>
                   )}
@@ -223,7 +223,7 @@ export function LaunchInstancePage() {
                   </Checkbox>
                 </div>
               ) : (
-                <FormField label="공통 보안 그룹" constraint="선택한 VPC의 보안 그룹, 1~5개">
+                <FormField help={{ docKey: "ec2", field: "securityGroups" }} label="공통 보안 그룹" constraint="선택한 VPC의 보안 그룹, 1~5개">
                   <MultiSelect
                     aria-label="보안 그룹 선택"
                     selected={existingSgs}
@@ -235,7 +235,7 @@ export function LaunchInstancePage() {
                 </FormField>
               )}
               <ExpandableSection header="고급 네트워크 구성">
-                <FormField label="기본 IP" optional description="비워 두면 서브넷에서 사용 가능한 주소가 자동으로 할당됩니다." constraint={subnet ? `${subnet.config.cidr} 범위 · 처음 4개와 마지막 주소는 AWS 예약` : undefined}>
+                <FormField help={{ docKey: "ec2", field: "privateIp" }} label="기본 IP" optional description="비워 두면 서브넷에서 사용 가능한 주소가 자동으로 할당됩니다." constraint={subnet ? `${subnet.config.cidr} 범위 · 처음 4개와 마지막 주소는 AWS 예약` : undefined}>
                   <TextInput value={privateIp} onChange={(e) => setPrivateIp(e.target.value)} placeholder="자동 할당" className="max-w-64" />
                 </FormField>
               </ExpandableSection>
@@ -244,7 +244,7 @@ export function LaunchInstancePage() {
 
           <ExpandableSection variant="container" header="고급 세부 정보" defaultExpanded>
             <SpaceBetween size="m">
-              <FormField
+              <FormField help={{ docKey: "ec2", field: "iamRoleId" }}
                 label="IAM 인스턴스 프로파일"
                 info={<InfoLink topic="iam-role" />}
                 description="서버 안의 프로그램이 S3 같은 서비스를 호출할 때 쓸 IAM 역할입니다. 액세스 키를 서버에 넣는 대신 역할을 연결하세요."

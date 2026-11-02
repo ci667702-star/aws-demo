@@ -129,8 +129,8 @@ function DashboardContent() {
         title="AWS Playground"
         description="실제 AWS 계정이나 요금 없이, AWS 콘솔과 비슷한 화면에서 VPC·EC2·ALB·RDS를 직접 만들고 통신을 분석해 보는 학습용 시뮬레이터입니다."
       />
-      <Alert type="info" header="비공식 학습용 시뮬레이터">
-        Amazon Web Services와 제휴하지 않은 독립 프로젝트입니다. 실제 AWS 계정·액세스 키·리소스를 사용하지 않으며, 모든 리소스와 통신 결과는 이 브라우저 안에서 계산되는 가상 결과입니다.
+      <Alert type="info" header="학습용 시뮬레이터">
+        AWSP는 AWS를 실습해볼 수 있는 사이트로, 실제 AWS 계정·자격 증명·리소스를 사용하지 않으며 요금이 발생하지 않습니다. 또한 모든 리소스와 통신 결과는 이 브라우저 안에서 계산되는 가상 결과입니다.
       </Alert>
 
       <ResourceTable<Project>
@@ -145,7 +145,7 @@ function DashboardContent() {
           <PageHeader
             title="샌드박스"
             counter={`(${projects.length})`}
-            description="샌드박스는 서로 독립된 가상 AWS 환경입니다. 같은 샌드박스를 쉬운 모드(그림으로 설계)와 심화 모드(AWS 콘솔처럼 직접 설정) 중 원하는 화면으로 열 수 있습니다."
+            description="샌드박스는 서로 독립된 가상 AWS 환경입니다."
             actions={
               <>
                 <ButtonDropdown
@@ -153,8 +153,8 @@ function DashboardContent() {
                   disabled={!current}
                   items={[
                     { id: "open", text: "열기" },
-                    { id: "open-easy", text: "쉬운 모드(그림 빌더)로 열기" },
-                    { id: "open-console", text: "심화 모드(콘솔)로 열기" },
+                    { id: "open-easy", text: "그림 빌더로 열기" },
+                    { id: "open-console", text: "콘솔로 열기" },
                     { id: "rename", text: "이름 변경" },
                     { id: "duplicate", text: "복제" },
                     { id: "export", text: "JSON으로 내보내기" },
@@ -173,10 +173,10 @@ function DashboardContent() {
         empty={
           <EmptyState
             title="샌드박스 없음"
-            description="빈 샌드박스를 만들어 AWS 콘솔처럼 리소스를 하나씩 직접 만들어 보세요."
+            description="빈 샌드박스를 만들어 리소스를 하나씩 만들어 보세요."
             action={
               <Button variant="primary" onClick={() => setCreating(true)}>
-                샌드박스 생성
+                생성
               </Button>
             }
           />
@@ -241,7 +241,7 @@ function DashboardContent() {
 
       <ExpandableSection variant="container" header="완성된 예시 아키텍처 살펴보기">
         <SpaceBetween size="m">
-          <p className="text-sm text-aws-text-2">직접 구성하기 전에 완성된 구성을 보고 싶을 때만 사용하세요. 예시를 열면 구성이 모두 갖춰진 새 샌드박스가 만들어집니다.</p>
+          <p className="text-sm text-aws-text-2">직접 구성하기 전 완성된 구성을 보고 싶을 때 사용하세요. 예시를 열면 구성이 모두 갖춰진 새 샌드박스가 만들어집니다.</p>
           <ul className="grid gap-4 md:grid-cols-3">
             {SAMPLES.map((s) => (
               <li key={s.id} className="flex flex-col gap-2 rounded-xl border border-aws-border p-4">
@@ -311,7 +311,7 @@ function CreateSandboxModal({ open, count, onClose, onCreate }: { open: boolean;
   const [error, setError] = useState<string | null>(null);
   const submit = () => {
     const n = name.trim() || `샌드박스 ${count + 1}`;
-    if (n.length > 80) return setError("이름은 80자 이하여야 합니다.");
+    if (n.length > 20) return setError("이름은 20자 이하여야 합니다.");
     onCreate(n, description.trim(), mode);
     setName("");
     setDescription("");
@@ -353,8 +353,8 @@ function CreateSandboxModal({ open, count, onClose, onCreate }: { open: boolean;
             ]}
           />
         </FormField>
-        <FormField label="이름" constraint="최대 80자" error={error ?? undefined}>
-          <TextInput autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={`샌드박스 ${count + 1}`} maxLength={80} />
+        <FormField label="이름" constraint="최대 20자" error={error ?? undefined}>
+          <TextInput autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={`샌드박스 ${count + 1}`} maxLength={20} />
         </FormField>
         <FormField label="설명" optional>
           <TextInput value={description} onChange={(e) => setDescription(e.target.value)} maxLength={500} />
@@ -397,7 +397,7 @@ function RenameModal({ project, onClose }: { project: Project | null; onClose: (
       }
     >
       <FormField label="이름" error={error ?? undefined}>
-        <TextInput value={name} onChange={(e) => setName(e.target.value)} maxLength={80} />
+        <TextInput value={name} onChange={(e) => setName(e.target.value)} maxLength={20} />
       </FormField>
     </Modal>
   );

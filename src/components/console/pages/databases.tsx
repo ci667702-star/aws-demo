@@ -82,7 +82,7 @@ function DbSubnetGroupFields({
       <FormField label="가용 영역" info={<InfoLink topic="availability-zone" />} constraint="최소 2개 가용 영역">
         <MultiSelect aria-label="가용 영역" selected={azs} onChange={(v) => { setAzs(v); setSubnetIds(subnetIds.filter((id) => v.includes(topo.getOfType(id, "subnet")?.config.availabilityZone ?? ""))); }} options={zoneOptions} empty={vpcId ? "이 VPC에 서브넷이 없습니다." : "먼저 VPC를 선택하세요."} />
       </FormField>
-      <FormField label="서브넷" description="DB 인스턴스는 보통 인터넷 경로가 없는 프라이빗 서브넷에 둡니다.">
+      <FormField help={{ docKey: "db-subnet-group", field: "subnets" }} label="서브넷" description="DB 인스턴스는 보통 인터넷 경로가 없는 프라이빗 서브넷에 둡니다.">
         <MultiSelect aria-label="서브넷" selected={subnetIds} onChange={setSubnetIds} options={subnetOptions} empty="가용 영역을 먼저 선택하세요." />
       </FormField>
     </SpaceBetween>
@@ -175,10 +175,10 @@ export function CreateDbSubnetGroupPage() {
       <PageHeader title="DB 서브넷 그룹 생성" info={<InfoLink topic="db-subnet-group" />} description="DB 인스턴스를 배치할 서브넷 묶음을 만듭니다." />
       <Container header={<ContainerHeader title="서브넷 그룹 세부 정보" />}>
         <SpaceBetween size="m">
-          <FormField label="이름" constraint="영문 소문자, 숫자, 공백, 마침표, 밑줄, 하이픈. 'default'는 쓸 수 없습니다.">
+          <FormField help={{ docKey: "db-subnet-group", field: "name" }} label="이름" constraint="영문 소문자, 숫자, 공백, 마침표, 밑줄, 하이픈. 'default'는 쓸 수 없습니다.">
             <TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="my-db-subnets" maxLength={255} />
           </FormField>
-          <FormField label="설명">
+          <FormField help={{ docKey: "db-subnet-group", field: "description" }} label="설명">
             <TextInput value={description} onChange={(e) => setDescription(e.target.value)} placeholder="DB용 프라이빗 서브넷" maxLength={255} />
           </FormField>
         </SpaceBetween>
@@ -252,7 +252,7 @@ export function EditDbSubnetGroupPage({ id }: { id: string }) {
     <SpaceBetween>
       <PageHeader title="DB 서브넷 그룹 편집" description={group.name} />
       <Container header={<ContainerHeader title="서브넷 그룹 세부 정보" />}>
-        <FormField label="설명">
+        <FormField help={{ docKey: "db-subnet-group", field: "description" }} label="설명">
           <TextInput value={description} onChange={(e) => setDescription(e.target.value)} maxLength={255} />
         </FormField>
       </Container>
@@ -374,12 +374,12 @@ function DbInstanceFields({ draft, set, vpcId }: { draft: DbNetworkDraft; set: (
   return (
     <>
       <Container header={<ContainerHeader title="인스턴스 구성" />}>
-        <FormField label="DB 인스턴스 클래스" description="성능은 시뮬레이션하지 않으며 가상 비용 추정에만 사용됩니다.">
+        <FormField help={{ docKey: "rds", field: "instanceClass" }} label="DB 인스턴스 클래스" description="성능은 시뮬레이션하지 않으며 가상 비용 추정에만 사용됩니다.">
           <SelectInput value={draft.instanceClass} onChange={(v) => set({ instanceClass: v as InstanceClass })} options={RDS_INSTANCE_CLASSES.map((c) => ({ value: c, label: c, description: CLASS_INFO[c] }))} />
         </FormField>
       </Container>
       <Container header={<ContainerHeader title="스토리지" />}>
-        <FormField label="할당된 스토리지 (GiB)" constraint="20~65536 GiB">
+        <FormField help={{ docKey: "rds", field: "allocatedStorageGb" }} label="할당된 스토리지 (GiB)" constraint="20~65536 GiB">
           <TextInput value={draft.storage} onChange={(e) => set({ storage: e.target.value })} inputMode="numeric" className="max-w-40" />
         </FormField>
       </Container>
@@ -396,7 +396,7 @@ function DbInstanceFields({ draft, set, vpcId }: { draft: DbNetworkDraft; set: (
       </Container>
       <Container header={<ContainerHeader title="연결" info={<InfoLink topic="rds-public" />} />}>
         <SpaceBetween size="m">
-          <FormField label="퍼블릭 액세스" info={<InfoLink topic="rds-public" />}>
+          <FormField help={{ docKey: "rds", field: "publiclyAccessible" }} label="퍼블릭 액세스" info={<InfoLink topic="rds-public" />}>
             <RadioGroup
               aria-label="퍼블릭 액세스"
               value={draft.publiclyAccessible ? "yes" : "no"}
@@ -407,11 +407,11 @@ function DbInstanceFields({ draft, set, vpcId }: { draft: DbNetworkDraft; set: (
               ]}
             />
           </FormField>
-          <FormField label="VPC 보안 그룹(방화벽)" constraint="DB 포트를 필요한 소스(예: 앱 서버 보안 그룹)에만 허용하세요.">
+          <FormField help={{ docKey: "rds", field: "securityGroups" }} label="VPC 보안 그룹(방화벽)" constraint="DB 포트를 필요한 소스(예: 앱 서버 보안 그룹)에만 허용하세요.">
             <MultiSelect aria-label="VPC 보안 그룹" selected={draft.sgIds} onChange={(v) => set({ sgIds: v })} max={5} empty={vpcId ? "이 VPC에 보안 그룹이 없습니다." : "먼저 DB 서브넷 그룹을 선택하세요."} options={groups.map((g) => ({ value: g.id, label: `${g.name} (${g.id})`, description: g.config.description }))} />
           </FormField>
           <ExpandableSection header="추가 구성">
-            <FormField label="데이터베이스 포트" constraint="1150~65535">
+            <FormField help={{ docKey: "rds", field: "port" }} label="데이터베이스 포트" constraint="1150~65535">
               <TextInput value={draft.port} onChange={(e) => set({ port: e.target.value })} inputMode="numeric" className="max-w-32" />
             </FormField>
           </ExpandableSection>
@@ -493,7 +493,7 @@ export function CreateDatabasePage() {
       </Container>
       <Container header={<ContainerHeader title="설정" />}>
         <SpaceBetween size="m">
-          <FormField label="DB 인스턴스 식별자" constraint="영문 소문자로 시작, 1~63자의 영문 소문자·숫자·하이픈. 하이픈으로 끝나거나 연속 하이픈을 쓸 수 없습니다.">
+          <FormField help={{ docKey: "rds", field: "name" }} label="DB 인스턴스 식별자" constraint="영문 소문자로 시작, 1~63자의 영문 소문자·숫자·하이픈. 하이픈으로 끝나거나 연속 하이픈을 쓸 수 없습니다.">
             <TextInput value={identifier} onChange={(e) => setIdentifier(e.target.value)} maxLength={63} />
           </FormField>
           <Alert type="info" header="자격 증명 설정 없음">
@@ -516,7 +516,7 @@ export function CreateDatabasePage() {
               options={topo.ofType("vpc").map((v) => ({ value: v.id, label: `${v.id} (${displayName(v)})` }))}
             />
           </FormField>
-          <FormField label="DB 서브넷 그룹" description="DB 인스턴스가 사용할 서브넷과 IP 범위">
+          <FormField help={{ docKey: "rds", field: "dbSubnetGroup" }} label="DB 서브넷 그룹" description="DB 인스턴스가 사용할 서브넷과 IP 범위">
             <SelectInput value={groupId} onChange={setGroupId} placeholder={groups.length ? "DB 서브넷 그룹 선택" : "사용 가능한 DB 서브넷 그룹 없음"} options={groups.map((g) => ({ value: g.id, label: g.name, description: g.config.description }))} />
           </FormField>
           {!groups.length && (

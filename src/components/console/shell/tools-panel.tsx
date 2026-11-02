@@ -10,20 +10,23 @@ import { useAnalysis } from "../analysis-context";
 import { useConsoleProjectId, useProject } from "../console-context";
 import { useConsoleUi } from "../console-store";
 import { HELP_TOPICS } from "../help-topics";
-import { href } from "../router";
+import { href, useHashLocation } from "../router";
 import { Button } from "../ui/button";
 import { ExpandableSection } from "../ui/layout";
 import { Badge } from "../ui/status";
+import { ResourceDocTab } from "./resource-doc-tab";
 
 export function ToolsPanel({ onClose }: { onClose: () => void }) {
   const tab = useConsoleUi((s) => s.toolsTab);
   const setTab = useConsoleUi((s) => s.setToolsTab);
+  const location = useHashLocation();
   return (
     <aside className="flex h-full flex-col bg-aws-surface" aria-label="도움말 및 실습">
       <div className="flex items-center justify-between gap-2 border-b border-aws-divider px-4 py-2">
         <div role="tablist" aria-label="패널 종류" className="flex gap-1">
           {(
             [
+              ["resource", "리소스 설명"],
               ["help", "도움말"],
               ["labs", "실습 가이드"],
             ] as const
@@ -44,7 +47,10 @@ export function ToolsPanel({ onClose }: { onClose: () => void }) {
           <X className="size-4" aria-hidden />
         </button>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">{tab === "help" ? <HelpContent /> : <LabGuide />}</div>
+      {/* 리소스 설명은 화면(경로)이 바뀌면 맨 위부터 보여 준다 */}
+      <div key={tab === "resource" ? location.path : tab} className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+        {tab === "help" ? <HelpContent /> : tab === "resource" ? <ResourceDocTab /> : <LabGuide />}
+      </div>
     </aside>
   );
 }
@@ -102,6 +108,20 @@ function HelpContent() {
           <ul className="list-disc space-y-1 pl-5 text-sm text-aws-text-2">
             {topic.simplifications.map((s, i) => (
               <li key={i}>{s}</li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {topic.links && (
+        <section>
+          <h3 className="mb-1 text-sm font-bold text-aws-text-2">AWS 공식 문서 (새 창)</h3>
+          <ul className="list-disc space-y-1 pl-5 text-sm">
+            {topic.links.map((link) => (
+              <li key={link.url}>
+                <a href={link.url} target="_blank" rel="noreferrer" className="text-aws-link hover:underline">
+                  {link.title}
+                </a>
+              </li>
             ))}
           </ul>
         </section>

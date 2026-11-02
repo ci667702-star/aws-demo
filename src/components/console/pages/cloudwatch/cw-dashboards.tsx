@@ -92,7 +92,7 @@ export function DashboardListPage() {
           }
         >
           <SpaceBetween size="m">
-            <FormField label="대시보드 이름" constraint="영문자, 숫자, 하이픈(-), 밑줄(_)만 사용">
+            <FormField help={{ docKey: "cloudwatch", field: "dashboard" }} label="대시보드 이름" constraint="영문자, 숫자, 하이픈(-), 밑줄(_)만 사용">
               <TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="web-service" />
             </FormField>
             {error && <ErrorAlert message={error} />}

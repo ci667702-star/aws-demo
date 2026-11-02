@@ -23,7 +23,7 @@ import { buildTopology } from "@/lib/engine/topology-engine";
 import { createEmptyProject, createResource, newListener, NACL, SG } from "./factory";
 import { applyAutoLayout } from "./layout";
 
-type RouteSpec = { destination: string; igw?: string; nat?: string };
+type RouteSpec = { destination: string; igw?: string; nat?: string; instance?: string };
 
 export interface BuilderOptions {
   description?: string;
@@ -150,7 +150,8 @@ export class ProjectBuilder {
   route(routeTable: string, route: RouteSpec): string {
     if (route.igw) return this.connect("route-table-internet-gateway", routeTable, route.igw, { destinationCidr: route.destination });
     if (route.nat) return this.connect("route-table-nat-gateway", routeTable, route.nat, { destinationCidr: route.destination });
-    throw new Error("ProjectBuilder.route: igw 또는 nat 대상이 필요합니다.");
+    if (route.instance) return this.connect("route-table-ec2", routeTable, route.instance, { destinationCidr: route.destination });
+    throw new Error("ProjectBuilder.route: igw, nat 또는 instance 대상이 필요합니다.");
   }
 
   elasticIp(name: string): string {
@@ -222,6 +223,8 @@ export class ProjectBuilder {
       instanceType?: ConfigOf<"ec2">["instanceType"];
       httpResponseCode?: number;
       userData?: string;
+      sourceDestCheck?: boolean;
+      ami?: ConfigOf<"ec2">["ami"];
     } = {},
   ): string {
     const id = this.add("ec2", name, {
@@ -232,6 +235,8 @@ export class ProjectBuilder {
       instanceType: options.instanceType ?? "t3.micro",
       httpResponseCode: options.httpResponseCode ?? 200,
       userData: options.userData ?? "",
+      sourceDestCheck: options.sourceDestCheck ?? true,
+      ...(options.ami ? { ami: options.ami } : {}),
     });
     if (subnet) {
       this.connect("ec2-subnet", id, subnet);

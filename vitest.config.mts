@@ -13,5 +13,7 @@ export default defineConfig({
     exclude: ["node_modules/**", "e2e/**", "legacy-cra/**"],
     setupFiles: ["./tests/setup.ts"],
     restoreMocks: true,
+    // jsdom UI 테스트는 여러 화면을 렌더링하므로, 전체를 병렬로 돌릴 때 기본 5초를 넘을 수 있다
+    testTimeout: 15_000,
   },
 });

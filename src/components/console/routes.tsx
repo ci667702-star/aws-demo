@@ -39,6 +39,7 @@ import { CreatePolicyPage, EditPolicyPage, PolicyDetailPage, PolicyListPage } fr
 import { CreateRolePage, RoleDetailPage, RoleListPage } from "./pages/iam/iam-roles";
 import { CreateAccessKeyPage, CreateUserPage, UserDetailPage, UserListPage } from "./pages/iam/iam-users";
 import { PolicySimulatorPage } from "./pages/iam/iam-simulator";
+import { RoleTemplatesPage } from "./pages/iam/iam-templates";
 import { ModifyInstanceRolePage } from "./pages/iam/instance-role";
 import { ChangeInstanceSgsPage, EditUserDataPage, InstanceDetailPage, InstanceListPage } from "./pages/instances";
 import { LaunchInstancePage } from "./pages/launch-instance";
@@ -286,6 +287,7 @@ const ROUTES: RouteDef[] = [
     detail: (id) => <PolicyDetailPage id={id} />,
   }),
   { pattern: "/iam/simulator", title: "정책 시뮬레이터", crumbs: () => [IAM, { text: "정책 시뮬레이터" }], render: () => <PolicySimulatorPage /> },
+  { pattern: "/iam/templates", title: "학교 역할 템플릿", crumbs: () => [IAM, { text: "학교 역할 템플릿" }], render: () => <RoleTemplatesPage /> },
 
   // ------------------------------------------------------------ S3
   { pattern: "/s3", title: "범용 버킷", crumbs: () => [S3, { text: "범용 버킷" }], render: () => <BucketListPage /> },

@@ -45,6 +45,8 @@ import { useCanRedo, useCanUndo, useProjectStore } from "@/lib/store/project-sto
 import { formatTime } from "@/lib/ui/format";
 import { useAnalysis } from "@/components/console/analysis-context";
 import { startBuilderTour } from "./builder-tour";
+import { notifyHistory } from "./history-toast";
+import { IdentityBadge } from "./identity-badge";
 
 function IconButton({ label, shortcut, onClick, disabled, children }: { label: string; shortcut?: string; onClick: () => void; disabled?: boolean; children: React.ReactNode }) {
   return (
@@ -172,7 +174,10 @@ export function BuilderToolbar({
   const lab = labById(labId);
   const runAutoLayout = () => {
     const r = apply(projectId, "자동 정렬", (p) => autoLayout(p));
-    if (r.ok) toast.success("리소스를 VPC/서브넷 기준으로 정렬했습니다.");
+    if (r.ok) {
+      useEditorStore.getState().requestFit();
+      toast.success("리소스를 가용 영역과 서브넷 종류에 맞춰 정렬했습니다.");
+    }
   };
 
   return (
@@ -203,10 +208,10 @@ export function BuilderToolbar({
         </span>
       </div>
       <div className="mx-1 h-5 w-px bg-border" aria-hidden />
-      <IconButton label="실행 취소" shortcut="Ctrl+Z" onClick={() => undo(projectId)} disabled={!canUndo}>
+      <IconButton label="실행 취소" shortcut="Ctrl+Z" onClick={() => notifyHistory(undo(projectId), "undo")} disabled={!canUndo}>
         <Undo2 />
       </IconButton>
-      <IconButton label="다시 실행" shortcut="Ctrl+Shift+Z" onClick={() => redo(projectId)} disabled={!canRedo}>
+      <IconButton label="다시 실행" shortcut="Ctrl+Shift+Z" onClick={() => notifyHistory(redo(projectId), "redo")} disabled={!canRedo}>
         <Redo2 />
       </IconButton>
       <span className="hidden sm:inline-flex">
@@ -232,6 +237,7 @@ export function BuilderToolbar({
       </DropdownMenu>
       <div className="ml-auto flex items-center gap-1">
         <span className="hidden rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-800 xl:inline dark:text-amber-300">쉬운 모드</span>
+        <IdentityBadge projectId={projectId} />
         <Button variant="ghost" size="sm" onClick={startBuilderTour} data-testid="builder-tour">
           <GraduationCap />
           <span className="hidden md:inline">둘러보기</span>

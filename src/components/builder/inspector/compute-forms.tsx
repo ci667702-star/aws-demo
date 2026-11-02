@@ -21,7 +21,9 @@ import { awsReservedReason, cidrContainsIp, formatIpv4, parseIpv4, tryParseCidr 
 import { EC2_AMIS, EC2_INSTANCE_TYPES, type HealthCheck, type ResourceOfType } from "@/lib/engine/resource-models";
 import { setListenerTargetGroup, toggleRelation, updateResourceConfig } from "@/lib/project/mutations";
 import { useProjectStore } from "@/lib/store/project-store";
-import { Callout, CheckList, InfoRow, NumberField, Section, SelectField, TextField } from "./fields";
+import { FieldHelpButton } from "@/components/docs/field-help";
+import { checkNatInstance, hasNatSoftware, isNatInstanceTarget, natInstanceScript } from "@/lib/engine/nat-instance";
+import { Callout, CheckList, InfoRow, NumberField, Section, SelectField, SwitchField, TextField } from "./fields";
 import { ResourceLink, vpcCompatibility, type FormContext } from "./form-shared";
 import { ListenersEditor } from "./rule-editors";
 
@@ -51,6 +53,61 @@ export function parsePortList(text: string): { ok: true; ports: number[] } | { o
 }
 
 // ---------------------------------------------------------------- EC2
+
+/** NAT 인스턴스로 쓰기 위한 설정 (소스/대상 확인, NAT 설정 스크립트)과 현재 동작 여부 */
+function NatInstanceSection({ ec2, ctx }: { ec2: ResourceOfType<"ec2">; ctx: FormContext }) {
+  const t = ctx.analysis.topology;
+  const script = natInstanceScript(ec2.config.ami);
+  const routed = isNatInstanceTarget(t, ec2.id);
+  const check = routed ? checkNatInstance(t, ec2) : null;
+  const hasScript = hasNatSoftware(ec2.config.userData);
+  return (
+    <Section title="NAT 인스턴스 (선택)">
+      <SwitchField
+        label="소스/대상 확인"
+        help="sourceDestCheck"
+        description="켜져 있으면(기본값) 자기 주소가 아닌 트래픽을 버립니다. NAT 인스턴스로 쓸 때만 끄세요."
+        checked={ec2.config.sourceDestCheck !== false}
+        disabled={ec2.config.state === "terminated"}
+        testId="ec2-source-dest-check"
+        onChange={(v) => ctx.actions.updateConfig(ec2, { sourceDestCheck: v }, v ? "소스/대상 확인 켜기" : "소스/대상 확인 중지")}
+      />
+      <InfoRow label="NAT 설정 (IP 포워딩·MASQUERADE)" help="userData">
+        {hasScript ? "사용자 데이터에 있음" : "없음"}
+      </InfoRow>
+      {script && !hasScript && (
+        <Button
+          variant="outline"
+          size="sm"
+          data-testid="ec2-insert-nat-script"
+          disabled={ec2.config.state === "terminated"}
+          onClick={() => ctx.actions.updateConfig(ec2, { userData: script }, "NAT 설정 스크립트 넣기")}
+        >
+          NAT 설정 스크립트 넣기
+        </Button>
+      )}
+      {!script && <p className="text-[11px] text-muted-foreground">Windows AMI는 NAT 인스턴스로 쓰지 않습니다.</p>}
+      {check ? (
+        check.ok ? (
+          <Callout tone="info">라우팅 테이블 경로가 이 인스턴스를 가리키고, NAT 인스턴스로 동작할 조건을 모두 갖췄습니다.</Callout>
+        ) : (
+          <Callout tone="warn">
+            경로가 이 인스턴스를 가리키지만 아직 NAT 인스턴스로 동작하지 않습니다.
+            <ul className="mt-1 list-disc pl-4">
+              {check.problems.map((p) => (
+                <li key={p.field}>{p.text}</li>
+              ))}
+            </ul>
+          </Callout>
+        )
+      ) : (
+        <p className="text-[11px] text-muted-foreground">
+          NAT 인스턴스로 쓰려면 퍼블릭 서브넷에 두고 퍼블릭 IP를 켠 뒤, 프라이빗 서브넷 라우팅 테이블의 경로 대상으로 이 인스턴스를 고르세요. 쉬운 모드에서는 스크립트를 바로 넣지만, 실제 AWS에서는 사용자 데이터를 바꾸려면 인스턴스를 중지해야 합니다.
+        </p>
+      )}
+    </Section>
+  );
+}
 
 export function Ec2Form({ ec2, ctx }: { ec2: ResourceOfType<"ec2">; ctx: FormContext }) {
   const t = ctx.analysis.topology;
@@ -95,7 +152,7 @@ export function Ec2Form({ ec2, ctx }: { ec2: ResourceOfType<"ec2">; ctx: FormCon
 
   return (
     <>
-      <Section title="가상 인스턴스 상태">
+      <Section title="가상 인스턴스 상태" help="state">
         <div className="flex items-center justify-between gap-2">
           <ToneBadge tone={STATE_TONE[state]} className="h-6 px-2 text-xs">
             {state}
@@ -130,6 +187,7 @@ export function Ec2Form({ ec2, ctx }: { ec2: ResourceOfType<"ec2">; ctx: FormCon
       <Section title="인스턴스">
         <SelectField
           label="AMI (가상)"
+          help="ami"
           value={ec2.config.ami}
           options={EC2_AMIS.map((a) => ({ value: a, label: AMI_LABEL[a] }))}
           onChange={(v) => ctx.actions.updateConfig(ec2, { ami: v as typeof ec2.config.ami }, "AMI 변경")}
@@ -137,6 +195,7 @@ export function Ec2Form({ ec2, ctx }: { ec2: ResourceOfType<"ec2">; ctx: FormCon
         />
         <SelectField
           label="인스턴스 유형"
+          help="instanceType"
           value={ec2.config.instanceType}
           options={EC2_INSTANCE_TYPES.map((x) => ({ value: x, label: x }))}
           onChange={(v) => ctx.actions.updateConfig(ec2, { instanceType: v as typeof ec2.config.instanceType }, "인스턴스 유형 변경")}
@@ -154,6 +213,7 @@ export function Ec2Form({ ec2, ctx }: { ec2: ResourceOfType<"ec2">; ctx: FormCon
           ]}
           onChange={(v) => ctx.actions.setRelation(ec2.id, "ec2-subnet", v || null, "EC2 서브넷 변경")}
           testId="ec2-subnet"
+          help="subnet"
           hint="서브넷을 바꾸면 범위 밖의 사설 IP는 자동으로 다시 할당됩니다."
         />
         <TextField
@@ -161,6 +221,7 @@ export function Ec2Form({ ec2, ctx }: { ec2: ResourceOfType<"ec2">; ctx: FormCon
           value={ec2.config.privateIp}
           mono
           testId="ec2-private-ip"
+          help="privateIp"
           validate={validatePrivateIp}
           onCommit={(v) => ctx.actions.updateConfig(ec2, { privateIp: v.trim() }, "사설 IP 변경")}
           hint={subnetId ? `제안: ${t.suggestPrivateIp(subnetId, ec2.id) ?? "-"}` : "서브넷에 배치하면 자동 할당됩니다."}
@@ -175,6 +236,7 @@ export function Ec2Form({ ec2, ctx }: { ec2: ResourceOfType<"ec2">; ctx: FormCon
           ]}
           onChange={(v) => ctx.actions.updateConfig(ec2, { publicIpMode: v as typeof ec2.config.publicIpMode }, "퍼블릭 IP 설정 변경")}
           testId="ec2-public-ip"
+          help="publicIpMode"
           hint={publicEnabled ? "퍼블릭 IP가 할당됩니다 (가상)." : "퍼블릭 IP가 할당되지 않습니다."}
         />
         <InfoRow label="가상 퍼블릭 IP" mono>
@@ -190,6 +252,7 @@ export function Ec2Form({ ec2, ctx }: { ec2: ResourceOfType<"ec2">; ctx: FormCon
       <Section title={`보안 그룹 (${sgIds.size})`}>
         <CheckList
           label="연결할 보안 그룹 (최대 5개)"
+          help="securityGroups"
           empty="보안 그룹이 없습니다. 팔레트에서 Security Group을 추가하세요."
           items={t.ofType("security-group").map((g) => {
             const compat = vpcCompatibility(ctx, ec2.id, g.id);
@@ -208,6 +271,7 @@ export function Ec2Form({ ec2, ctx }: { ec2: ResourceOfType<"ec2">; ctx: FormCon
       <Section title="가상 애플리케이션 (시뮬레이션 가정)">
         <TextField
           label="가상 서비스 포트"
+          help="listenPorts"
           value={ec2.config.listenPorts.join(", ")}
           mono
           validate={(v) => {
@@ -222,6 +286,7 @@ export function Ec2Form({ ec2, ctx }: { ec2: ResourceOfType<"ec2">; ctx: FormCon
         />
         <NumberField
           label="가상 HTTP 응답 코드"
+          help="httpResponseCode"
           value={ec2.config.httpResponseCode}
           min={100}
           max={599}
@@ -229,9 +294,20 @@ export function Ec2Form({ ec2, ctx }: { ec2: ResourceOfType<"ec2">; ctx: FormCon
           hint="헬스 체크 성공 코드(matcher)와 비교됩니다. 예: 200, 500"
         />
       </Section>
+      <Section title="IAM 역할 · 사용자 데이터">
+        <InfoRow label="IAM 역할 (인스턴스 프로파일)" help="iamRoleId">
+          {ec2.config.iamRoleId ? (ctx.project.services.iam.roles.find((r) => r.id === ec2.config.iamRoleId)?.name ?? "(삭제된 역할)") : "없음"}
+        </InfoRow>
+        <InfoRow label="사용자 데이터 (가상)" help="userData">
+          {ec2.config.userData.trim() ? `스크립트 ${ec2.config.userData.trim().split("\n").length}줄 · 실행되지 않음` : "없음"}
+        </InfoRow>
+        <p className="text-[11px] text-muted-foreground">두 설정은 심화 모드(콘솔)의 EC2 인스턴스 화면에서 바꿀 수 있습니다. NAT 설정 스크립트는 아래 NAT 인스턴스 항목에서 넣을 수 있습니다.</p>
+      </Section>
+      <NatInstanceSection ec2={ec2} ctx={ctx} />
       <Section title="대상 그룹 등록">
         <CheckList
           label="이 인스턴스를 대상으로 등록할 대상 그룹"
+          help="targetGroups"
           empty="대상 그룹이 없습니다."
           items={t.ofType("target-group").map((tg) => {
             const registered = t.targetGroupTargets(tg.id).some((x) => x.ec2.id === ec2.id);
@@ -282,6 +358,7 @@ export function AlbForm({ alb, ctx }: { alb: ResourceOfType<"alb">; ctx: FormCon
       <Section title="기본 설정">
         <SelectField
           label="Scheme"
+          help="scheme"
           value={alb.config.scheme}
           options={[
             { value: "internet-facing", label: "Internet-facing (인터넷에서 접근)" },
@@ -293,10 +370,14 @@ export function AlbForm({ alb, ctx }: { alb: ResourceOfType<"alb">; ctx: FormCon
         <InfoRow label="가상 DNS 이름" mono>
           {t.dnsName(alb.id)}
         </InfoRow>
+        <InfoRow label="가상 상태" help="state">
+          {alb.config.state === "active" ? "Active" : "Provisioning (준비 중)"}
+        </InfoRow>
       </Section>
       <Section title={`서브넷 / 가용 영역 (${subnets.length})`}>
         <CheckList
           label="ALB 노드를 둘 서브넷 (가용 영역당 1개, 최소 2개 AZ)"
+          help="subnets"
           empty="서브넷이 없습니다."
           items={t.ofType("subnet").map((s) => {
             const checked = subnetIds.has(s.id);
@@ -333,6 +414,7 @@ export function AlbForm({ alb, ctx }: { alb: ResourceOfType<"alb">; ctx: FormCon
       <Section title={`보안 그룹 (${sgIds.size})`}>
         <CheckList
           label="ALB 보안 그룹"
+          help="securityGroups"
           empty="보안 그룹이 없습니다."
           items={t.ofType("security-group").map((g) => {
             const compat = vpcCompatibility(ctx, alb.id, g.id);
@@ -347,7 +429,7 @@ export function AlbForm({ alb, ctx }: { alb: ResourceOfType<"alb">; ctx: FormCon
           onToggle={(id, checked) => ctx.actions.run(checked ? "보안 그룹 연결" : "보안 그룹 연결 해제", (p) => toggleRelation(p, alb.id, id, checked))}
         />
       </Section>
-      <Section title={`리스너 (${alb.config.listeners.length})`}>
+      <Section title={`리스너 (${alb.config.listeners.length})`} help="listeners">
         <ListenersEditor
           listeners={alb.config.listeners}
           bindings={bindings}
@@ -364,7 +446,8 @@ export function AlbForm({ alb, ctx }: { alb: ResourceOfType<"alb">; ctx: FormCon
             ctx.actions.run("리스너 대상 그룹 변경", (p) => setListenerTargetGroup(p, alb.id, listenerId, tgId))
           }
         />
-        <p className="text-[11px] text-muted-foreground">
+        <p className="text-[11px] text-muted-foreground" data-field="listenerRules">
+          <FieldHelpButton field="listenerRules" className="mr-1 inline-flex align-text-bottom" />
           쉬운 모드에서는 리스너의 기본 작업(전달)만 편집합니다. 경로 기반 규칙(예: /api/* → 다른 대상 그룹, 고정 응답)은 심화 모드의 로드 밸런서 화면에서 설정할 수
           있습니다.
           {alb.config.listeners.some((l) => (l.rules ?? []).length > 0) && " 이 로드 밸런서에는 경로 규칙이 설정되어 있습니다."}
@@ -389,6 +472,7 @@ export function TargetGroupForm({ tg, ctx }: { tg: ResourceOfType<"target-group"
       <Section title="기본 설정">
         <SelectField
           label="프로토콜"
+          help="protocol"
           value={tg.config.protocol}
           options={[
             { value: "HTTP", label: "HTTP" },
@@ -398,12 +482,16 @@ export function TargetGroupForm({ tg, ctx }: { tg: ResourceOfType<"target-group"
         />
         <NumberField
           label="대상 포트"
+          help="port"
           value={tg.config.port}
           min={1}
           max={65535}
           onCommit={(v) => ctx.actions.updateConfig(tg, { port: v }, "대상 포트 변경")}
           hint="ALB가 대상 EC2로 요청을 보낼 포트입니다."
         />
+        <InfoRow label="VPC" help="vpc">
+          <ResourceLink ctx={ctx} id={t.vpcOf(tg.id)} />
+        </InfoRow>
         <div className="text-sm">
           <span className="text-xs text-muted-foreground">사용 중인 ALB: </span>
           {t.targetGroupAlbs(tg.id).length ? (
@@ -416,6 +504,7 @@ export function TargetGroupForm({ tg, ctx }: { tg: ResourceOfType<"target-group"
       <Section title={`대상 (${registered.size})`}>
         <CheckList
           label="등록할 EC2"
+          help="targets"
           empty="EC2가 없습니다."
           items={t.ofType("ec2").map((e) => {
             const compat = vpcCompatibility(ctx, tg.id, e.id);
@@ -447,7 +536,7 @@ export function TargetGroupForm({ tg, ctx }: { tg: ResourceOfType<"target-group"
           </div>
         )}
       </Section>
-      <Section title="가상 헬스 체크">
+      <Section title="가상 헬스 체크" help="healthCheck">
         <SelectField
           label="프로토콜"
           value={hc.protocol}
@@ -459,6 +548,7 @@ export function TargetGroupForm({ tg, ctx }: { tg: ResourceOfType<"target-group"
         />
         <TextField
           label="경로"
+          help="healthCheckPath"
           value={hc.path}
           mono
           maxLength={1024}
@@ -467,6 +557,7 @@ export function TargetGroupForm({ tg, ctx }: { tg: ResourceOfType<"target-group"
         />
         <SelectField
           label="포트"
+          help="healthCheckPort"
           value={hc.port === "traffic-port" ? "traffic-port" : "override"}
           options={[
             { value: "traffic-port", label: `traffic-port (대상 포트 ${tg.config.port})` },
@@ -478,10 +569,11 @@ export function TargetGroupForm({ tg, ctx }: { tg: ResourceOfType<"target-group"
           <NumberField label="헬스 체크 포트" value={hc.port} min={1} max={65535} onCommit={(v) => setHc({ port: v }, "헬스 체크 포트 변경")} />
         )}
         <div className="grid grid-cols-2 gap-2">
-          <NumberField label="정상 임계값" value={hc.healthyThreshold} min={2} max={10} onCommit={(v) => setHc({ healthyThreshold: v }, "정상 임계값 변경")} />
-          <NumberField label="비정상 임계값" value={hc.unhealthyThreshold} min={2} max={10} onCommit={(v) => setHc({ unhealthyThreshold: v }, "비정상 임계값 변경")} />
+          <NumberField label="정상 임계값" help="healthyThreshold" value={hc.healthyThreshold} min={2} max={10} onCommit={(v) => setHc({ healthyThreshold: v }, "정상 임계값 변경")} />
+          <NumberField label="비정상 임계값" help="unhealthyThreshold" value={hc.unhealthyThreshold} min={2} max={10} onCommit={(v) => setHc({ unhealthyThreshold: v }, "비정상 임계값 변경")} />
           <TextField
             label="제한 시간(초)"
+            help="timeoutSeconds"
             value={String(hc.timeoutSeconds)}
             validate={(v) => {
               if (!/^\d+$/.test(v)) return "정수를 입력하세요.";
@@ -494,6 +586,7 @@ export function TargetGroupForm({ tg, ctx }: { tg: ResourceOfType<"target-group"
           />
           <TextField
             label="간격(초)"
+            help="intervalSeconds"
             value={String(hc.intervalSeconds)}
             validate={(v) => {
               if (!/^\d+$/.test(v)) return "정수를 입력하세요.";
@@ -507,6 +600,7 @@ export function TargetGroupForm({ tg, ctx }: { tg: ResourceOfType<"target-group"
         </div>
         <TextField
           label="성공 코드 (matcher)"
+          help="matcher"
           value={hc.matcher}
           mono
           maxLength={64}

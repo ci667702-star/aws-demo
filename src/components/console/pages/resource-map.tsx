@@ -13,12 +13,13 @@ import {
   MiniMap,
   ReactFlow,
   ReactFlowProvider,
+  useReactFlow,
   type NodeChange,
   type XYPosition,
 } from "@xyflow/react";
 import { useTheme } from "next-themes";
 import { simulateWithTopology, type SimulationResult } from "@/lib/engine/connectivity-engine";
-import { RELATION_SPECS, RESOURCE_TYPE_INFO } from "@/lib/engine/resource-models";
+import { RELATION_SPECS, RESOURCE_TYPE_INFO, type RelationCategory } from "@/lib/engine/resource-models";
 import { displayName } from "@/lib/engine/topology-engine";
 import { autoLayout, moveResources } from "@/lib/project/mutations";
 import { useProjectStore } from "@/lib/store/project-store";
@@ -30,12 +31,16 @@ import {
   computeZones,
   DEFAULT_NODE_SIZE,
   edgeLabel,
+  focusNeighborhood,
+  focusStateOf,
+  isImplicitEdge,
   isMembershipEdge,
   type PathState,
   type RelationFlowEdge,
   type ResourceFlowNode,
   type ZoneFlowNode,
 } from "../map/canvas-model";
+import { MapLegend } from "../map/map-legend";
 import { EDGE_STROKES, RelationEdge } from "../map/relation-edge";
 import { ResourceNode, ZoneNode } from "../map/resource-node";
 import { href, navigate, resourceHref, resourcePath, useHashLocation } from "../router";
@@ -47,6 +52,8 @@ import { OutcomeStatus } from "./reachability";
 
 type FlowNode = ResourceFlowNode | ZoneFlowNode;
 
+const FIT_PADDING = 0.06;
+const MINIMAP_SIZE = { width: 150, height: 100 };
 const nodeTypes = { resource: ResourceNode, zone: ZoneNode };
 const edgeTypes = { relation: RelationEdge };
 
@@ -72,9 +79,11 @@ function ResourceMap() {
   const analysis = useAnalysis();
   const { query } = useHashLocation();
   const { resolvedTheme } = useTheme();
+  const rf = useReactFlow();
   const runs = useConsoleUi((s) => s.runs);
   const [showZones, setShowZones] = useState(true);
   const [showMembership, setShowMembership] = useState(false);
+  const [hiddenCategories, setHiddenCategories] = useState<ReadonlySet<RelationCategory>>(() => new Set());
   const [hideTerminated, setHideTerminated] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [measured, setMeasured] = useState<Record<string, { width: number; height: number }>>({});
@@ -114,6 +123,17 @@ function ResourceMap() {
     [project.resources, hideTerminated],
   );
 
+  // 선택한 리소스와 직접 연결된 리소스·선만 강조한다 (분석 경로를 표시하는 중에는 경로 강조가 우선)
+  const focusIds = useMemo(() => (selectedId && !result ? [selectedId] : []), [selectedId, result]);
+  const neighborhood = useMemo(
+    () =>
+      focusNeighborhood(
+        project.connections.filter((c) => visibleResources.some((r) => r.id === c.sourceResourceId) && visibleResources.some((r) => r.id === c.targetResourceId)),
+        focusIds,
+      ),
+    [project.connections, visibleResources, focusIds],
+  );
+
   const resourceNodes = useMemo<ResourceFlowNode[]>(
     () =>
       visibleResources.map((r) => {
@@ -122,7 +142,10 @@ function ResourceMap() {
           id: r.id,
           type: "resource",
           position: dragPositions[r.id] ?? r.position,
-          data: buildResourceNodeData(analysis.topology, r, analysis.health, analysis.findingsByResource.get(r.id), p?.state ?? (result ? "pending" : null), p && p.order >= 0 ? p.order : null),
+          data: {
+            ...buildResourceNodeData(analysis.topology, r, analysis.health, analysis.findingsByResource.get(r.id), p?.state ?? (result ? "pending" : null), p && p.order >= 0 ? p.order : null),
+            focus: focusStateOf(r.id, focusIds, neighborhood),
+          },
           selected: selectedId === r.id,
           measured: measured[r.id],
           connectable: false,
@@ -130,7 +153,7 @@ function ResourceMap() {
           zIndex: 1,
         };
       }),
-    [visibleResources, dragPositions, analysis, pathInfo, result, selectedId, measured],
+    [visibleResources, dragPositions, analysis, pathInfo, result, selectedId, measured, focusIds, neighborhood],
   );
 
   const zoneNodes = useMemo<ZoneFlowNode[]>(() => {
@@ -160,10 +183,17 @@ function ResourceMap() {
     () =>
       project.connections
         .filter((c) => visibleIds.has(c.sourceResourceId) && visibleIds.has(c.targetResourceId))
-        .filter((c) => showMembership || !isMembershipEdge(c) || activeConnections.has(c.id))
+        .filter((c) => {
+          // 경로에 쓰였거나 선택한 리소스에 닿는 선은 숨긴 종류여도 보여 준다
+          if (activeConnections.has(c.id) || neighborhood.edges.has(c.id)) return true;
+          if (isMembershipEdge(c)) return showMembership;
+          if (isImplicitEdge(c, analysis.topology)) return false;
+          return !hiddenCategories.has(RELATION_SPECS[c.relationType].category);
+        })
         .map((c) => {
           const spec = RELATION_SPECS[c.relationType];
           const pathActive = activeConnections.has(c.id);
+          const emphasized = neighborhood.edges.has(c.id);
           const directional = spec.category === "route" || spec.category === "traffic";
           return {
             id: c.id,
@@ -174,11 +204,38 @@ function ResourceMap() {
             deletable: false,
             className: pathActive ? "path-active" : undefined,
             markerEnd: directional ? { type: MarkerType.ArrowClosed, width: 14, height: 14, color: pathActive ? "#0284c7" : EDGE_STROKES[spec.category].color } : undefined,
-            data: { connection: c, category: spec.category, label: edgeLabel(c, analysis.topology), alwaysShowLabel: directional, pathActive, faded: spec.category === "membership" || (!!result && !pathActive) },
+            data: {
+              connection: c,
+              category: spec.category,
+              label: edgeLabel(c, analysis.topology),
+              alwaysShowLabel: directional,
+              pathActive,
+              faded: spec.category === "membership" || (!!result && !pathActive),
+              emphasized,
+              dimmed: focusIds.length > 0 && !emphasized,
+            },
           };
         }),
-    [project.connections, visibleIds, showMembership, activeConnections, analysis.topology, result],
+    [project.connections, visibleIds, showMembership, hiddenCategories, activeConnections, analysis.topology, result, neighborhood, focusIds],
   );
+
+  const legendHidden = useMemo(() => {
+    const hidden = new Set(hiddenCategories);
+    if (!showMembership) hidden.add("membership");
+    return hidden;
+  }, [hiddenCategories, showMembership]);
+  const toggleCategory = useCallback((category: RelationCategory) => {
+    if (category === "membership") {
+      setShowMembership((v) => !v);
+      return;
+    }
+    setHiddenCategories((prev) => {
+      const next = new Set(prev);
+      if (next.has(category)) next.delete(category);
+      else next.add(category);
+      return next;
+    });
+  }, []);
 
   const onNodesChange = useCallback((changes: NodeChange<FlowNode>[]) => {
     const dims: Record<string, { width: number; height: number }> = {};
@@ -219,10 +276,13 @@ function ResourceMap() {
       <PageHeader
         title="리소스 맵"
         info={<InfoLink topic="resource-map" />}
-        description="리소스와 관계를 한눈에 봅니다. 노드를 두 번 클릭하면 해당 리소스의 콘솔 페이지로 이동합니다. 리소스를 만들거나 연결하려면 각 서비스 콘솔을 사용하세요."
+        description="리소스를 클릭하면 연결된 선만 강조되고, 두 번 클릭하면 콘솔 페이지로 이동합니다."
         actions={
           <Button
-            onClick={() => useProjectStore.getState().apply(projectId, "리소스 맵 자동 정렬", (p) => autoLayout(p))}
+            onClick={() => {
+              useProjectStore.getState().apply(projectId, "리소스 맵 자동 정렬", (p) => autoLayout(p));
+              requestAnimationFrame(() => void rf.fitView({ padding: FIT_PADDING, duration: 300 }));
+            }}
             disabled={!project.resources.length}
           >
             자동 정렬
@@ -232,9 +292,6 @@ function ResourceMap() {
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
         <Checkbox checked={showZones} onChange={setShowZones}>
           VPC/서브넷 영역 표시
-        </Checkbox>
-        <Checkbox checked={showMembership} onChange={setShowMembership}>
-          소속 관계선 표시
         </Checkbox>
         <Checkbox checked={hideTerminated} onChange={setHideTerminated}>
           종료된 인스턴스 숨기기
@@ -259,12 +316,13 @@ function ResourceMap() {
           </span>
         )}
       </div>
+      {project.resources.length > 0 && <MapLegend variant="strip" hidden={legendHidden} onToggle={toggleCategory} />}
       {project.resources.length === 0 ? (
         <Container>
           <EmptyState title="표시할 리소스가 없습니다" description="VPC부터 직접 만들어 보세요." action={<ButtonLink href={href("/vpc/vpcs/create")}>VPC 생성</ButtonLink>} />
         </Container>
       ) : (
-        <div className="readonly-map relative h-[calc(100dvh-16rem)] min-h-[420px] overflow-hidden rounded-2xl border border-aws-border bg-aws-surface" data-testid="resource-map">
+        <div className="readonly-map relative h-[calc(100dvh-20rem)] min-h-[420px] overflow-hidden rounded-2xl border border-aws-border bg-aws-surface" data-testid="resource-map">
           <ReactFlow<FlowNode, RelationFlowEdge>
             nodes={nodes}
             edges={edges}
@@ -282,13 +340,13 @@ function ResourceMap() {
             deleteKeyCode={null}
             colorMode={resolvedTheme === "dark" ? "dark" : "light"}
             fitView
-            fitViewOptions={{ padding: 0.15 }}
+            fitViewOptions={{ padding: FIT_PADDING }}
             minZoom={0.15}
             attributionPosition="top-right"
           >
             <Background variant={BackgroundVariant.Dots} gap={18} size={1} />
             <Controls showInteractive={false} />
-            <MiniMap pannable zoomable nodeColor={(n) => (n.type === "resource" ? MINIMAP_COLORS[RESOURCE_TYPE_INFO[(n as ResourceFlowNode).data.resource.type].category] : "transparent")} />
+            <MiniMap pannable zoomable style={MINIMAP_SIZE} nodeColor={(n) => (n.type === "resource" ? MINIMAP_COLORS[RESOURCE_TYPE_INFO[(n as ResourceFlowNode).data.resource.type].category] : "transparent")} />
           </ReactFlow>
           {selected && (
             <div className="absolute bottom-3 left-3 z-10 max-w-xs rounded-xl border border-aws-border bg-aws-surface p-3 text-sm shadow-lg">

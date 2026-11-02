@@ -29,6 +29,7 @@ import {
   RELATION_SPECS,
   RESOURCE_TYPE_INFO,
   type Project,
+  type RelationCategory,
   type ResourceType,
 } from "@/lib/engine/resource-models";
 import { NODE_HEIGHT, NODE_WIDTH } from "@/lib/project/layout";
@@ -49,6 +50,9 @@ import {
   DEFAULT_NODE_SIZE,
   edgeLabel,
   findFreePosition,
+  focusNeighborhood,
+  focusStateOf,
+  isImplicitEdge,
   isMembershipEdge,
   type PathState,
   type RelationFlowEdge,
@@ -56,6 +60,7 @@ import {
   type ZoneFlowNode,
 } from "@/components/console/map/canvas-model";
 import { CanvasActionsProvider } from "@/components/console/map/canvas-context";
+import { MapLegend } from "@/components/console/map/map-legend";
 import { EDGE_STROKES, RelationEdge } from "@/components/console/map/relation-edge";
 import { ResourceNode, ZoneNode } from "@/components/console/map/resource-node";
 
@@ -106,9 +111,12 @@ export function ArchitectureCanvas({
   const selectedConnectionIds = useEditorStore((s) => s.selectedConnectionIds);
   const setSelection = useEditorStore((s) => s.setSelection);
   const focusRequest = useEditorStore((s) => s.focusRequest);
+  const fitNonce = useEditorStore((s) => s.fitNonce);
   const highlight = useEditorStore((s) => s.highlight);
   const showZones = useEditorStore((s) => s.showZones);
   const showMembershipEdges = useEditorStore((s) => s.showMembershipEdges);
+  const toggleMembershipEdges = useEditorStore((s) => s.toggleMembershipEdges);
+  const [hiddenCategories, setHiddenCategories] = useState<ReadonlySet<RelationCategory>>(() => new Set());
 
   const [measured, setMeasured] = useState<Record<string, { width: number; height: number }>>({});
   const [dragPositions, setDragPositions] = useState<Record<string, XYPosition>>({});
@@ -143,6 +151,11 @@ export function ArchitectureCanvas({
     return set;
   }, [highlight, project.connections]);
 
+  // ------------------------------------------------------------ 선택 강조
+  // 선택한 리소스와 직접 연결된 리소스·선만 강조한다 (통신 경로를 재생하는 중에는 경로 강조가 우선)
+  const focusIds = useMemo(() => (highlight ? [] : selectedResourceIds), [highlight, selectedResourceIds]);
+  const neighborhood = useMemo(() => focusNeighborhood(project.connections, focusIds), [project.connections, focusIds]);
+
   // ------------------------------------------------------------ 노드 / 영역 / 연결선
   const resourceNodes = useMemo<ResourceFlowNode[]>(
     () =>
@@ -152,20 +165,23 @@ export function ArchitectureCanvas({
           id: r.id,
           type: "resource",
           position: dragPositions[r.id] ?? r.position,
-          data: buildResourceNodeData(
-            analysis.topology,
-            r,
-            analysis.health,
-            analysis.findingsByResource.get(r.id),
-            p?.state ?? null,
-            p && p.order >= 0 ? p.order : null,
-          ),
+          data: {
+            ...buildResourceNodeData(
+              analysis.topology,
+              r,
+              analysis.health,
+              analysis.findingsByResource.get(r.id),
+              p?.state ?? null,
+              p && p.order >= 0 ? p.order : null,
+            ),
+            focus: focusStateOf(r.id, focusIds, neighborhood),
+          },
           selected: selectedResourceIds.includes(r.id),
           measured: measured[r.id],
           zIndex: 1,
         };
       }),
-    [project.resources, dragPositions, analysis, pathInfo, selectedResourceIds, measured],
+    [project.resources, dragPositions, analysis, pathInfo, selectedResourceIds, measured, focusIds, neighborhood],
   );
 
   const zoneBoxes = useMemo(() => {
@@ -199,10 +215,17 @@ export function ArchitectureCanvas({
   const edges = useMemo<RelationFlowEdge[]>(
     () =>
       project.connections
-        .filter((c) => showMembershipEdges || !isMembershipEdge(c) || selectedConnectionIds.includes(c.id))
+        .filter((c) => {
+          // 선택했거나, 선택한 리소스에 닿거나, 경로에 쓰인 선은 숨긴 종류여도 보여 준다
+          if (selectedConnectionIds.includes(c.id) || neighborhood.edges.has(c.id) || activeConnections.has(c.id)) return true;
+          if (isMembershipEdge(c)) return showMembershipEdges;
+          if (isImplicitEdge(c, analysis.topology)) return false;
+          return !hiddenCategories.has(RELATION_SPECS[c.relationType].category);
+        })
         .map((c) => {
           const spec = RELATION_SPECS[c.relationType];
           const pathActive = activeConnections.has(c.id);
+          const emphasized = neighborhood.edges.has(c.id);
           const directional = spec.category === "route" || spec.category === "traffic";
           return {
             id: c.id,
@@ -221,10 +244,33 @@ export function ArchitectureCanvas({
               alwaysShowLabel: directional,
               pathActive,
               faded: spec.category === "membership",
+              emphasized,
+              dimmed: focusIds.length > 0 && !emphasized,
             },
           };
         }),
-    [project.connections, showMembershipEdges, selectedConnectionIds, activeConnections, analysis.topology],
+    [project.connections, showMembershipEdges, hiddenCategories, selectedConnectionIds, activeConnections, analysis.topology, neighborhood, focusIds],
+  );
+
+  const legendHidden = useMemo(() => {
+    const hidden = new Set(hiddenCategories);
+    if (!showMembershipEdges) hidden.add("membership");
+    return hidden;
+  }, [hiddenCategories, showMembershipEdges]);
+  const toggleCategory = useCallback(
+    (category: RelationCategory) => {
+      if (category === "membership") {
+        toggleMembershipEdges();
+        return;
+      }
+      setHiddenCategories((prev) => {
+        const next = new Set(prev);
+        if (next.has(category)) next.delete(category);
+        else next.add(category);
+        return next;
+      });
+    },
+    [toggleMembershipEdges],
   );
 
   // ------------------------------------------------------------ 변경 처리
@@ -441,6 +487,13 @@ export function ArchitectureCanvas({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusRequest?.nonce]);
 
+  // 자동 정렬 뒤 전체가 보이도록 맞춘다
+  useEffect(() => {
+    if (!fitNonce) return;
+    const frame = requestAnimationFrame(() => void rf.fitView({ padding: 0.1, maxZoom: 1.1, duration: 300 }));
+    return () => cancelAnimationFrame(frame);
+  }, [fitNonce, rf]);
+
   const onMoveEnd = useCallback(
     (_e: MouseEvent | TouchEvent | null, viewport: FlowViewport) => setStoreViewport(projectId, viewport),
     [projectId, setStoreViewport],
@@ -470,7 +523,7 @@ export function ArchitectureCanvas({
           connectionRadius={28}
           defaultViewport={project.viewport ?? undefined}
           fitView={!project.viewport}
-          fitViewOptions={{ padding: 0.2, maxZoom: 1.1 }}
+          fitViewOptions={{ padding: 0.1, maxZoom: 1.1 }}
           minZoom={0.15}
           maxZoom={2}
           deleteKeyCode={["Backspace", "Delete"]}
@@ -488,12 +541,18 @@ export function ArchitectureCanvas({
             zoomable
             position="bottom-right"
             className="hidden md:block"
+            style={{ width: 150, height: 100 }}
             nodeColor={(n) =>
               n.type === "zone" ? "transparent" : MINIMAP_COLORS[RESOURCE_TYPE_INFO[(n as ResourceFlowNode).data.resource.type].category]
             }
             nodeStrokeColor={(n) => (n.type === "zone" ? "#94a3b8" : "transparent")}
             ariaLabel="미니맵"
           />
+          {project.resources.length > 0 && (
+            <Panel position="top-left">
+              <MapLegend variant="panel" hidden={legendHidden} onToggle={toggleCategory} />
+            </Panel>
+          )}
           {project.resources.length === 0 && (
             <Panel position="top-center" className="pointer-events-none mt-16">
               <div className="flex max-w-sm flex-col items-center gap-2 rounded-xl border border-dashed bg-background/90 p-6 text-center shadow-sm">

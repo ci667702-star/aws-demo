@@ -4,7 +4,8 @@ import { Download, Eye, EyeOff, TriangleAlert } from "lucide-react";
 import { useMemo, useState } from "react";
 import { effectivePolicyIds, userArn } from "@/lib/engine/iam-engine";
 import type { IamUser } from "@/lib/engine/resource-models";
-import { createAccessKey, createUser, deleteAccessKey, deleteUser, setAccessKeyStatus, setUserConsoleAccess, setUserGroups, setUserMfa, setUserPolicies } from "@/lib/project/iam-actions";
+import { actingIdentity } from "@/lib/engine/iam-session";
+import { createAccessKey, createUser, deleteAccessKey, deleteUser, setAccessKeyStatus, setUserConsoleAccess, setUserGroups, setUserMfa, setUserPolicies, signInAsUser } from "@/lib/project/iam-actions";
 import { useProjectStore } from "@/lib/store/project-store";
 import { downloadTextFile } from "@/lib/ui/download";
 import { formatDateTime } from "@/lib/ui/format";
@@ -12,6 +13,7 @@ import { useConsoleProjectId, useProject, useRunAction } from "../../console-con
 import { withHint } from "../../error-codes";
 import { notify } from "../../notify";
 import { href, navigate } from "../../router";
+import { useSessionActions } from "../../shell/identity-menu";
 import { Alert, ErrorAlert } from "../../ui/alert";
 import { Button, ButtonDropdown, ButtonLink } from "../../ui/button";
 import { Checkbox, FormActions, FormField, MultiSelect, RadioGroup, TextInput } from "../../ui/form";
@@ -134,7 +136,7 @@ export function CreateUserPage() {
       {step === 1 && (
         <Container header={<ContainerHeader title="사용자 세부 정보" />}>
           <SpaceBetween size="m">
-            <FormField label="사용자 이름" constraint="최대 64자. 영문자, 숫자, + = , . @ _ - 사용 가능">
+            <FormField help={{ docKey: "iam", field: "user" }} label="사용자 이름" constraint="최대 64자. 영문자, 숫자, + = , . @ _ - 사용 가능">
               <TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="예: alice 또는 ci-bot" maxLength={64} />
             </FormField>
             <Checkbox checked={consoleAccess} onChange={setConsoleAccess} description="사람이 콘솔에 로그인해야 할 때만 켭니다. 이 시뮬레이터는 실제 로그인이나 암호를 만들지 않습니다.">
@@ -156,7 +158,7 @@ export function CreateUserPage() {
               ]}
             />
             {mode === "group" ? (
-              <FormField label="사용자 그룹">
+              <FormField help={{ docKey: "iam", field: "group" }} label="사용자 그룹">
                 <MultiSelect aria-label="사용자 그룹" selected={groupIds} onChange={setGroupIds} options={groups.map((g) => ({ value: g.id, label: g.name, description: `정책 ${g.policyIds.length}개` }))} />
               </FormField>
             ) : (
@@ -220,7 +222,12 @@ export function UserDetailPage({ id }: { id: string }) {
   const [tab, setTab] = useQueryTab("permissions");
   const [editing, setEditing] = useState<"policies" | "groups" | null>(null);
   const [deletingKey, setDeletingKey] = useState<string | null>(null);
+  const act = useSessionActions();
   if (!user) return <NotFound what="사용자" />;
+  const signedIn = (() => {
+    const identity = actingIdentity(project);
+    return identity.kind === "user" && identity.user.id === user.id;
+  })();
   const groups = project.services.iam.groups;
   const inherited = user.groupIds.flatMap((gid) => {
     const g = groups.find((x) => x.id === gid);
@@ -232,7 +239,20 @@ export function UserDetailPage({ id }: { id: string }) {
       <PageHeader
         title={user.name}
         actions={
-          <ButtonDropdown
+          <>
+            {signedIn ? (
+              <Badge color="green">지금 이 사용자로 작업 중</Badge>
+            ) : (
+              <Button
+                onClick={() => act("로그인", (p) => signInAsUser(p, user.id))}
+                disabled={!user.consoleAccess}
+                title={user.consoleAccess ? "이 사용자의 권한으로 콘솔을 써 봅니다 (가상 로그인)" : "콘솔 액세스가 꺼져 있어 로그인할 수 없습니다"}
+                data-testid="sign-in-as-user"
+              >
+                이 사용자로 로그인 (가상)
+              </Button>
+            )}
+            <ButtonDropdown
             label="작업"
             items={[
               { id: "policies", text: "권한 추가/제거" },
@@ -245,6 +265,7 @@ export function UserDetailPage({ id }: { id: string }) {
               if (a === "key") navigate(`/iam/users/${user.id}/create-access-key`);
             }}
           />
+          </>
         }
       />
       <Container header={<ContainerHeader title="요약" />}>

@@ -156,7 +156,7 @@ export function CreateBucketPage() {
               { label: "버킷 유형", value: "범용 — 대부분의 용도에 쓰는 기본 유형" },
             ]}
           />
-          <FormField
+          <FormField help={{ docKey: "s3", field: "bucketName" }}
             label="버킷 이름"
             info={<InfoLink topic="s3" />}
             description="전 세계에서 하나뿐인 이름이어야 합니다. 예: my-site-2026-kim"
