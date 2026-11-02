@@ -1,8 +1,8 @@
 "use client";
 
 import { ArrowRight } from "lucide-react";
-import { effectivePolicyIds, SANDBOX_ACCOUNT_ID } from "@/lib/engine/iam-engine";
-import type { Project } from "@/lib/engine/resource-models";
+import { SANDBOX_ACCOUNT_ID } from "@/lib/engine/iam-engine";
+import { iamRecommendations, type IamRecommendation } from "@/lib/engine/iam-recommendations";
 import { useProject } from "../../console-context";
 import { href } from "../../router";
 import { ButtonLink } from "../../ui/button";
@@ -13,46 +13,7 @@ import { CopyText, StatusIndicator, type StatusType } from "../../ui/status";
 import { StartTutorialButton } from "../../tutorial/tutorial-menu";
 import { ResourceTiles } from "../dashboards";
 
-interface Recommendation {
-  title: string;
-  status: StatusType;
-  detail: string;
-  link?: { label: string; path: string };
-}
-
-/** AWS IAM 대시보드의 '보안 권장 사항'을 흉내 낸 점검 */
-export function iamRecommendations(project: Project): Recommendation[] {
-  const { users } = project.services.iam;
-  const recs: Recommendation[] = [];
-  recs.push(
-    users.length
-      ? { title: "일상 작업에 IAM 사용자 사용", status: "success", detail: `IAM 사용자 ${users.length}명이 있습니다. 루트 사용자는 계정 설정처럼 꼭 필요한 일에만 씁니다.` }
-      : { title: "일상 작업에 IAM 사용자 사용", status: "info", detail: "루트 사용자 대신 쓸 IAM 사용자를 만드세요.", link: { label: "사용자 생성", path: "/iam/users/create" } },
-  );
-  const noMfa = users.filter((u) => u.consoleAccess && !u.mfaEnabled);
-  recs.push(
-    noMfa.length
-      ? { title: "콘솔 사용자에게 MFA 할당", status: "warning", detail: `MFA 없이 콘솔에 로그인하는 사용자: ${noMfa.map((u) => u.name).join(", ")}`, link: { label: `${noMfa[0].name} 보안 자격 증명`, path: `/iam/users/${noMfa[0].id}?tab=credentials` } }
-      : { title: "콘솔 사용자에게 MFA 할당", status: "success", detail: "MFA가 없는 콘솔 사용자가 없습니다." },
-  );
-  const admins = users.filter((u) => effectivePolicyIds(project, { kind: "user", user: u }).includes("aws:AdministratorAccess"));
-  recs.push(
-    admins.length > 1
-      ? { title: "관리자 권한 최소화", status: "warning", detail: `AdministratorAccess를 가진 사용자가 ${admins.length}명입니다 (${admins.map((u) => u.name).join(", ")}). 필요한 권한만 주세요.` }
-      : { title: "관리자 권한 최소화", status: "success", detail: admins.length ? `관리자는 ${admins[0].name} 한 명입니다.` : "AdministratorAccess를 가진 사용자가 없습니다." },
-  );
-  const computeKeys = users.flatMap((u) => u.accessKeys.filter((k) => k.status === "Active" && k.useCase === "aws-compute").map(() => u));
-  recs.push(
-    computeKeys.length
-      ? { title: "서버에는 액세스 키 대신 역할", status: "warning", detail: `AWS 컴퓨팅 서비스용으로 만든 활성 액세스 키가 ${computeKeys.length}개 있습니다. EC2에는 IAM 역할을 연결하세요.`, link: { label: "EC2용 역할 생성", path: "/iam/roles/create?service=ec2" } }
-      : { title: "서버에는 액세스 키 대신 역할", status: "success", detail: "서버용 장기 액세스 키가 없습니다." },
-  );
-  const twoActive = users.filter((u) => u.accessKeys.filter((k) => k.status === "Active").length > 1);
-  if (twoActive.length) {
-    recs.push({ title: "사용하지 않는 액세스 키 정리", status: "info", detail: `활성 키가 2개인 사용자: ${twoActive.map((u) => u.name).join(", ")}. 키를 교체한 뒤에는 옛 키를 비활성화하고 삭제하세요.` });
-  }
-  return recs;
-}
+const TONE_STATUS: Record<IamRecommendation["tone"], StatusType> = { ok: "success", warn: "warning", info: "info" };
 
 const FLOW = [
   { title: "누가 (주체)", body: "IAM 사용자, 역할, 또는 인터넷의 익명 사용자" },
@@ -75,6 +36,7 @@ export function IamDashboardPage() {
         actions={
           <>
             <StartTutorialButton tutorialId="iam-access-key" label="따라하기 튜토리얼" />
+            <ButtonLink href={href("/iam/templates")}>학교 역할 템플릿</ButtonLink>
             <ButtonLink variant="primary" href={href("/iam/users/create")}>
               사용자 생성
             </ButtonLink>
@@ -118,7 +80,7 @@ export function IamDashboardPage() {
           {recs.map((r) => (
             <li key={r.title} className="flex flex-wrap items-start justify-between gap-3 py-3">
               <div className="min-w-0 space-y-0.5">
-                <StatusIndicator type={r.status}>
+                <StatusIndicator type={TONE_STATUS[r.tone]}>
                   <span className="font-bold">{r.title}</span>
                 </StatusIndicator>
                 <p className="pl-6 text-sm text-aws-text-2">{r.detail}</p>

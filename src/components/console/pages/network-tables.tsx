@@ -31,7 +31,9 @@ export function RoutesTable({ topo, routes }: { topo: Topology; routes: Effectiv
                 ? !topo.igwAttachedTo(r.targetId, rtId ? topo.vpcOf(rtId) : null)
                 : r.targetKind === "nat-gateway"
                   ? !target || (target.type === "nat-gateway" && target.config.state === "failed")
-                  : false;
+                  : r.targetKind === "instance"
+                    ? !target || (target.type === "ec2" && target.config.state !== "running")
+                    : false;
             return (
               <tr key={r.key}>
                 <td className={`${td} font-mono text-[13px]`}>{r.destinationCidr}</td>

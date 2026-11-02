@@ -1,10 +1,10 @@
 /**
- * 자동 정렬: VPC별 블록으로 리소스를 배치한다.
- *  행 0: Internet Gateway, VPC, Route Table, Network ACL
- *  행 1: ALB, Target Group
- *  행 2: Subnet (열) — 아래로 해당 서브넷의 NAT Gateway, EC2
- *  다음 행: Security Group
- *  다음 행: DB Subnet Group, RDS
+ * 자동 정렬: AWS 아키텍처 그림처럼 VPC마다 가용 영역을 열로, 서브넷 종류를 행으로 배치한다.
+ *  맨 위: Internet Gateway, ALB
+ *  서브넷 행: 퍼블릭 → (대상 그룹) → 프라이빗(NAT) → 프라이빗(격리). 서브넷 아래로 NAT Gateway, EC2, 탄력적 IP
+ *  그 아래: DB Subnet Group, RDS
+ *  오른쪽 1열: VPC, 라우팅 테이블, Network ACL (연결된 서브넷과 같은 높이)
+ *  오른쪽 2열: Security Group (연결된 리소스와 같은 높이)
  * VPC에 속하지 않은 리소스는 오른쪽에 격자로 배치한다.
  */
 import { buildTopology } from "@/lib/engine/topology-engine";
@@ -13,8 +13,13 @@ import type { Project, Resource } from "@/lib/engine/resource-models";
 export const NODE_WIDTH = 220;
 export const NODE_HEIGHT = 72;
 const COL = NODE_WIDTH + 48;
-const ROW = NODE_HEIGHT + 64;
+const ROW = NODE_HEIGHT + 40;
+/** 서브넷 행 위의 여백 (서브넷 영역 제목이 들어간다) */
+const TIER_GAP = 28;
+/** 오른쪽 열의 노드 간격 */
+const SIDE_ROW = NODE_HEIGHT + 24;
 const VPC_GAP = 160;
+const SUBNET_TIERS = ["public", "private-nat", "private-isolated", "unattached"] as const;
 
 export function computeAutoLayout(project: Project): Record<string, { x: number; y: number }> {
   const topo = buildTopology(project);
@@ -28,67 +33,120 @@ export function computeAutoLayout(project: Project): Record<string, { x: number;
     placed.add(id);
     return true;
   };
-
-  const placeRow = (ids: string[], y: number, startX: number): number => {
-    let col = 0;
-    for (const id of ids) if (place(id, startX + col * COL, y)) col++;
-    return col;
-  };
+  const occupied = (x: number, y: number) => Object.values(positions).some((p) => p.x === Math.round(x) && p.y === Math.round(y));
 
   for (const vpc of topo.ofType("vpc")) {
     const inVpc = (r: Resource) => topo.vpcOf(r.id) === vpc.id || topo.vpcsOf(r.id).includes(vpc.id);
-    let width = 1;
-
-    const row0 = [
-      topo.igwOfVpc(vpc.id)?.id,
-      vpc.id,
-      ...topo.routeTablesOfVpc(vpc.id).map((r) => r.id),
-      ...topo.ofType("network-acl").filter(inVpc).map((r) => r.id),
-    ].filter((x): x is string => !!x);
-    width = Math.max(width, placeRow(row0, 0, originX));
+    const subnets = topo.subnetsOfVpc(vpc.id);
+    const azs = [...new Set(subnets.map((s) => s.config.availabilityZone))].sort();
+    const tiers = SUBNET_TIERS.map((kind) => subnets.filter((s) => topo.classifySubnet(s.id).kind === kind)).filter((tier) => tier.length > 0);
 
     const albs = topo.ofType("alb").filter(inVpc);
     const tgs = topo
       .ofType("target-group")
       .filter((tg) => inVpc(tg) || albs.some((a) => topo.listenersOf(a.id).some((b) => b.targetGroupId === tg.id)));
-    width = Math.max(width, placeRow([...albs.map((a) => a.id), ...tgs.map((t) => t.id)], ROW, originX));
+    // 대상 그룹은 대상(EC2)이 있는 서브넷 행 바로 위에 둔다. 대상이 없거나 첫 행에 있으면 ALB 옆에 둔다
+    const tierOfTargetGroup = (tgId: string) => {
+      const found = topo
+        .targetGroupTargets(tgId)
+        .map((t) => tiers.findIndex((tier) => tier.some((s) => s.id === topo.subnetOf(t.ec2.id))))
+        .filter((i) => i >= 0);
+      return found.length ? Math.min(...found) : 0;
+    };
+    const topRow = [
+      topo.igwOfVpc(vpc.id)?.id,
+      ...albs.map((a) => a.id),
+      ...tgs.filter((tg) => tierOfTargetGroup(tg.id) === 0).map((tg) => tg.id),
+    ].filter((x): x is string => !!x);
+    const targetRows = tiers.map((_, i) => (i === 0 ? [] : tgs.filter((tg) => tierOfTargetGroup(tg.id) === i).map((tg) => tg.id)));
+    const dbRow = [...topo.ofType("db-subnet-group").filter(inVpc), ...topo.ofType("rds").filter(inVpc)].map((r) => r.id);
 
-    const rank = { public: 0, "private-nat": 1, "private-isolated": 2, unattached: 3 } as const;
-    const subnets = topo
-      .subnetsOfVpc(vpc.id)
-      .sort(
-        (a, b) =>
-          rank[topo.classifySubnet(a.id).kind] - rank[topo.classifySubnet(b.id).kind] ||
-          a.config.availabilityZone.localeCompare(b.config.availabilityZone) ||
-          topo.orderOf(a.id) - topo.orderOf(b.id),
-      );
-    let deepest = 0;
-    subnets.forEach((subnet, i) => {
-      const x = originX + i * COL;
-      place(subnet.id, x, ROW * 2);
-      const members = [
-        ...topo.ofType("nat-gateway").filter((n) => topo.subnetOf(n.id) === subnet.id),
-        ...topo.ofType("ec2").filter((e) => topo.subnetOf(e.id) === subnet.id),
-      ];
-      let depth = 0;
-      for (const m of members) if (place(m.id, x, ROW * (3 + depth))) depth++;
-      deepest = Math.max(deepest, depth);
-    });
-    width = Math.max(width, subnets.length);
+    const columns = Math.max(1, azs.length, topRow.length, dbRow.length, ...targetRows.map((row) => row.length));
+    /** 한 줄에 count개를 놓을 때 i번째의 x (가운데 정렬) */
+    const rowX = (count: number, i: number) => originX + ((columns - count) / 2 + i) * COL;
+    const sideX = originX + columns * COL;
 
-    let y = ROW * (3 + Math.max(deepest, 0));
-    const sgs = topo.ofType("security-group").filter(inVpc).map((r) => r.id);
-    if (sgs.length) {
-      width = Math.max(width, placeRow(sgs, y, originX));
+    let y = 0;
+    const placeRow = (ids: string[]) => {
+      if (!ids.length) return;
+      ids.forEach((id, i) => place(id, rowX(ids.length, i), y));
       y += ROW;
-    }
-    const db = [
-      ...topo.ofType("db-subnet-group").filter(inVpc).map((r) => r.id),
-      ...topo.ofType("rds").filter(inVpc).map((r) => r.id),
-    ];
-    if (db.length) width = Math.max(width, placeRow(db, y, originX));
+    };
 
-    originX += width * COL + VPC_GAP;
+    placeRow(topRow);
+    tiers.forEach((tier, t) => {
+      placeRow(targetRows[t]);
+      y += TIER_GAP;
+      let bottom = y;
+      const attached: { memberId: string; x: number; y: number }[] = [];
+      azs.forEach((az, c) => {
+        const x = rowX(azs.length, c);
+        let cy = y;
+        for (const subnet of tier.filter((s) => s.config.availabilityZone === az)) {
+          place(subnet.id, x, cy);
+          cy += ROW;
+          const members = [
+            ...topo.ofType("nat-gateway").filter((n) => topo.subnetOf(n.id) === subnet.id),
+            ...topo.ofType("ec2").filter((e) => topo.subnetOf(e.id) === subnet.id),
+          ];
+          for (const m of members) {
+            if (place(m.id, x, cy)) {
+              attached.push({ memberId: m.id, x, y: cy });
+              cy += ROW;
+            }
+          }
+        }
+        bottom = Math.max(bottom, cy);
+      });
+      // 탄력적 IP는 연결된 리소스 옆 빈 칸에 둔다 (빈 칸이 없으면 그 행 아래)
+      for (const a of attached) {
+        const eip = topo.elasticIpOf(a.memberId);
+        if (!eip) continue;
+        const free = [a.x + COL, a.x - COL].find((x) => x >= originX && x < sideX && !occupied(x, a.y));
+        if (free !== undefined) place(eip.id, free, a.y);
+        else if (place(eip.id, a.x, bottom)) bottom += ROW;
+      }
+      y = bottom;
+    });
+    placeRow(dbRow);
+
+    const nextSideY = [0, 0];
+    const placeSide = (id: string, col: number, wantedY: number) => {
+      const sideY = Math.max(wantedY, nextSideY[col]);
+      if (place(id, sideX + col * COL, sideY)) nextSideY[col] = sideY + SIDE_ROW;
+    };
+    const topOf = (ids: string[]) => {
+      const ys = ids.flatMap((id) => (positions[id] ? [positions[id].y] : []));
+      return ys.length ? Math.min(...ys) : 0;
+    };
+    const usersOfRouteTable = (rtId: string) =>
+      subnets
+        .filter((s) => {
+          const ref = topo.routeTableRefFor(s.id);
+          return (ref.kind === "explicit" || ref.kind === "main") && ref.routeTableId === rtId;
+        })
+        .map((s) => s.id);
+
+    placeSide(vpc.id, 0, 0);
+    [
+      ...topo.routeTablesOfVpc(vpc.id).map((rt) => ({ id: rt.id, y: topOf(usersOfRouteTable(rt.id)) })),
+      ...topo
+        .ofType("network-acl")
+        .filter(inVpc)
+        // 기본 NACL은 모든 서브넷에 적용되므로 맨 위에 둔다
+        .map((n) => ({ id: n.id, y: n.config.isDefault ? 0 : topOf(topo.outgoing(n.id, "network-acl-subnet").map((c) => c.targetResourceId)) })),
+    ]
+      .sort((a, b) => a.y - b.y)
+      .forEach((item) => placeSide(item.id, 0, item.y));
+
+    const sgs = topo
+      .ofType("security-group")
+      .filter(inVpc)
+      .map((sg) => ({ id: sg.id, y: topOf(topo.resourcesUsingSecurityGroup(sg.id).map((r) => r.id)) }))
+      .sort((a, b) => a.y - b.y);
+    sgs.forEach((item) => placeSide(item.id, 1, item.y));
+
+    originX = sideX + (sgs.length ? 2 : 1) * COL + VPC_GAP;
   }
 
   const rest = project.resources.filter((r) => !placed.has(r.id));

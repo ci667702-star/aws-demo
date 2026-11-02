@@ -1,10 +1,12 @@
 /**
  * 콘솔 튜토리얼 정의.
- * 판정(isDone)이 있는 단계는 실제 설정이 맞아야 다음으로 넘어간다. 판정이 없는 단계는 "다음" 버튼으로 넘어간다.
+ * 모든 단계는 사용자가 "다음"을 눌러 넘어간다. 판정(isDone)이 있는 단계는 실제 설정이 맞으면 '완료'로 표시되고 그때 "다음"을 누를 수 있다.
+ * 화면 이동도 자동으로 하지 않는다 (팝업의 '이 단계 화면으로 이동' 버튼이나 메뉴로 사용자가 직접 이동).
  */
 import { parseIpv4 } from "@/lib/engine/cidr-utils";
 import { buildMetricModel } from "@/lib/engine/cloudwatch-engine";
 import { DEFAULT_INTERNET_CLIENT_IP, simulateWithTopology } from "@/lib/engine/connectivity-engine";
+import { hasNatSoftware } from "@/lib/engine/nat-instance";
 import type { Project, ResourceOfType, S3Bucket } from "@/lib/engine/resource-models";
 import { findObject, websiteRequest } from "@/lib/engine/s3-engine";
 import { evaluateSecurityGroups } from "@/lib/engine/security-group-engine";
@@ -27,7 +29,7 @@ export interface TutorialStep {
   /** 강조할 요소의 CSS 선택자 (보통 [data-tour="..."]) */
   target?: string;
   side?: "top" | "right" | "bottom" | "left";
-  /** 완료 판정 — 참이 되면 자동으로 다음 단계로 넘어간다 */
+  /** 완료 판정 — 참이면 '완료'로 표시하고 "다음" 버튼을 켠다 (자동으로 넘어가지 않음) */
   isDone?: (ctx: TutorialContext) => boolean;
 }
 
@@ -69,6 +71,41 @@ function siteBucket(project: Project): S3Bucket | undefined {
 function tutorialUser(project: Project) {
   const users = project.services.iam.users;
   return users.find((u) => u.groupIds.length > 0) ?? users[users.length - 1];
+}
+
+/** NAT 인스턴스 튜토리얼: 퍼블릭 서브넷이 있는 VPC */
+function natLabVpc(t: Topology): string | null {
+  const pub = publicSubnets(t)[0];
+  return pub ? t.vpcOfSubnet(pub.id) : null;
+}
+
+/** 같은 VPC의 퍼블릭이 아닌 서브넷 */
+function privateSubnetsOf(t: Topology, vpcId: string | null) {
+  return vpcId ? t.subnetsOfVpc(vpcId).filter((s) => t.classifySubnet(s.id).kind !== "public") : [];
+}
+
+/** NAT 인스턴스 경로(0.0.0.0/0 → 인스턴스)를 쓰는 프라이빗 서브넷 */
+function natInstanceSubnets(t: Topology) {
+  return t.ofType("subnet").filter((s) => {
+    const cls = t.classifySubnet(s.id);
+    return cls.kind === "private-nat" && cls.route?.targetKind === "instance";
+  });
+}
+
+/** NAT 인스턴스 후보: 퍼블릭 서브넷에 있고 NAT 설정 스크립트가 있는 EC2 */
+function natCandidate(t: Topology): ResourceOfType<"ec2"> | undefined {
+  const pub = new Set(publicSubnets(t).map((s) => s.id));
+  return t.ofType("ec2").find((e) => e.config.state !== "terminated" && pub.has(t.subnetOf(e.id) ?? "") && hasNatSoftware(e.config.userData));
+}
+
+/** 프라이빗 서브넷이 쓸 라우팅 테이블: 프라이빗 서브넷에 명시적으로 연결된 테이블, 없으면 IGW 경로가 없는 기본이 아닌 테이블 */
+function privateRouteTable(t: Topology): ResourceOfType<"route-table"> | undefined {
+  const vpc = natLabVpc(t);
+  for (const s of privateSubnetsOf(t, vpc)) {
+    const ref = t.routeTableRefFor(s.id);
+    if (ref.kind === "explicit") return t.getOfType(ref.routeTableId, "route-table");
+  }
+  return vpc ? t.routeTablesOfVpc(vpc).find((rt) => !rt.config.main && !t.routesOf(rt.id, vpc).some((r) => r.targetKind === "internet-gateway")) : undefined;
 }
 
 /** CloudWatch 튜토리얼에서 부하를 받을 대상 (실행 중인 EC2 또는 활성 ALB) */
@@ -152,7 +189,7 @@ export const TUTORIALS: Tutorial[] = [
   {
     id: "first-web-server",
     title: "첫 웹 서버 만들기",
-    description: "VPC부터 EC2까지 직접 만들고 인터넷에서 접속되는지 확인합니다. 단계마다 실제 설정이 맞아야 다음으로 넘어갑니다.",
+    description: "VPC부터 EC2까지 직접 만들고 인터넷에서 접속되는지 확인합니다. 단계마다 실제 설정이 맞는지 확인해 '완료'로 표시합니다.",
     minutes: 10,
     steps: [
       {
@@ -161,7 +198,8 @@ export const TUTORIALS: Tutorial[] = [
         body: [
           "인터넷에서 접속할 수 있는 웹 서버 한 대를 만듭니다. 순서는 다음과 같습니다.",
           "① VPC(내 네트워크) → ② 서브넷(구역) → ③ 인터넷 게이트웨이(정문) → ④ 라우팅(길 안내) → ⑤ 보안 그룹(출입 규칙) → ⑥ EC2(서버) → ⑦ 통신 분석",
-          "각 단계에서 안내 팝업이 해당 화면의 양식을 가리킵니다. 양식을 채우고 버튼을 누르면 자동으로 다음 단계로 넘어갑니다.",
+          "각 단계에서 안내 팝업이 해당 화면의 양식을 가리킵니다. 양식을 채우고 버튼을 누르면 팝업에 '완료'가 표시되고, 준비되면 '다음'을 눌러 넘어갑니다.",
+          "화면은 자동으로 바뀌지 않습니다. 팝업의 '이 단계 화면으로 이동' 버튼을 누르거나 왼쪽 메뉴에서 직접 찾아가세요.",
         ],
       },
       {
@@ -470,7 +508,7 @@ export const TUTORIALS: Tutorial[] = [
         id: "server",
         title: "① 부하를 받을 서버 준비",
         body: ["실행 중인 EC2 인스턴스나 로드 밸런서가 필요합니다. 없다면 '첫 웹 서버 만들기' 튜토리얼이나 샌드박스 목록의 예시 아키텍처로 준비하세요."],
-        task: "실행 중인(Running) 인스턴스가 하나 이상 있어야 다음으로 넘어갑니다.",
+        task: "실행 중인(Running) 인스턴스가 하나 이상 있으면 이 단계가 완료됩니다.",
         path: "/ec2/instances",
         isDone: ({ topo }) => !!loadTarget(topo),
       },
@@ -528,6 +566,180 @@ export const TUTORIALS: Tutorial[] = [
       },
     ],
   },
+  {
+    id: "nat-instance",
+    title: "NAT 인스턴스로 비용 줄이기",
+    description: "NAT 게이트웨이 대신 EC2 한 대로 프라이빗 서브넷의 외부 통신을 만듭니다. AWS 문서의 NAT 인스턴스 절차를 따라 하고 비용을 비교합니다.",
+    minutes: 15,
+    steps: [
+      {
+        id: "intro",
+        title: "NAT 인스턴스란?",
+        body: [
+          "프라이빗 서브넷의 서버도 업데이트나 외부 API 호출을 위해 인터넷으로 나가야 할 때가 있습니다. 이때 출발지 주소를 바꿔 대신 내보내 주는 것이 NAT입니다.",
+          "NAT 게이트웨이는 AWS가 관리해 편하지만 시간당 요금과 처리 데이터(GB)당 요금이 붙습니다. NAT 인스턴스는 퍼블릭 서브넷의 EC2가 같은 일을 하므로 인스턴스 요금만 듭니다. 대신 장애 대비·패치는 직접 해야 합니다. AWS는 운영 환경에 NAT 게이트웨이를 권장합니다.",
+          "순서: ① 프라이빗 서브넷과 라우팅 테이블 → ② NAT용 보안 그룹 → ③ NAT 인스턴스 시작(NAT 설정 스크립트) → ④ 소스/대상 확인 중지 → ⑤ 경로 추가 → ⑥ 프라이빗 서버 → ⑦ 통신 분석 → ⑧ 비용 비교",
+          "이 시뮬레이터는 운영체제나 iptables를 실제로 실행하지 않습니다. 사용자 데이터 스크립트에 NAT 설정이 있는지, 소스/대상 확인과 경로가 맞는지로 동작을 계산합니다.",
+        ],
+      },
+      {
+        id: "public",
+        title: "준비: 퍼블릭 서브넷",
+        body: ["NAT 인스턴스는 인터넷 게이트웨이 경로(0.0.0.0/0 → IGW)가 있는 퍼블릭 서브넷에 둡니다. NAT 인스턴스 자신도 그 길로 인터넷에 나가기 때문입니다."],
+        task: "퍼블릭 서브넷이 없다면 '첫 웹 서버 만들기' 튜토리얼의 ①~④를 먼저 하세요. 이미 있으면 '다음'을 누르세요.",
+        path: "/vpc/subnets",
+        isDone: ({ topo }) => publicSubnets(topo).length > 0,
+      },
+      {
+        id: "private-subnet",
+        title: "①-1 프라이빗 서브넷 만들기",
+        body: ["외부에 드러나지 않을 서버를 둘 구역입니다. 퍼블릭 서브넷과 같은 VPC에 만듭니다."],
+        task: "퍼블릭 서브넷이 있는 VPC를 고르고 이름 private-a, CIDR 10.0.11.0/24(VPC 범위 안의 겹치지 않는 범위)로 '서브넷 생성'을 누르세요.",
+        path: "/vpc/subnets/create",
+        target: '[data-tour="subnet-form"]',
+        side: "left",
+        isDone: ({ topo }) => {
+          const vpc = natLabVpc(topo);
+          return !!vpc && topo.subnetsOfVpc(vpc).length >= 2;
+        },
+      },
+      {
+        id: "private-rt",
+        title: "①-2 프라이빗 라우팅 테이블 연결",
+        body: [
+          "새 서브넷은 VPC의 기본(main) 라우팅 테이블을 씁니다. 기본 테이블에 IGW 경로가 있으면 새 서브넷도 퍼블릭이 되어 버립니다.",
+          "그래서 IGW 경로가 없는 라우팅 테이블(private-rt)을 따로 만들어 프라이빗 서브넷에 연결합니다. 이미 프라이빗(IGW 경로 없음)으로 판정되면 이 단계는 완료입니다.",
+        ],
+        task: "라우팅 테이블 생성에서 이름 private-rt, VPC를 고르고 만드세요. 그다음 '서브넷 연결 편집'에서 private-a를 체크하고 저장하세요.",
+        path: ({ topo }) => {
+          const rt = privateRouteTable(topo);
+          return rt ? `/vpc/route-tables/${rt.id}/edit-associations` : "/vpc/route-tables/create";
+        },
+        target: '[data-tour="rt-associations"], [data-tour="rt-form"]',
+        side: "left",
+        isDone: ({ topo }) => privateSubnetsOf(topo, natLabVpc(topo)).length > 0,
+      },
+      {
+        id: "nat-sg",
+        title: "② NAT 인스턴스용 보안 그룹",
+        body: [
+          "NAT 인스턴스는 프라이빗 서브넷에서 오는 요청을 받아야 합니다. AWS 문서는 프라이빗 서브넷 CIDR에서 오는 HTTP(80)·HTTPS(443)를 인바운드로 허용하도록 권장합니다.",
+          "아웃바운드는 기본값(모든 트래픽 허용)이어도 동작합니다. AWS 문서의 권장은 인터넷으로 나가는 HTTP·HTTPS만 허용하는 것입니다.",
+        ],
+        task: "이름 nat-sg, 설명 'NAT instance'로 같은 VPC를 고르고, 인바운드 규칙 HTTP와 HTTPS를 추가해 소스를 '사용자 지정' 10.0.11.0/24(프라이빗 서브넷 CIDR)로 정한 뒤 '보안 그룹 생성'을 누르세요.",
+        path: "/vpc/security-groups/create",
+        target: '[data-tour="sg-form"]',
+        side: "left",
+        isDone: ({ topo }) => {
+          const vpc = natLabVpc(topo);
+          const samples = privateSubnetsOf(topo, vpc)
+            .map((s) => parseIpv4(topo.suggestPrivateIp(s.id) ?? ""))
+            .filter((ip): ip is number => ip !== null);
+          return topo
+            .ofType("security-group")
+            .some(
+              (g) =>
+                !g.config.isDefault &&
+                topo.vpcOf(g.id) === vpc &&
+                samples.some((ip) => evaluateSecurityGroups([g], "inbound", { protocol: "tcp", port: 443, peerIp: ip, peerSecurityGroupIds: [] }).allowed),
+            );
+        },
+      },
+      {
+        id: "nat-launch",
+        title: "③ NAT 인스턴스 시작하기",
+        body: [
+          "NAT 인스턴스는 평범한 EC2입니다. 운영체제 안에서 IP 포워딩을 켜고 iptables MASQUERADE로 출발지 주소를 바꾸면 NAT가 됩니다.",
+          "AWS 문서는 이 설정(iptables-services 설치, net.ipv4.ip_forward=1, MASQUERADE 규칙 저장)을 넣은 NAT AMI를 만들어 시작합니다. 이 시뮬레이터에는 AMI 만들기가 없어서, 사용자 데이터 템플릿 'NAT 인스턴스'로 같은 명령을 넣습니다. 실습에는 가장 작은 유형(t3.micro)이면 충분합니다.",
+        ],
+        task: "이름 nat-instance, Amazon Linux 2023, t3.micro, 퍼블릭 서브넷, 퍼블릭 IP 자동 할당 '활성화', 보안 그룹 nat-sg, 고급 세부 정보의 사용자 데이터 'NAT 인스턴스'를 고르고 '인스턴스 시작'을 누르세요.",
+        path: "/ec2/instances/launch",
+        target: '[data-tour="launch-form"]',
+        side: "left",
+        isDone: ({ topo }) => !!natCandidate(topo),
+      },
+      {
+        id: "src-dst",
+        title: "④ 소스/대상 확인 중지",
+        body: [
+          "EC2는 기본적으로 자기 주소가 출발지나 목적지가 아닌 트래픽을 버립니다(소스/대상 확인). NAT 인스턴스는 남의 트래픽을 전달하므로 이 기능을 꺼야 합니다.",
+          "이 설정은 인스턴스를 시작한 뒤에 바꿉니다.",
+        ],
+        task: "NAT 인스턴스 화면에서 작업 → 네트워킹 → '소스/대상 확인 변경'을 열고 '중지'를 체크한 뒤 저장하세요.",
+        path: ({ topo }) => {
+          const nat = natCandidate(topo);
+          return nat ? `/ec2/instances/${nat.id}` : "/ec2/instances";
+        },
+        target: '[data-tour="instance-actions"]',
+        side: "bottom",
+        isDone: ({ topo }) => natCandidate(topo)?.config.sourceDestCheck === false,
+      },
+      {
+        id: "route",
+        title: "⑤ 프라이빗 경로: 0.0.0.0/0 → NAT 인스턴스",
+        body: ["프라이빗 서브넷에서 인터넷으로 가는 트래픽을 NAT 인스턴스로 보냅니다. 경로 대상(Target)으로 '인스턴스'를 고를 수 있습니다."],
+        task: "'라우팅 추가'를 누르고 대상(Destination) 0.0.0.0/0, 대상(Target)에 인스턴스 · nat-instance를 고른 뒤 '변경 사항 저장'을 누르세요.",
+        path: ({ topo }) => {
+          const rt = privateRouteTable(topo);
+          return rt ? `/vpc/route-tables/${rt.id}/edit-routes` : "/vpc/route-tables";
+        },
+        target: '[data-tour="routes-form"]',
+        side: "left",
+        isDone: ({ topo }) => natInstanceSubnets(topo).length > 0,
+      },
+      {
+        id: "worker",
+        title: "⑥ 프라이빗 서버 시작하기",
+        body: ["이제 프라이빗 서브넷에 퍼블릭 IP가 없는 서버를 둡니다. 이 서버는 인터넷에서 직접 접속할 수 없지만, NAT 인스턴스를 거쳐 밖으로 나갈 수는 있습니다."],
+        task: "이름 worker-1, 서브넷 private-a, 퍼블릭 IP 자동 할당 '비활성화'로 '인스턴스 시작'을 누르세요. (보안 그룹은 기본값이어도 됩니다)",
+        path: "/ec2/instances/launch",
+        target: '[data-tour="launch-form"]',
+        side: "left",
+        isDone: ({ topo }) => {
+          const subnets = new Set(natInstanceSubnets(topo).map((s) => s.id));
+          return topo.ofType("ec2").some((e) => e.config.state !== "terminated" && subnets.has(topo.subnetOf(e.id) ?? ""));
+        },
+      },
+      {
+        id: "analyze",
+        title: "⑦ 프라이빗 서버 → 인터넷 분석하기",
+        body: ["Reachability Analyzer로 프라이빗 서버의 요청이 NAT 인스턴스와 인터넷 게이트웨이를 거쳐 나가는지 확인합니다. 단계마다 소스/대상 확인, MASQUERADE 주소 변환, 보안 그룹 판정이 보입니다."],
+        task: "소스 유형 '인스턴스'에 worker-1, 대상 유형 '인터넷', 프로토콜 TCP, 포트 443으로 '경로 생성 및 분석'을 누르세요. (worker-1이 Running이 된 뒤에 분석하세요)",
+        path: "/vpc/reachability/create",
+        target: '[data-tour="path-form"]',
+        side: "left",
+        isDone: ({ project, topo }) => {
+          const subnets = new Set(natInstanceSubnets(topo).map((s) => s.id));
+          return project.networkPaths.some(
+            (p) =>
+              p.request.source.kind === "resource" &&
+              subnets.has(topo.subnetOf(p.request.source.resourceId) ?? "") &&
+              p.request.destination.kind === "internet" &&
+              simulateWithTopology(topo, p.request).outcome === "success",
+          );
+        },
+      },
+      {
+        id: "cost",
+        title: "⑧ 비용 비교하기",
+        body: [
+          "가상 비용 화면에서 같은 가정 단가로 NAT 게이트웨이와 NAT 인스턴스의 한 달 비용을 비교해 보세요. 사용량 가정(처리 데이터 GB)을 바꾸면 차이가 어떻게 달라지는지도 볼 수 있습니다.",
+          "숫자는 교육용 가정값이며 실제 요금이 아닙니다.",
+        ],
+        path: "/billing",
+        target: '[data-testid="nat-cost-comparison"]',
+        side: "top",
+      },
+      {
+        id: "done",
+        title: "NAT 인스턴스를 직접 구성했습니다! 🎉",
+        body: [
+          "퍼블릭 서브넷의 EC2 + NAT 설정 스크립트 + 소스/대상 확인 중지 + 0.0.0.0/0 → 인스턴스 경로로, NAT 게이트웨이 없이 프라이빗 서버의 외부 통신을 만들었습니다.",
+          "다음 도전: 소스/대상 확인을 다시 켜거나 NAT 인스턴스를 중지한 뒤 다시 분석해 보세요. 어느 단계에서 왜 막히는지 보입니다(중지하면 경로가 Blackhole이 됩니다). 운영 환경이라면 장애에 대비해 NAT 게이트웨이를 고려하세요.",
+        ],
+      },
+    ],
+  },
 ];
 
 export function tutorialById(id: string | null | undefined): Tutorial | undefined {
@@ -538,6 +750,14 @@ export function tutorialById(id: string | null | undefined): Tutorial | undefine
 export function tutorialProgress(t: Tutorial, ctx: TutorialContext): { done: number; total: number } {
   const checks = t.steps.filter((s) => s.isDone);
   return { done: checks.filter((s) => s.isDone!(ctx)).length, total: checks.length };
+}
+
+/** 이어서 할 단계: 아직 완료하지 않은 첫 판정 단계 (하나도 안 했거나 모두 끝냈으면 처음부터) */
+export function resumeStepIndex(t: Tutorial, ctx: TutorialContext): number {
+  const progress = tutorialProgress(t, ctx);
+  if (progress.done === 0 || progress.done === progress.total) return 0;
+  const index = t.steps.findIndex((s) => s.isDone && !s.isDone(ctx));
+  return index < 0 ? 0 : index;
 }
 
 export function resolveStepPath(step: TutorialStep, ctx: TutorialContext): string | null {

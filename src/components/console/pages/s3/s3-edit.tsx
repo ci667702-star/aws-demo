@@ -140,7 +140,7 @@ export function EditBucketPolicyPage({ id }: { id: string }) {
       )}
       <Container header={<ContainerHeader title="정책 예시로 시작" description="예시를 고르면 아래 편집기에 채워집니다. 필요하면 고쳐서 저장하세요." />}>
         <SpaceBetween size="m">
-          <FormField label="권한을 줄 IAM 사용자·역할 (두 번째 예시용)">
+          <FormField help={{ docKey: "s3", field: "bucketPolicy" }} label="권한을 줄 IAM 사용자·역할 (두 번째 예시용)">
             <SelectInput value={principal} onChange={setPrincipal} placeholder={principals.length ? "선택" : "IAM 사용자·역할이 없습니다"} options={principals} className="max-w-md" />
           </FormField>
           <div className="flex flex-wrap gap-2">
@@ -254,10 +254,10 @@ export function EditWebsitePage({ id }: { id: string }) {
           </Toggle>
           {enabled && (
             <>
-              <FormField label="인덱스 문서" description="주소가 / 또는 폴더로 끝날 때 보여 줄 파일입니다." constraint="예: index.html">
+              <FormField help={{ docKey: "s3", field: "indexDocument" }} label="인덱스 문서" description="주소가 / 또는 폴더로 끝날 때 보여 줄 파일입니다." constraint="예: index.html">
                 <TextInput value={indexDocument} onChange={(e) => setIndexDocument(e.target.value)} className="max-w-md" />
               </FormField>
-              <FormField label="오류 문서" optional description="없는 주소를 요청했을 때 보여 줄 파일입니다." constraint="예: error.html">
+              <FormField help={{ docKey: "s3", field: "errorDocument" }} label="오류 문서" optional description="없는 주소를 요청했을 때 보여 줄 파일입니다." constraint="예: error.html">
                 <TextInput value={errorDocument} onChange={(e) => setErrorDocument(e.target.value)} className="max-w-md" />
               </FormField>
               <Alert type="info" header="방문자가 볼 수 있게 하려면">
@@ -371,7 +371,7 @@ export function UploadPage({ id }: { id: string }) {
           </div>
           <div className="space-y-3 rounded-xl border border-aws-border p-4">
             <p className="font-bold">텍스트 파일 직접 만들기</p>
-            <FormField label="파일 이름(키)" constraint={prefix ? `실제 키: ${prefix}${newKey}` : "예: index.html, error.html, notes/todo.txt"}>
+            <FormField help={{ docKey: "s3", field: "objectKey" }} label="파일 이름(키)" constraint={prefix ? `실제 키: ${prefix}${newKey}` : "예: index.html, error.html, notes/todo.txt"}>
               <TextInput value={newKey} onChange={(e) => setNewKey(e.target.value)} className="max-w-md" />
             </FormField>
             <FormField label="내용">

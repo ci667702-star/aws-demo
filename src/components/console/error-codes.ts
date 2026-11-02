@@ -42,7 +42,9 @@ export const ERROR_EXPLANATIONS: Record<string, string> = {
   InvalidDBInstanceState: "DB가 지금 상태에서는 이 작업을 할 수 없습니다.",
   DBInstanceAlreadyExists: "같은 식별자의 DB가 있습니다.",
   DefaultVpcAlreadyExists: "기본 VPC는 리전마다 하나만 있을 수 있습니다.",
-  AccessDenied: "권한 설정 때문에 거부되었습니다.",
+  AccessDenied:
+    "정책이 이 작업을 허용하지 않아 거부되었습니다. 지금 로그인한 IAM 사용자·역할의 정책(또는 버킷 정책)에 명시적 Deny가 있거나, 허용하는 문장이 없습니다(암묵적 거부).",
+  UnauthorizedOperation: "EC2·VPC 작업에 필요한 IAM 권한이 없습니다. 지금 로그인한 사용자·역할에 이 작업을 허용하는 정책을 연결하거나, 권한이 있는 사용자·역할로 전환하세요.",
   BucketAlreadyExists: "같은 이름의 버킷이 이미 있습니다. 버킷 이름은 모두 달라야 합니다.",
   BucketNotEmpty: "버킷 안에 객체가 남아 있어 삭제할 수 없습니다. 먼저 비우세요.",
   InvalidBucketName: "버킷 이름 규칙(소문자·숫자·하이픈, 3~63자 등)에 맞지 않습니다.",

@@ -3,9 +3,9 @@ import type { Project } from "@/lib/engine/resource-models";
 import { validateProject, VALIDATION_RULES } from "@/lib/engine/validation-engine";
 import { ProjectBuilder } from "@/lib/project/builder";
 import { NACL, SG } from "@/lib/project/factory";
-import { createPublicEc2Sample, createThreeTierSample } from "@/lib/project/samples";
+import { createNatInstanceSample, createPublicEc2Sample, createThreeTierSample } from "@/lib/project/samples";
 import { createLab5Starter } from "@/lib/labs/labs";
-import { useDeterministicIds } from "../helpers";
+import { natInstanceProject, useDeterministicIds } from "../helpers";
 
 beforeEach(useDeterministicIds);
 
@@ -201,6 +201,13 @@ const triggers: Record<string, () => Project> = {
       const e = b.ec2("gone", subnet, { state: "terminated", sgs: [b.securityGroup("sg", vpc)] });
       b.targetGroup("tg", { targets: [e] });
     }),
+  "EC2-006": () => natInstanceProject({ sourceDestCheck: true }),
+  "EC2-007": () => natInstanceProject({ script: false }),
+  "EC2-008": () => natInstanceProject({ natInPrivate: true }),
+  "EC2-009": () => natInstanceProject({ publicIp: false }),
+  "EC2-010": () => natInstanceProject({ state: "stopped" }),
+  "EC2-011": () => natInstanceProject({ natSgInbound: [] }),
+  "EC2-012": () => natInstanceProject(),
   "ELB-001": () => webTier({ listeners: [] }),
   "ELB-002": () => webTier({ listeners: [{ port: 80, targetGroup: false }] }),
   "ELB-003": () => {
@@ -280,6 +287,17 @@ describe("검증 결과는 실제 설정에 따라 달라진다", () => {
   it("정상 구성(3-Tier 샘플)에는 오류와 경고가 없다", () => {
     const report = validateProject(createThreeTierSample());
     expect(report.findings.filter((f) => f.severity !== "info").map((f) => `${f.ruleId}: ${f.cause}`)).toEqual([]);
+  });
+
+  it("NAT 인스턴스 샘플에는 오류와 경고가 없고, 단일 장애 지점 안내(EC2-012)만 있다", () => {
+    const report = validateProject(createNatInstanceSample());
+    expect(report.findings.filter((f) => f.severity !== "info").map((f) => `${f.ruleId}: ${f.cause}`)).toEqual([]);
+    expect(report.findings.map((f) => f.ruleId)).toContain("EC2-012");
+  });
+
+  it("올바른 NAT 인스턴스 구성에는 NAT 인스턴스 오류가 없다", () => {
+    const ids = validateProject(natInstanceProject()).findings.map((f) => f.ruleId);
+    expect(ids.filter((id) => /^EC2-0(0[6-9]|1[01])$/.test(id))).toEqual([]);
   });
 
   it("퍼블릭 EC2 샘플에도 오류와 경고가 없다", () => {

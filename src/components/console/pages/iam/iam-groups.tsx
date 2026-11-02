@@ -105,7 +105,7 @@ export function CreateGroupPage() {
     <SpaceBetween tour="iam-group-form">
       <PageHeader title="사용자 그룹 생성" info={<InfoLink topic="iam" />} description="그룹 이름을 정하고, 구성원과 권한 정책을 고릅니다. 둘 다 나중에 바꿀 수 있습니다." />
       <Container header={<ContainerHeader title="사용자 그룹 이름 지정" />}>
-        <FormField label="사용자 그룹 이름" constraint="최대 128자. 영문자, 숫자, + = , . @ _ - 사용 가능">
+        <FormField help={{ docKey: "iam", field: "group" }} label="사용자 그룹 이름" constraint="최대 128자. 영문자, 숫자, + = , . @ _ - 사용 가능">
           <TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="예: developers" maxLength={128} />
         </FormField>
       </Container>

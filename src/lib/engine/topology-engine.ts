@@ -4,6 +4,7 @@
  * 모든 결과는 입력 프로젝트에서만 계산되며 결정적이다.
  */
 import {
+  isRouteRelation,
   RESOURCE_TYPE_INFO,
   VIRTUAL_REGION,
   type Connection,
@@ -26,7 +27,8 @@ import {
 } from "./cidr-utils";
 import { hashString } from "./ids";
 
-export type RouteTargetKind = "local" | "internet-gateway" | "nat-gateway";
+/** 경로 대상: local, 인터넷 게이트웨이, NAT 게이트웨이, 인스턴스(NAT 인스턴스) */
+export type RouteTargetKind = "local" | "internet-gateway" | "nat-gateway" | "instance";
 
 export interface EffectiveRoute {
   /** "local" 또는 경로를 정의한 연결 ID */
@@ -421,12 +423,12 @@ export class Topology {
     }
     if (routeTableId) {
       for (const c of this.outgoing(routeTableId)) {
-        if (c.relationType === "route-table-internet-gateway" || c.relationType === "route-table-nat-gateway") {
+        if (isRouteRelation(c.relationType) && "destinationCidr" in c.metadata) {
           routes.push({
             key: c.id,
             destinationCidr: c.metadata.destinationCidr,
             cidr: tryParseCidr(c.metadata.destinationCidr),
-            targetKind: c.relationType === "route-table-internet-gateway" ? "internet-gateway" : "nat-gateway",
+            targetKind: c.relationType === "route-table-internet-gateway" ? "internet-gateway" : c.relationType === "route-table-nat-gateway" ? "nat-gateway" : "instance",
             targetId: c.targetResourceId,
             connectionId: c.id,
           });
@@ -472,7 +474,7 @@ export class Topology {
   /**
    * 서브넷 분류. 이름이나 사용자의 선택이 아니라 실제 라우팅으로 판정한다.
    * - public: VPC에 연결된 IGW로 향하는 경로가 있음
-   * - private-nat: IGW 경로는 없고 NAT Gateway 경로가 있음
+   * - private-nat: IGW 경로는 없고 NAT Gateway(또는 NAT 인스턴스) 경로가 있음
    * - private-isolated: 외부로 향하는 경로가 없음
    */
   classifySubnet(subnetId: string): SubnetClassification {
@@ -493,7 +495,7 @@ export class Topology {
         };
       }
       const natRoute = routing.routes.find(
-        (r) => r.targetKind === "nat-gateway" && r.cidr && this.getOfType(r.targetId, "nat-gateway"),
+        (r) => r.cidr && ((r.targetKind === "nat-gateway" && this.getOfType(r.targetId, "nat-gateway")) || (r.targetKind === "instance" && this.getOfType(r.targetId, "ec2"))),
       );
       if (natRoute) {
         return {

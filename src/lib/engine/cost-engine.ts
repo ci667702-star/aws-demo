@@ -3,9 +3,11 @@
  * 실제 AWS 요금표를 사용하지 않는다. 모든 단가는 "교육용 가정값"이며 사용자가 프로젝트별로 수정할 수 있다.
  * 결과는 실제 청구 금액이 아니다.
  */
+import { isNatInstanceTarget } from "./nat-instance";
 import {
   EC2_INSTANCE_TYPES,
   RDS_INSTANCE_CLASSES,
+  type ConfigOf,
   type CostAssumptions,
   type Project,
   type ResourceType,
@@ -98,6 +100,7 @@ export function estimateCost(project: Project, assumptions: CostAssumptions = re
           if (topo.enisOf(r.id)[0]?.publicIp !== null && !topo.elasticIpOf(r.id)) {
             items.push(item("퍼블릭 IPv4 주소 (자동 할당)", hours, "시간", a.publicIpv4Hourly));
           }
+          if (isNatInstanceTarget(topo, r.id)) note = "NAT 인스턴스로 사용 중: NAT 게이트웨이와 달리 처리 데이터(GB) 요금 없이 인스턴스 사용 시간만 계산합니다.";
         } else {
           note = `${r.config.state} 상태: 인스턴스 사용 시간 비용 없음으로 가정 (스토리지는 모델링하지 않음)`;
         }
@@ -160,6 +163,40 @@ export function estimateCost(project: Project, assumptions: CostAssumptions = re
       "EBS 볼륨, 스냅샷, 요청 수, 리전 간 전송 등은 모델링하지 않습니다.",
     ],
   };
+}
+
+export interface NatCostOption {
+  items: CostItem[];
+  monthly: number;
+}
+
+export interface NatCostComparison {
+  instanceType: ConfigOf<"ec2">["instanceType"];
+  gateway: NatCostOption;
+  instance: NatCostOption;
+  /** NAT 게이트웨이 − NAT 인스턴스 (양수면 NAT 인스턴스가 그만큼 저렴) */
+  savings: number;
+}
+
+/**
+ * 같은 가정 단가로 NAT 게이트웨이 1개와 NAT 인스턴스 1대의 월 비용을 비교한다.
+ * 인터넷으로 나가는 데이터 전송 요금은 두 방식이 같다고 보고 뺀다.
+ */
+export function compareNatCost(a: CostAssumptions, instanceType: ConfigOf<"ec2">["instanceType"] = "t3.micro"): NatCostComparison {
+  const hours = a.hoursPerMonth;
+  const gatewayItems = [
+    item("NAT 게이트웨이 사용 시간", hours, "시간", a.natHourly),
+    item("NAT 처리 데이터", a.dataProcessedGb, "GB", a.natPerGb),
+    item("탄력적 IP (퍼블릭 IPv4)", hours, "시간", a.publicIpv4Hourly),
+  ];
+  const instanceItems = [
+    item(`${instanceType} 인스턴스 사용 시간`, hours, "시간", a.ec2Hourly[instanceType] ?? 0),
+    item("퍼블릭 IPv4 주소", hours, "시간", a.publicIpv4Hourly),
+  ];
+  const sum = (items: CostItem[]) => round(items.reduce((s, i) => s + i.amount, 0));
+  const gateway = { items: gatewayItems, monthly: sum(gatewayItems) };
+  const instance = { items: instanceItems, monthly: sum(instanceItems) };
+  return { instanceType, gateway, instance, savings: round(gateway.monthly - instance.monthly) };
 }
 
 export const COST_INSTANCE_TYPES = EC2_INSTANCE_TYPES;

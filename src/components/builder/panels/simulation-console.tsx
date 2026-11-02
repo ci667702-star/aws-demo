@@ -36,6 +36,8 @@ import type { SimStep } from "@/lib/engine/simulation-log";
 import { buildTopology, type Topology } from "@/lib/engine/topology-engine";
 import { createId } from "@/lib/engine/ids";
 import { upsertAnalyzedPath } from "@/lib/project/console-actions";
+import { getFieldHelp } from "@/lib/docs";
+import { fieldForFailure, fieldForStep } from "@/lib/docs/rule-fields";
 import { useEditorStore, type PathHighlight } from "@/lib/store/editor-store";
 import { useProjectStore } from "@/lib/store/project-store";
 import { formatTime } from "@/lib/ui/format";
@@ -432,6 +434,7 @@ function SimulationResultView({ result, project }: { result: SimulationResult; p
   const setHighlight = useEditorStore((s) => s.setHighlight);
   const advance = useEditorStore((s) => s.advancePlayhead);
   const focusResources = useEditorStore((s) => s.focusResources);
+  const focusField = useEditorStore((s) => s.focusField);
   const analysis = useAnalysis();
   const [limit, setLimit] = useState(STEP_PAGE);
   const [openStep, setOpenStep] = useState<number | null>(result.failure?.stepIndex ?? null);
@@ -467,14 +470,25 @@ function SimulationResultView({ result, project }: { result: SimulationResult; p
           <p className="font-medium">차단 원인</p>
           <p className="text-muted-foreground">{result.failure.reason}</p>
           {result.failure.resourceIds.length > 0 && (
-            <div className="flex flex-wrap gap-1">
+            <div className="flex flex-wrap gap-1" data-testid="failure-resources">
               {result.failure.resourceIds.map((id) => {
                 const r = analysis.topology.get(id);
-                return r ? (
-                  <Button key={id} variant="outline" size="xs" onClick={() => focusResources([id])}>
-                    <ResourceIcon type={r.type} size="sm" className="size-4 [&_svg]:size-2.5" /> {r.name}
-                  </Button>
-                ) : null;
+                if (!r) return null;
+                // 실패 원인 분류에 맞는 설정 항목 (예: 보안 그룹 차단 → 인바운드 규칙)
+                const field = fieldForFailure(result.failure!.category, r.type, result.failure!.fields);
+                const help = field ? getFieldHelp(r.type, field) : null;
+                return (
+                  <span key={id} className="inline-flex flex-wrap items-center gap-1">
+                    <Button variant="outline" size="xs" onClick={() => focusResources([id])} title={`${r.name} 설명과 설정 보기`}>
+                      <ResourceIcon type={r.type} size="sm" className="size-4 [&_svg]:size-2.5" /> {r.name}
+                    </Button>
+                    {field && help && (
+                      <Button variant="ghost" size="xs" onClick={() => focusField(id, field)} data-testid="failure-open-field">
+                        {help.title} 설정 보기
+                      </Button>
+                    )}
+                  </span>
+                );
               })}
             </div>
           )}
@@ -490,7 +504,12 @@ function SimulationResultView({ result, project }: { result: SimulationResult; p
               </ul>
             </div>
           )}
-          {result.failure.concept && <p className="rounded-md bg-muted/50 p-2 text-xs text-muted-foreground">{result.failure.concept}</p>}
+          {result.failure.concept && (
+            <div className="rounded-md bg-muted/50 p-2 text-xs text-muted-foreground">
+              <p className="mb-0.5 text-[10px] font-semibold">관련 AWS 개념 (일반 설명)</p>
+              <p>{result.failure.concept}</p>
+            </div>
+          )}
         </div>
       )}
 
@@ -616,6 +635,8 @@ function StepRow({
   name: (id: string) => string;
   onFocus: (ids: string[]) => void;
 }) {
+  const analysis = useAnalysis();
+  const focusField = useEditorStore((s) => s.focusField);
   const icon =
     step.status === "pass" ? (
       <CircleCheck className="size-3.5 text-emerald-600" aria-label="통과" />
@@ -662,11 +683,24 @@ function StepRow({
           {step.concept && <p className="rounded-md bg-muted/50 p-2 text-muted-foreground">{step.concept}</p>}
           {step.resourceIds.length > 0 && (
             <div className="flex flex-wrap gap-1">
-              {step.resourceIds.map((id) => (
-                <Button key={id} variant="outline" size="xs" onClick={() => onFocus([id])}>
-                  <Crosshair /> {name(id)}
-                </Button>
-              ))}
+              {step.resourceIds.map((id) => {
+                const r = analysis.topology.get(id);
+                // 이 단계를 결정한 설정 항목 (예: 보안 그룹 평가 → 인바운드 규칙)
+                const field = r ? fieldForStep(step, r.type) : null;
+                const help = r && field ? getFieldHelp(r.type, field) : null;
+                return (
+                  <span key={id} className="inline-flex flex-wrap items-center gap-1">
+                    <Button variant="outline" size="xs" onClick={() => onFocus([id])}>
+                      <Crosshair /> {name(id)}
+                    </Button>
+                    {field && help && (
+                      <Button variant="ghost" size="xs" onClick={() => focusField(id, field)} data-testid="step-open-field">
+                        {help.title} 설정
+                      </Button>
+                    )}
+                  </span>
+                );
+              })}
             </div>
           )}
         </div>

@@ -183,6 +183,8 @@ export const configSchemas = {
     userData: z.string().max(16384).default(""),
     /** 인스턴스 프로파일로 연결한 IAM 역할 ID */
     iamRoleId: z.string().max(64).nullable().default(null),
+    /** 소스/대상 확인. 켜져 있으면(기본값) 자기 주소가 아닌 트래픽을 버린다. NAT 인스턴스는 꺼야 한다 */
+    sourceDestCheck: z.boolean().default(true),
   }),
   alb: z.object({
     scheme: z.enum(["internet-facing", "internal"]),
@@ -246,6 +248,7 @@ export const RELATION_TYPES = [
   "route-table-subnet",
   "route-table-internet-gateway",
   "route-table-nat-gateway",
+  "route-table-ec2",
   "network-acl-subnet",
   "nat-gateway-subnet",
   "ec2-subnet",
@@ -263,12 +266,16 @@ export const RELATION_TYPES = [
 ] as const;
 export type RelationType = (typeof RELATION_TYPES)[number];
 
-export const ROUTE_RELATIONS = ["route-table-internet-gateway", "route-table-nat-gateway"] as const;
+/** 경로(Destination → 대상). 대상은 인터넷 게이트웨이, NAT 게이트웨이, 또는 NAT 인스턴스로 쓰는 EC2 */
+export const ROUTE_RELATIONS = ["route-table-internet-gateway", "route-table-nat-gateway", "route-table-ec2"] as const;
 export type RouteRelationType = (typeof ROUTE_RELATIONS)[number];
 
+export function isRouteRelation(r: RelationType): r is RouteRelationType {
+  return (ROUTE_RELATIONS as readonly string[]).includes(r);
+}
+
 const PLAIN_RELATIONS = RELATION_TYPES.filter(
-  (r): r is Exclude<RelationType, RouteRelationType | "alb-target-group"> =>
-    r !== "route-table-internet-gateway" && r !== "route-table-nat-gateway" && r !== "alb-target-group",
+  (r): r is Exclude<RelationType, RouteRelationType | "alb-target-group"> => !isRouteRelation(r) && r !== "alb-target-group",
 ) as unknown as readonly [
   Exclude<RelationType, RouteRelationType | "alb-target-group">,
   ...Exclude<RelationType, RouteRelationType | "alb-target-group">[],
@@ -302,6 +309,10 @@ export const connectionSchema = z.union([
 ]);
 export type Connection = z.infer<typeof connectionSchema>;
 export type RouteConnection = Extract<Connection, { relationType: RouteRelationType }>;
+
+export function isRouteConnection(c: Connection): c is RouteConnection {
+  return isRouteRelation(c.relationType);
+}
 export type ListenerForwardConnection = Extract<Connection, { relationType: "alb-target-group" }>;
 
 export const endpointSpecSchema = z.discriminatedUnion("kind", [
@@ -415,6 +426,18 @@ export const iamRoleSchema = z.object({
   policyIds: z.array(policyRef).max(20).default([]),
 });
 export type IamRole = z.infer<typeof iamRoleSchema>;
+
+/**
+ * 콘솔·그림 빌더에서 지금 작업하는 자격 증명 (가상 로그인). 없으면 루트 사용자로 작업한다.
+ * 실제 로그인·암호는 없고, 이 자격 증명의 IAM 정책으로 생성·변경·삭제 작업을 허용할지 판단한다.
+ */
+export const iamSessionSchema = z.object({
+  kind: z.enum(["user", "role"]),
+  id,
+  /** IAM 사용자가 역할로 전환한 경우 원래 사용자 (돌아가기·감사 기록용) */
+  sourceUserId: id.nullable().default(null),
+});
+export type IamSession = z.infer<typeof iamSessionSchema>;
 
 export const iamPolicySchema = z.object({
   id,
@@ -549,6 +572,7 @@ export const servicesSchema = z
         groups: z.array(iamGroupSchema).max(50).default([]),
         roles: z.array(iamRoleSchema).max(50).default([]),
         policies: z.array(iamPolicySchema).max(100).default([]),
+        session: iamSessionSchema.nullable().optional(),
       })
       .default({ users: [], groups: [], roles: [], policies: [] }),
     s3: z.object({ buckets: z.array(s3BucketSchema).max(100).default([]) }).default({ buckets: [] }),
@@ -685,6 +709,15 @@ export const RELATION_SPECS: Record<RelationType, RelationSpec> = {
     target: "nat-gateway",
     label: "경로",
     description: "라우팅 테이블의 경로(Destination → NAT Gateway). 프라이빗 서브넷의 외부 IPv4 통신에 사용합니다.",
+    category: "route",
+  },
+  "route-table-ec2": {
+    type: "route-table-ec2",
+    source: "route-table",
+    target: "ec2",
+    label: "경로",
+    description:
+      "라우팅 테이블의 경로(Destination → 인스턴스). NAT 인스턴스처럼 다른 리소스의 트래픽을 대신 전달하는 EC2를 대상으로 지정합니다. 인스턴스의 소스/대상 확인을 꺼야 합니다.",
     category: "route",
   },
   "network-acl-subnet": {

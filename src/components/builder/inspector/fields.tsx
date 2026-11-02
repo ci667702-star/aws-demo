@@ -3,12 +3,25 @@
 import { useId, useState } from "react";
 import { ChevronDown, CircleAlert } from "lucide-react";
 import { cn } from "cn";
+import { FieldHelpButton, useRevealable } from "@/components/docs/field-help";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 
 type CommitResult = string | null | void;
+
+/** 설정 이름 + 도움말 아이콘. help는 설명 데이터의 설정 키다 (FieldHelpScope의 리소스 기준). */
+function FieldLabel({ htmlFor, label, help, className = "text-xs font-medium text-muted-foreground" }: { htmlFor: string; label: string; help?: string; className?: string }) {
+  return (
+    <div className="flex items-center gap-1">
+      <Label htmlFor={htmlFor} className={className}>
+        {label}
+      </Label>
+      {help && <FieldHelpButton field={help} />}
+    </div>
+  );
+}
 
 /**
  * 검증 후 확정되는 텍스트 입력.
@@ -25,6 +38,7 @@ export function TextField({
   disabled,
   maxLength = 128,
   testId,
+  help,
 }: {
   label: string;
   value: string;
@@ -36,6 +50,7 @@ export function TextField({
   disabled?: boolean;
   maxLength?: number;
   testId?: string;
+  help?: string;
 }) {
   const id = useId();
   const [draft, setDraft] = useState(value);
@@ -65,10 +80,8 @@ export function TextField({
   };
 
   return (
-    <div className="space-y-1">
-      <Label htmlFor={id} className="text-xs font-medium text-muted-foreground">
-        {label}
-      </Label>
+    <div className="space-y-1" data-field={help}>
+      <FieldLabel htmlFor={id} label={label} help={help} />
       <Input
         id={id}
         value={draft}
@@ -121,6 +134,7 @@ export function NumberField({
   max,
   hint,
   testId,
+  help,
 }: {
   label: string;
   value: number;
@@ -129,6 +143,7 @@ export function NumberField({
   max: number;
   hint?: React.ReactNode;
   testId?: string;
+  help?: string;
 }) {
   return (
     <TextField
@@ -136,6 +151,7 @@ export function NumberField({
       value={String(value)}
       hint={hint}
       testId={testId}
+      help={help}
       maxLength={12}
       validate={(v) => {
         if (!/^-?\d+$/.test(v.trim())) return "정수를 입력하세요.";
@@ -162,6 +178,7 @@ export function SelectField({
   hint,
   disabled,
   testId,
+  help,
 }: {
   label: string;
   value: string;
@@ -170,13 +187,12 @@ export function SelectField({
   hint?: React.ReactNode;
   disabled?: boolean;
   testId?: string;
+  help?: string;
 }) {
   const id = useId();
   return (
-    <div className="space-y-1">
-      <Label htmlFor={id} className="text-xs font-medium text-muted-foreground">
-        {label}
-      </Label>
+    <div className="space-y-1" data-field={help}>
+      <FieldLabel htmlFor={id} label={label} help={help} />
       <NativeSelect id={id} value={value} onChange={onChange} options={options} disabled={disabled} testId={testId} />
       {hint && <p className="text-[11px] text-muted-foreground">{hint}</p>}
     </div>
@@ -231,6 +247,7 @@ export function SwitchField({
   onChange,
   disabled,
   testId,
+  help,
 }: {
   label: string;
   description?: React.ReactNode;
@@ -238,14 +255,13 @@ export function SwitchField({
   onChange: (checked: boolean) => void;
   disabled?: boolean;
   testId?: string;
+  help?: string;
 }) {
   const id = useId();
   return (
-    <div className="flex items-start justify-between gap-3">
+    <div className="flex items-start justify-between gap-3" data-field={help}>
       <div className="space-y-0.5">
-        <Label htmlFor={id} className="text-sm">
-          {label}
-        </Label>
+        <FieldLabel htmlFor={id} label={label} help={help} className="text-sm" />
         {description && <p className="text-[11px] text-muted-foreground">{description}</p>}
       </div>
       <Switch id={id} checked={checked} onCheckedChange={onChange} disabled={disabled} data-testid={testId} />
@@ -267,16 +283,23 @@ export function CheckList({
   items,
   onToggle,
   empty,
+  help,
 }: {
   label: string;
   items: CheckItem[];
   onToggle: (id: string, checked: boolean) => void;
   empty?: React.ReactNode;
+  help?: string;
 }) {
   const baseId = useId();
   return (
-    <fieldset className="space-y-1">
-      <legend className="mb-1 text-xs font-medium text-muted-foreground">{label}</legend>
+    <fieldset className="space-y-1" data-field={help}>
+      <legend className="mb-1 text-xs font-medium text-muted-foreground">
+        <span className="inline-flex items-center gap-1">
+          {label}
+          {help && <FieldHelpButton field={help} />}
+        </span>
+      </legend>
       {items.length === 0 ? (
         <p className="text-xs text-muted-foreground">{empty ?? "선택할 수 있는 항목이 없습니다."}</p>
       ) : (
@@ -312,42 +335,50 @@ export function Section({
   children,
   defaultOpen = true,
   actions,
+  help,
 }: {
   title: string;
   children: React.ReactNode;
   defaultOpen?: boolean;
   actions?: React.ReactNode;
+  /** 섹션 전체에 해당하는 설정 키 (예: 인바운드 규칙) */
+  help?: string;
 }) {
   const [open, setOpen] = useState(defaultOpen);
+  const ref = useRevealable<HTMLElement>(open, setOpen);
   const id = useId();
   return (
-    <section className="border-b py-3 last:border-b-0">
+    <section ref={ref} className="border-b py-3 last:border-b-0" data-revealable data-field={help}>
       <div className="flex items-center justify-between gap-2 px-4">
-        <button
-          type="button"
-          className="flex flex-1 items-center gap-1 text-left text-xs font-semibold tracking-wide text-muted-foreground uppercase"
-          aria-expanded={open}
-          aria-controls={id}
-          onClick={() => setOpen((o) => !o)}
-        >
-          <ChevronDown className={cn("size-3.5 transition-transform", !open && "-rotate-90")} aria-hidden />
-          {title}
-        </button>
+        <div className="flex flex-1 items-center gap-1">
+          <button
+            type="button"
+            className="flex items-center gap-1 text-left text-xs font-semibold tracking-wide text-muted-foreground uppercase"
+            aria-expanded={open}
+            aria-controls={id}
+            onClick={() => setOpen(!open)}
+          >
+            <ChevronDown className={cn("size-3.5 transition-transform", !open && "-rotate-90")} aria-hidden />
+            {title}
+          </button>
+          {help && <FieldHelpButton field={help} />}
+        </div>
         {actions}
       </div>
-      {open && (
-        <div id={id} className="mt-2 space-y-3 px-4">
-          {children}
-        </div>
-      )}
+      <div id={id} hidden={!open} className="mt-2 space-y-3 px-4">
+        {children}
+      </div>
     </section>
   );
 }
 
-export function InfoRow({ label, children, mono }: { label: string; children: React.ReactNode; mono?: boolean }) {
+export function InfoRow({ label, children, mono, help }: { label: string; children: React.ReactNode; mono?: boolean; help?: string }) {
   return (
-    <div className="flex items-start justify-between gap-3 text-sm">
-      <span className="shrink-0 text-xs text-muted-foreground">{label}</span>
+    <div className="flex items-start justify-between gap-3 text-sm" data-field={help}>
+      <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
+        {label}
+        {help && <FieldHelpButton field={help} />}
+      </span>
       <span className={cn("min-w-0 text-right break-all", mono && "font-mono text-[12px]")}>{children}</span>
     </div>
   );

@@ -7,7 +7,7 @@
 import { create } from "zustand";
 import type { SimulationResult } from "@/lib/engine/connectivity-engine";
 
-export type ToolsTab = "help" | "labs";
+export type ToolsTab = "help" | "labs" | "resource";
 
 /** Reachability Analyzer에서 마지막으로 분석한 결과 (리소스 맵 경로 표시용) */
 export interface AnalysisRun {
@@ -28,6 +28,8 @@ interface ConsoleUiState {
   setNavOpen: (open: boolean) => void;
   openHelp: (topic: string) => void;
   openLabs: () => void;
+  /** 지금 화면의 리소스 설명 탭을 연다 */
+  openResourceDoc: () => void;
   setToolsOpen: (open: boolean) => void;
   setToolsTab: (tab: ToolsTab) => void;
   recordRun: (key: string, run: AnalysisRun) => void;
@@ -46,6 +48,7 @@ export const useConsoleUi = create<ConsoleUiState>()((set) => ({
   setNavOpen: (navOpen) => set({ navOpen }),
   openHelp: (helpTopic) => set({ helpTopic, toolsOpen: true, toolsTab: "help" }),
   openLabs: () => set({ toolsOpen: true, toolsTab: "labs" }),
+  openResourceDoc: () => set({ toolsOpen: true, toolsTab: "resource" }),
   setToolsOpen: (toolsOpen) => set({ toolsOpen }),
   setToolsTab: (toolsTab) => set({ toolsTab, toolsOpen: true }),
   recordRun: (key, run) => set((s) => ({ runs: { ...s.runs, [key]: run } })),

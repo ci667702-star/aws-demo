@@ -29,7 +29,9 @@ import {
   type ResourceOfType,
   type ResourceType,
   type SgRule,
+  isRouteConnection,
 } from "@/lib/engine/resource-models";
+import { checkNatInstance, natInstanceScript } from "@/lib/engine/nat-instance";
 import type { SimulationResult } from "@/lib/engine/connectivity-engine";
 import { buildTopology, displayName, type Topology } from "@/lib/engine/topology-engine";
 import { allocateVirtualPublicIp, NACL, SG } from "./factory";
@@ -454,7 +456,8 @@ export function editRoutes(project: Project, routeTableId: string, routes: Route
   const vpcCidr = topo.vpcCidr(vpcId);
   const seen = new Set<string>();
   const next: Connection[] = [];
-  const existing = topo.outgoing(rt.id).filter((c) => c.relationType === "route-table-internet-gateway" || c.relationType === "route-table-nat-gateway");
+  const existing = topo.outgoing(rt.id).filter(isRouteConnection);
+  const notes: string[] = [];
   for (const [i, route] of routes.entries()) {
     const parsed = parseCidr(route.destination);
     if (!parsed.ok) return awsFail("InvalidParameterValue", `경로 ${i + 1}: 대상 '${route.destination}'이(가) 올바른 CIDR이 아닙니다. ${parsed.error}`);
@@ -463,14 +466,14 @@ export function editRoutes(project: Project, routeTableId: string, routes: Route
     if (vpcCidr && parsed.value.prefix > vpcCidr.prefix && cidrContainsCidr(vpcCidr, parsed.value)) {
       return awsFail(
         "InvalidParameterValue",
-        `경로 ${i + 1}: VPC CIDR(${vpcCidr.text})보다 구체적인 경로 ${dest}의 대상으로 인터넷/NAT 게이트웨이를 지정할 수 없습니다.`,
+        `경로 ${i + 1}: VPC CIDR(${vpcCidr.text})보다 구체적인 경로 ${dest}는 이 시뮬레이터에서 지정할 수 없습니다. (실제 AWS에서는 VPC 안의 트래픽을 검사 장비로 보내는 미들박스 라우팅에 쓰이며, 인터넷 게이트웨이는 대상이 될 수 없습니다.)`,
       );
     }
     if (seen.has(dest)) return awsFail("RouteAlreadyExists", `대상 ${dest}에 대한 경로가 두 번 이상 지정되었습니다.`);
     seen.add(dest);
     const target = topo.get(route.targetId);
-    if (!target || (target.type !== "internet-gateway" && target.type !== "nat-gateway")) {
-      return awsFail("InvalidParameterValue", `경로 ${i + 1}: 대상 리소스를 선택하세요 (인터넷 게이트웨이 또는 NAT 게이트웨이).`);
+    if (!target || (target.type !== "internet-gateway" && target.type !== "nat-gateway" && target.type !== "ec2")) {
+      return awsFail("InvalidParameterValue", `경로 ${i + 1}: 대상 리소스를 선택하세요 (인터넷 게이트웨이, NAT 게이트웨이 또는 인스턴스).`);
     }
     if (target.type === "internet-gateway" && topo.vpcOfIgw(target.id) !== vpcId) {
       return awsFail("InvalidParameterValue", `경로 ${i + 1}: 인터넷 게이트웨이 ${target.id}이(가) 이 라우팅 테이블의 VPC(${vpcId})에 연결되어 있지 않습니다.`);
@@ -478,7 +481,14 @@ export function editRoutes(project: Project, routeTableId: string, routes: Route
     if (target.type === "nat-gateway" && topo.vpcOf(target.id) !== vpcId) {
       return awsFail("InvalidParameterValue", `경로 ${i + 1}: NAT 게이트웨이 ${target.id}이(가) 다른 VPC에 있습니다.`);
     }
-    const relationType: RelationType = target.type === "internet-gateway" ? "route-table-internet-gateway" : "route-table-nat-gateway";
+    if (target.type === "ec2") {
+      if (target.config.state === "terminated") return awsFail("IncorrectInstanceState", `경로 ${i + 1}: 인스턴스 ${target.id}은(는) 종료되었습니다.`);
+      if (topo.vpcOf(target.id) !== vpcId) return awsFail("InvalidParameterValue", `경로 ${i + 1}: 인스턴스 ${target.id}이(가) 다른 VPC에 있습니다.`);
+      const check = checkNatInstance(topo, target);
+      if (!check.ok) notes.push(`경로 ${dest} → ${target.id}: NAT 인스턴스로 동작하려면 고칠 점이 있습니다 — ${check.problems.map((x) => x.text).join(" ")}`);
+    }
+    const relationType: RelationType =
+      target.type === "internet-gateway" ? "route-table-internet-gateway" : target.type === "nat-gateway" ? "route-table-nat-gateway" : "route-table-ec2";
     const keep = existing.find(
       (c) => c.relationType === relationType && c.targetResourceId === target.id && "destinationCidr" in c.metadata && c.metadata.destinationCidr === dest,
     );
@@ -486,7 +496,7 @@ export function editRoutes(project: Project, routeTableId: string, routes: Route
   }
   const removeIds = new Set(existing.map((c) => c.id));
   const p = { ...project, connections: [...project.connections.filter((c) => !removeIds.has(c.id)), ...next] };
-  return ok(touch(p));
+  return ok(touch(p), notes);
 }
 
 /** 서브넷 연결 편집: 선택한 서브넷을 이 테이블에 명시적으로 연결하고(다른 테이블에서 이동), 해제된 서브넷은 기본 테이블로 돌아간다. */
@@ -798,7 +808,7 @@ export function deleteNetworkAcl(project: Project, naclId: string): ActionResult
 
 // ---------------------------------------------------------------- EC2
 
-export type UserDataTemplate = "none" | "web-server" | "custom";
+export type UserDataTemplate = "none" | "web-server" | "nat-instance" | "custom";
 
 export const AMI_INFO: Record<ConfigOf<"ec2">["ami"], { label: string; family: "linux" | "windows"; description: string }> = {
   "amazon-linux-2023": { label: "Amazon Linux 2023 (가상)", family: "linux", description: "기본으로 SSH(22) 서비스만 실행된다고 가정" },
@@ -827,6 +837,10 @@ export function userDataFor(ami: ConfigOf<"ec2">["ami"], template: UserDataTempl
           ? "#!/bin/bash\napt-get update -y\napt-get install -y apache2\nsystemctl enable --now apache2"
           : "#!/bin/bash\ndnf install -y httpd\nsystemctl enable --now httpd";
     return { listenPorts: [...base, 80], script };
+  }
+  if (template === "nat-instance") {
+    // AWS 문서의 NAT 인스턴스 절차 (IP 포워딩 + iptables MASQUERADE). Windows는 해당 없음
+    return { listenPorts: base, script: natInstanceScript(ami) ?? "" };
   }
   return { listenPorts: base, script: "" };
 }
@@ -909,6 +923,7 @@ export function launchInstances(project: Project, input: LaunchInstancesInput): 
         instanceType: input.instanceType,
         privateIp,
         publicIpMode: input.publicIpMode,
+        sourceDestCheck: true,
         state: "pending",
         listenPorts: [...new Set(input.listenPorts)].sort((a, b) => a - b),
         httpResponseCode: input.httpResponseCode,
@@ -979,6 +994,17 @@ export function changeInstanceSecurityGroups(project: Project, instanceId: strin
 }
 
 /** 사용자 데이터(가상 애플리케이션) 편집 — AWS처럼 인스턴스가 중지된 상태에서만 가능하다. */
+/** 소스/대상 확인 변경 (ModifyInstanceAttribute SourceDestCheck). NAT 인스턴스는 중지(false)해야 한다 */
+export function changeSourceDestCheck(project: Project, instanceId: string, enabled: boolean): ActionResult {
+  const ec2 = find(project, instanceId, "ec2");
+  if (!ec2) return notFound("ec2", instanceId);
+  if (ec2.config.state === "terminated") return awsFail("IncorrectInstanceState", "종료된 인스턴스의 속성은 변경할 수 없습니다.");
+  const notes = enabled
+    ? ["소스/대상 확인을 켰습니다. 이 인스턴스는 자기 주소가 아닌 트래픽을 버립니다."]
+    : ["소스/대상 확인을 중지했습니다. 이 인스턴스가 다른 리소스의 트래픽을 전달할 수 있습니다 (NAT 인스턴스)."];
+  return ok(touch(updateConfig<"ec2">(project, ec2.id, { sourceDestCheck: enabled })), notes);
+}
+
 export function editInstanceUserData(
   project: Project,
   instanceId: string,

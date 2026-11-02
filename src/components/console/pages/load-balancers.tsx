@@ -223,10 +223,10 @@ export function CreateLoadBalancerPage() {
       <PageGuide topic="alb" />
       <Container header={<ContainerHeader title="기본 구성" />}>
         <SpaceBetween size="m">
-          <FormField label="로드 밸런서 이름" constraint="1~32자의 영문자, 숫자, 하이픈. 하이픈으로 시작·끝나거나 'internal-'로 시작할 수 없습니다. 만든 뒤에는 바꿀 수 없습니다.">
+          <FormField help={{ docKey: "alb", field: "name" }} label="로드 밸런서 이름" constraint="1~32자의 영문자, 숫자, 하이픈. 하이픈으로 시작·끝나거나 'internal-'로 시작할 수 없습니다. 만든 뒤에는 바꿀 수 없습니다.">
             <TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="my-alb" maxLength={32} />
           </FormField>
-          <FormField label="체계" description="만든 뒤에는 체계를 바꿀 수 없습니다.">
+          <FormField help={{ docKey: "alb", field: "scheme" }} label="체계" description="만든 뒤에는 체계를 바꿀 수 없습니다.">
             <RadioGroup
               aria-label="체계"
               value={scheme}
@@ -258,7 +258,7 @@ export function CreateLoadBalancerPage() {
             />
           </FormField>
           {vpcId && (
-            <FormField label="가용 영역 및 서브넷" constraint="가용 영역마다 서브넷 하나, 최소 2개 가용 영역">
+            <FormField help={{ docKey: "alb", field: "subnets" }} label="가용 영역 및 서브넷" constraint="가용 영역마다 서브넷 하나, 최소 2개 가용 영역">
               <SubnetMapping topo={topo} vpcId={vpcId} mapping={mapping} onChange={setMapping} />
             </FormField>
           )}
@@ -277,13 +277,13 @@ export function CreateLoadBalancerPage() {
           {listeners.map((l, i) => (
             <fieldset key={l.key} className="grid gap-3 rounded-xl border border-aws-border p-3 sm:grid-cols-[120px_120px_minmax(0,1fr)_auto]" data-testid="listener-draft">
               <legend className="px-1 text-sm font-bold">리스너 {i + 1}</legend>
-              <FormField label="프로토콜">
+              <FormField help={{ docKey: "alb", field: "listenerProtocol" }} label="프로토콜">
                 <SelectInput value={l.protocol} onChange={(v) => updateListener(l.key, { protocol: v as "HTTP" | "HTTPS" })} options={[{ value: "HTTP", label: "HTTP" }, { value: "HTTPS", label: "HTTPS" }]} />
               </FormField>
-              <FormField label="포트">
+              <FormField help={{ docKey: "alb", field: "listenerPort" }} label="포트">
                 <TextInput value={l.port} onChange={(e) => updateListener(l.key, { port: e.target.value })} inputMode="numeric" />
               </FormField>
-              <FormField label="기본 작업: 전달 대상">
+              <FormField help={{ docKey: "alb", field: "defaultTargetGroup" }} label="기본 작업: 전달 대상">
                 <SelectInput value={l.targetGroupId} onChange={(v) => updateListener(l.key, { targetGroupId: v })} placeholder={tgs.length ? "대상 그룹 선택" : "사용 가능한 대상 그룹 없음"} options={tgs.map((t) => ({ value: t.id, label: `${t.name} (${t.config.protocol}:${t.config.port})` }))} />
               </FormField>
               <div className="self-end">{listeners.length > 1 && <Button onClick={() => setListeners(listeners.filter((x) => x.key !== l.key))}>제거</Button>}</div>
@@ -345,15 +345,15 @@ function ListenerModal({ alb, listenerId, open, onClose }: { alb: Alb; listenerI
       <SpaceBetween size="m">
         {!binding && (
           <div className="grid gap-3 sm:grid-cols-2">
-            <FormField label="프로토콜">
+            <FormField help={{ docKey: "alb", field: "listenerProtocol" }} label="프로토콜">
               <SelectInput value={protocol} onChange={(v) => setProtocol(v as "HTTP" | "HTTPS")} options={[{ value: "HTTP", label: "HTTP" }, { value: "HTTPS", label: "HTTPS" }]} />
             </FormField>
-            <FormField label="포트">
+            <FormField help={{ docKey: "alb", field: "listenerPort" }} label="포트">
               <TextInput value={port} onChange={(e) => setPort(e.target.value)} inputMode="numeric" />
             </FormField>
           </div>
         )}
-        <FormField label="기본 작업: 전달 대상" description="같은 VPC에 있고 다른 로드 밸런서가 쓰지 않는 대상 그룹">
+        <FormField help={{ docKey: "alb", field: "defaultTargetGroup" }} label="기본 작업: 전달 대상" description="같은 VPC에 있고 다른 로드 밸런서가 쓰지 않는 대상 그룹">
           <SelectInput value={tgId} onChange={setTgId} placeholder="대상 그룹 선택" options={tgs.map((t) => ({ value: t.id, label: `${t.name} (${t.config.protocol}:${t.config.port})` }))} />
         </FormField>
         {error && <ErrorAlert message={error} />}
@@ -556,7 +556,7 @@ export function EditLbSecurityGroupsPage({ id }: { id: string }) {
     <SpaceBetween>
       <PageHeader title="보안 그룹 편집" description={alb.name} />
       <Container header={<ContainerHeader title="보안 그룹" />}>
-        <FormField label="보안 그룹" constraint="1~5개" error={error ?? undefined}>
+        <FormField help={{ docKey: "alb", field: "securityGroups" }} label="보안 그룹" constraint="1~5개" error={error ?? undefined}>
           <MultiSelect aria-label="보안 그룹" selected={selected} onChange={setSelected} max={5} options={groups.map((g) => ({ value: g.id, label: `${g.name} (${g.id})`, description: g.config.description }))} />
         </FormField>
       </Container>

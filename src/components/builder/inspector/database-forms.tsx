@@ -18,6 +18,7 @@ export function DbSubnetGroupForm({ group, ctx }: { group: ResourceOfType<"db-su
       <Section title="기본 설정">
         <TextField
           label="설명"
+          help="description"
           value={group.config.description}
           maxLength={255}
           onCommit={(v) => ctx.actions.updateConfig(group, { description: v }, "DB 서브넷 그룹 설명 변경")}
@@ -29,6 +30,7 @@ export function DbSubnetGroupForm({ group, ctx }: { group: ResourceOfType<"db-su
       <Section title="서브넷">
         <CheckList
           label="포함할 서브넷 (프라이빗 서브넷 권장)"
+          help="subnets"
           empty="서브넷이 없습니다."
           items={t.ofType("subnet").map((s) => {
             const compat = vpcCompatibility(ctx, group.id, s.id);
@@ -66,6 +68,7 @@ export function RdsForm({ rds, ctx }: { rds: ResourceOfType<"rds">; ctx: FormCon
       <Section title="데이터베이스 (가상)">
         <SelectField
           label="엔진"
+          help="engine"
           value={rds.config.engine}
           options={[
             { value: "mysql", label: "MySQL" },
@@ -79,12 +82,14 @@ export function RdsForm({ rds, ctx }: { rds: ResourceOfType<"rds">; ctx: FormCon
         />
         <SelectField
           label="인스턴스 클래스"
+          help="instanceClass"
           value={rds.config.instanceClass}
           options={RDS_INSTANCE_CLASSES.map((c) => ({ value: c, label: c }))}
           onChange={(v) => ctx.actions.updateConfig(rds, { instanceClass: v as typeof rds.config.instanceClass }, "인스턴스 클래스 변경")}
         />
         <NumberField
           label="포트"
+          help="port"
           value={rds.config.port}
           min={1150}
           max={65535}
@@ -93,6 +98,7 @@ export function RdsForm({ rds, ctx }: { rds: ResourceOfType<"rds">; ctx: FormCon
         />
         <NumberField
           label="스토리지 (GB)"
+          help="allocatedStorageGb"
           value={rds.config.allocatedStorageGb}
           min={20}
           max={65536}
@@ -100,6 +106,7 @@ export function RdsForm({ rds, ctx }: { rds: ResourceOfType<"rds">; ctx: FormCon
         />
         <SelectField
           label="가상 상태"
+          help="state"
           value={rds.config.state}
           options={[
             { value: "available", label: "Available" },
@@ -112,18 +119,21 @@ export function RdsForm({ rds, ctx }: { rds: ResourceOfType<"rds">; ctx: FormCon
       <Section title="네트워크">
         <SelectField
           label="DB 서브넷 그룹"
+          help="dbSubnetGroup"
           value={group?.id ?? ""}
           options={[{ value: "", label: "선택 안 함" }, ...t.ofType("db-subnet-group").map((g) => ({ value: g.id, label: g.name }))]}
           onChange={(v) => ctx.actions.setRelation(rds.id, "rds-db-subnet-group", v || null, "DB 서브넷 그룹 변경")}
         />
         <SwitchField
           label="Publicly Accessible"
+          help="publiclyAccessible"
           description="켜면 외부에서 엔드포인트가 퍼블릭 IP로 해석됩니다. 실제 접근은 퍼블릭 서브넷 경로와 보안 그룹에 따라 결정됩니다."
           checked={rds.config.publiclyAccessible}
           onChange={(v) => ctx.actions.updateConfig(rds, { publiclyAccessible: v }, "Publicly Accessible 변경")}
         />
         <SwitchField
           label="Multi-AZ"
+          help="multiAz"
           description="다른 가용 영역에 대기 인스턴스를 둡니다 (연결 시뮬레이션에는 영향 없음)."
           checked={rds.config.multiAz}
           onChange={(v) => ctx.actions.updateConfig(rds, { multiAz: v }, "Multi-AZ 변경")}
@@ -149,6 +159,7 @@ export function RdsForm({ rds, ctx }: { rds: ResourceOfType<"rds">; ctx: FormCon
       <Section title={`보안 그룹 (${sgIds.size})`}>
         <CheckList
           label="DB 보안 그룹"
+          help="securityGroups"
           empty="보안 그룹이 없습니다."
           items={t.ofType("security-group").map((g) => {
             const compat = vpcCompatibility(ctx, rds.id, g.id);

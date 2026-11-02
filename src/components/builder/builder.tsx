@@ -10,7 +10,7 @@ import { ImportDialog } from "@/components/app/import-dialog";
 import { Button } from "@/components/ui/button";
 import type { ResourceType } from "@/lib/engine/resource-models";
 import { exportFileName, exportProjectJson } from "@/lib/project/serialization";
-import { useEditorStore } from "@/lib/store/editor-store";
+import { useEditorStore, type InspectorDoc } from "@/lib/store/editor-store";
 import { useProjectStore } from "@/lib/store/project-store";
 import { downloadTextFile } from "@/lib/ui/download";
 import { analyzeProject, AnalysisProvider } from "@/components/console/analysis-context";
@@ -18,6 +18,7 @@ import { ArchitectureCanvas, type CanvasCommands } from "./canvas/architecture-c
 import { Inspector } from "./inspector/inspector";
 import { Palette } from "./palette";
 import { BottomPanel } from "./panels/bottom-panel";
+import { notifyHistory } from "./history-toast";
 import { BuilderToolbar } from "./toolbar";
 
 function isTypingTarget(target: EventTarget | null): boolean {
@@ -33,6 +34,9 @@ export function Builder({ projectId }: { projectId: string }) {
   const log = useProjectStore((s) => s.log);
   const resetEditor = useEditorStore((s) => s.reset);
   const selectedCount = useEditorStore((s) => s.selectedResourceIds.length + s.selectedConnectionIds.length);
+  const inspectorDoc = useEditorStore((s) => s.inspectorDoc);
+  const fieldNonce = useEditorStore((s) => s.fieldFocus?.nonce ?? null);
+  const showDoc = useEditorStore((s) => s.showDoc);
   const commandsRef = useRef<CanvasCommands | null>(null);
   const [revalidateNonce, setRevalidateNonce] = useState(0);
   const [expanded, setExpanded] = useState(false);
@@ -49,11 +53,21 @@ export function Builder({ projectId }: { projectId: string }) {
     return analyzeProject(project);
   }, [project, revalidateNonce]);
 
-  // 작은 화면에서는 리소스를 선택하면 설정 패널을 연다
+  // 작은 화면에서는 리소스를 선택하거나 설명·설정 항목을 열면 오른쪽 패널을 연다
   const [prevSelected, setPrevSelected] = useState(selectedCount);
   if (selectedCount !== prevSelected) {
     setPrevSelected(selectedCount);
     if (selectedCount > 0) setRightOpen(true);
+  }
+  const [prevDoc, setPrevDoc] = useState(inspectorDoc);
+  if (inspectorDoc !== prevDoc) {
+    setPrevDoc(inspectorDoc);
+    if (inspectorDoc) setRightOpen(true);
+  }
+  const [prevFieldNonce, setPrevFieldNonce] = useState(fieldNonce);
+  if (fieldNonce !== prevFieldNonce) {
+    setPrevFieldNonce(fieldNonce);
+    if (fieldNonce !== null) setRightOpen(true);
   }
 
   useEffect(() => {
@@ -64,10 +78,10 @@ export function Builder({ projectId }: { projectId: string }) {
       const key = e.key.toLowerCase();
       if (key === "z" && !e.shiftKey) {
         e.preventDefault();
-        if (!undo(projectId)) toast.info("실행 취소할 작업이 없습니다.");
+        notifyHistory(undo(projectId), "undo");
       } else if ((key === "z" && e.shiftKey) || key === "y") {
         e.preventDefault();
-        if (!redo(projectId)) toast.info("다시 실행할 작업이 없습니다.");
+        notifyHistory(redo(projectId), "redo");
       }
     };
     window.addEventListener("keydown", onKey);
@@ -76,6 +90,12 @@ export function Builder({ projectId }: { projectId: string }) {
 
   const onAdd = (type: ResourceType) => {
     commandsRef.current?.addAtCenter(type);
+    setLeftOpen(false);
+  };
+
+  // 팔레트의 설명 버튼: 보던 리소스를 기억해 두고(돌아가기용) 설명을 연다
+  const onInfo = (doc: InspectorDoc) => {
+    showDoc({ ...doc, from: useEditorStore.getState().selectedResourceIds[0] ?? null });
     setLeftOpen(false);
   };
 
@@ -101,7 +121,7 @@ export function Builder({ projectId }: { projectId: string }) {
               )}
               aria-label="리소스 팔레트"
             >
-              <Palette onAdd={onAdd} />
+              <Palette onAdd={onAdd} onInfo={onInfo} />
             </aside>
             <div className="flex min-w-0 flex-1 flex-col">
               <div className="relative min-h-0 flex-1">
@@ -124,16 +144,16 @@ export function Builder({ projectId }: { projectId: string }) {
                 "w-80 shrink-0 flex-col border-l bg-background xl:w-96 lg:static lg:flex",
                 rightOpen ? "absolute inset-y-0 right-0 z-30 flex shadow-xl" : "hidden",
               )}
-              aria-label="설정 패널"
+              aria-label="설명·설정 패널"
             >
               <div className="flex h-9 items-center justify-between border-b px-3 lg:hidden">
-                <span className="text-xs font-semibold">설정</span>
+                <span className="text-xs font-semibold">설명 · 설정</span>
                 <Button variant="ghost" size="icon-xs" onClick={() => setRightOpen(false)} aria-label="설정 패널 닫기">
                   <X />
                 </Button>
               </div>
               <div className="min-h-0 flex-1">
-                <Inspector projectId={projectId} />
+                <Inspector projectId={projectId} onAdd={onAdd} />
               </div>
             </aside>
           </div>

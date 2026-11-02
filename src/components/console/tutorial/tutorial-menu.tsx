@@ -8,7 +8,7 @@ import { useProject } from "../console-context";
 import { navButton } from "../shell/nav-styles";
 import { Button, type ButtonVariant } from "../ui/button";
 import { useTutorialStore } from "./tutorial-store";
-import { tutorialById, tutorialProgress, TUTORIALS } from "./tutorials";
+import { resumeStepIndex, tutorialById, tutorialProgress, TUTORIALS } from "./tutorials";
 
 const menuItem =
   "flex cursor-pointer flex-col items-start gap-0.5 rounded-lg px-3 py-2.5 text-[15px] outline-none data-[highlighted]:bg-aws-info-bg data-[highlighted]:text-aws-link-hover";
@@ -31,7 +31,7 @@ export function TutorialMenu() {
           {TUTORIALS.map((t) => {
             const progress = tutorialProgress(t, ctx);
             return (
-              <Menu_.Item key={t.id} className={menuItem} onSelect={() => useTutorialStore.getState().start(t.id)}>
+              <Menu_.Item key={t.id} className={menuItem} onSelect={() => useTutorialStore.getState().start(t.id, resumeStepIndex(t, ctx))}>
                 <span className="font-bold">
                   {t.title} <span className="font-normal text-aws-text-2">· 약 {t.minutes}분</span>
                 </span>
@@ -39,6 +39,7 @@ export function TutorialMenu() {
                 {progress.total > 0 && (
                   <span className="text-[13px] font-bold text-aws-success">
                     진행 {progress.done}/{progress.total}
+                    {progress.done > 0 && progress.done < progress.total && " · 남은 단계부터 이어서"}
                   </span>
                 )}
               </Menu_.Item>
@@ -64,10 +65,11 @@ export function StartTutorialButton({ tutorialId, variant = "normal", label }: {
   const { topology } = useAnalysis();
   const tutorial = tutorialById(tutorialId);
   if (!tutorial) return null;
-  const progress = tutorialProgress(tutorial, { project, topo: topology });
+  const ctx = { project, topo: topology };
+  const progress = tutorialProgress(tutorial, ctx);
   const text = label ?? (progress.done > 0 && progress.done < progress.total ? "튜토리얼 이어서 하기" : "튜토리얼 시작");
   return (
-    <Button variant={variant} onClick={() => useTutorialStore.getState().start(tutorialId)}>
+    <Button variant={variant} onClick={() => useTutorialStore.getState().start(tutorialId, resumeStepIndex(tutorial, ctx))}>
       {text}
     </Button>
   );

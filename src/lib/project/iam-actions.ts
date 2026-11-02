@@ -2,7 +2,9 @@
  * 가상 IAM 콘솔 동작. 실제 자격 증명을 만들지 않는다.
  * 액세스 키는 PGSIM으로 시작하는 가상 값이며, 비밀 키는 만들 때 한 번만 돌려주고 저장하지 않는다.
  */
-import { checkPolicyDocument, managedPolicy, policyAttachments } from "@/lib/engine/iam-engine";
+import { checkPolicyDocument, evaluateIam, managedPolicy, policyAttachments, roleArn } from "@/lib/engine/iam-engine";
+import { actingIdentity, actingLabel, actingPrincipal } from "@/lib/engine/iam-session";
+import { roleTemplate, templatePolicyDocument, type RoleTemplate } from "@/lib/engine/iam-templates";
 import { createId } from "@/lib/engine/ids";
 import type { IamAccessKey, IamGroup, IamPolicy, IamRole, IamUser, Project, ResourceOfType, Services } from "@/lib/engine/resource-models";
 import { awsFail, type ActionResult } from "./console-actions";
@@ -71,7 +73,9 @@ export function deleteUser(project: Project, userId: string): ActionResult {
     user.accessKeys.length ? `액세스 키 ${user.accessKeys.length}개를 함께 삭제했습니다.` : null,
     user.groupIds.length ? `그룹 ${user.groupIds.length}개에서 제거했습니다.` : null,
   ].filter((n): n is string => !!n);
-  return ok(withIam(project, (iam) => ({ ...iam, users: iam.users.filter((u) => u.id !== userId) })), notes);
+  const signedIn = project.services.iam.session?.kind === "user" && project.services.iam.session.id === userId;
+  if (signedIn) notes.push("지금 로그인한 사용자를 삭제해 로그아웃되었습니다 (루트 사용자로 돌아감).");
+  return ok(withIam(project, (iam) => ({ ...iam, users: iam.users.filter((u) => u.id !== userId), session: signedIn ? null : iam.session })), notes);
 }
 
 export function setUserPolicies(project: Project, userId: string, policyIds: string[]): ActionResult {
@@ -259,7 +263,11 @@ export function deleteRole(project: Project, roleId: string): ActionResult {
   if (users.length) {
     return awsFail("DeleteConflict", `역할 ${role.name}이(가) 인스턴스 ${users.map((u) => u.id).join(", ")}에 연결되어 있습니다.`, "인스턴스의 IAM 역할을 먼저 해제하세요.");
   }
-  return ok(withIam(project, (iam) => ({ ...iam, roles: iam.roles.filter((r) => r.id !== roleId) })));
+  const signedIn = project.services.iam.session?.kind === "role" && project.services.iam.session.id === roleId;
+  return ok(
+    withIam(project, (iam) => ({ ...iam, roles: iam.roles.filter((r) => r.id !== roleId), session: signedIn ? null : iam.session })),
+    signedIn ? ["지금 전환한 역할을 삭제해 로그아웃되었습니다 (루트 사용자로 돌아감)."] : [],
+  );
 }
 
 /** EC2 인스턴스에 IAM 역할(인스턴스 프로파일) 연결/해제 */
@@ -313,4 +321,130 @@ export function deletePolicy(project: Project, policyId: string): ActionResult {
   const count = a.users.length + a.groups.length + a.roles.length;
   if (count) return awsFail("DeleteConflict", `정책 ${policy.name}이(가) 사용자·그룹·역할 ${count}곳에 연결되어 있습니다.`, "연결된 엔터티 탭에서 먼저 분리하세요.");
   return ok(withIam(project, (iam) => ({ ...iam, policies: iam.policies.filter((p) => p.id !== policyId) })));
+}
+
+// ---------------------------------------------------------------- 자격 증명 전환 (가상 로그인)
+
+function withSession(project: Project, session: Services["iam"]["session"]): Project {
+  return { ...project, services: { ...project.services, iam: { ...project.services.iam, session } } };
+}
+
+/** 루트 사용자로 돌아간다 (가상 로그아웃 후 루트로 로그인). 샌드박스 주인이라 언제든 가능하다 */
+export function signInAsRoot(project: Project): Project {
+  return project.services.iam.session ? withSession(project, null) : project;
+}
+
+/** IAM 사용자로 (가상) 로그인한다. AWS처럼 콘솔 액세스(로그인 프로필)가 있는 사용자만 가능하다 */
+export function signInAsUser(project: Project, userId: string): ActionResult {
+  const user = findUser(project, userId);
+  if (!user) return awsFail("NoSuchEntity", "사용자를 찾을 수 없습니다.");
+  if (!user.consoleAccess) {
+    return awsFail(
+      "NoSuchEntity",
+      `사용자 ${user.name}에게 콘솔 로그인 프로필이 없어 콘솔에 로그인할 수 없습니다.`,
+      "사용자 상세 화면의 '보안 자격 증명'에서 콘솔 액세스를 켜세요. 액세스 키만 있는 사용자는 CLI·SDK용입니다.",
+    );
+  }
+  return ok(withSession(project, { kind: "user", id: user.id, sourceUserId: null }), [`IAM 사용자 ${user.name}(으)로 로그인했습니다 (가상).`]);
+}
+
+/**
+ * 역할로 전환한다 (Switch role).
+ * - 역할의 신뢰 정책이 이 계정을 신뢰해야 한다 (EC2 같은 서비스용 역할은 사람이 전환할 수 없다).
+ * - AWS 규칙대로 루트 사용자는 역할로 전환할 수 없고, IAM 사용자·역할은 sts:AssumeRole 권한이 필요하다.
+ */
+export function switchToRole(project: Project, roleId: string): ActionResult {
+  const role = project.services.iam.roles.find((r) => r.id === roleId);
+  if (!role) return awsFail("NoSuchEntity", "역할을 찾을 수 없습니다.");
+  if (role.trustedEntity !== "account") {
+    return awsFail(
+      "AccessDenied",
+      `역할 ${role.name}은(는) ${role.trustedEntity}만 신뢰하므로 사람이 전환할 수 없습니다.`,
+      "신뢰할 수 있는 엔터티가 'AWS 계정'인 역할만 전환할 수 있습니다. EC2용 역할은 인스턴스에 연결해 씁니다.",
+    );
+  }
+  const identity = actingIdentity(project);
+  const principal = actingPrincipal(identity);
+  if (!principal) {
+    return awsFail("AccessDenied", "루트 사용자는 역할로 전환할 수 없습니다 (AWS 규칙).", "IAM 사용자로 로그인한 뒤 역할로 전환하세요.");
+  }
+  const decision = evaluateIam(project, principal, "sts:AssumeRole", roleArn(role.name));
+  if (decision.decision !== "allowed") {
+    return awsFail(
+      "AccessDenied",
+      `${actingLabel(identity)}에게 역할 ${role.name}로 전환할 권한(sts:AssumeRole)이 없습니다.`,
+      `sts:AssumeRole을 Resource ${roleArn(role.name)}에 허용하는 정책을 연결하세요.`,
+    );
+  }
+  const sourceUserId = identity.kind === "user" ? identity.user.id : identity.kind === "role" ? (identity.sourceUser?.id ?? null) : null;
+  return ok(withSession(project, { kind: "role", id: role.id, sourceUserId }), [`역할 ${role.name}(으)로 전환했습니다 (가상).`]);
+}
+
+/** 역할에서 원래 IAM 사용자로 돌아간다 (원래 사용자가 없으면 루트) */
+export function switchBack(project: Project): Project {
+  const identity = actingIdentity(project);
+  if (identity.kind !== "role") return project;
+  return withSession(project, identity.sourceUser ? { kind: "user", id: identity.sourceUser.id, sourceUserId: null } : null);
+}
+
+// ---------------------------------------------------------------- 학교 역할 템플릿
+
+/** 서버 운영자 템플릿과 함께 만드는 예시 EC2 역할 (iam:PassRole을 이름으로 제한한 것을 확인하는 용도) */
+export const SCHOOL_EC2_ROLE_NAME = "School-Ec2-S3ReadOnly";
+
+/**
+ * 템플릿마다 정책·그룹(+예시 사용자)을 만든다. 이미 같은 이름이 있으면 다시 만들지 않고 연결만 맞춘다.
+ * 예시 사용자는 콘솔 액세스가 켜진 상태로 만들어 바로 '자격 증명 전환'으로 로그인해 볼 수 있다 (가상, 암호 없음).
+ */
+export function applyRoleTemplates(project: Project, templateIds: string[], options: { createUsers: boolean }): ActionResult {
+  const templates = templateIds.map((id) => roleTemplate(id)).filter((t): t is RoleTemplate => !!t);
+  if (!templates.length) return awsFail("ValidationError", "만들 역할 템플릿을 하나 이상 고르세요.");
+  let p = project;
+  const notes: string[] = [];
+  for (const t of templates) {
+    let policyId = t.managedPolicyId ?? null;
+    if (t.policyName) {
+      const existing = p.services.iam.policies.find((x) => sameName(x.name, t.policyName!));
+      if (existing) policyId = existing.id;
+      else {
+        const r = createPolicy(p, { name: t.policyName, description: `학교 역할 템플릿: ${t.title}`, document: templatePolicyDocument(t) ?? "" });
+        if (!r.ok) return r;
+        p = r.project;
+        policyId = r.createdId ?? null;
+        notes.push(`정책 ${t.policyName}`);
+      }
+    }
+    let group = p.services.iam.groups.find((g) => sameName(g.name, t.groupName));
+    if (!group) {
+      const r = createGroup(p, { name: t.groupName, policyIds: policyId ? [policyId] : [], userIds: [] });
+      if (!r.ok) return r;
+      p = r.project;
+      group = p.services.iam.groups.find((g) => g.id === r.createdId)!;
+      notes.push(`그룹 ${t.groupName}`);
+    } else if (policyId && !group.policyIds.includes(policyId)) {
+      const r = setGroupPolicies(p, group.id, [...group.policyIds, policyId]);
+      if (!r.ok) return r;
+      p = r.project;
+    }
+    if (options.createUsers) {
+      const user = p.services.iam.users.find((u) => sameName(u.name, t.exampleUser));
+      if (!user) {
+        const r = createUser(p, { name: t.exampleUser, groupIds: [group.id], policyIds: [], consoleAccess: true });
+        if (!r.ok) return r;
+        p = r.project;
+        notes.push(`사용자 ${t.exampleUser}`);
+      } else if (!user.groupIds.includes(group.id)) {
+        const r = setUserGroups(p, user.id, [...user.groupIds, group.id]);
+        if (!r.ok) return r;
+        p = r.project;
+      }
+    }
+    if (t.id === "server-operator" && !p.services.iam.roles.some((r) => sameName(r.name, SCHOOL_EC2_ROLE_NAME))) {
+      const r = createRole(p, { name: SCHOOL_EC2_ROLE_NAME, description: "학교 역할 템플릿: 서버 운영자가 인스턴스에 연결할 수 있는 EC2 역할 (S3 읽기)", trustedEntity: "ec2.amazonaws.com", policyIds: ["aws:AmazonS3ReadOnlyAccess"] });
+      if (!r.ok) return r;
+      p = r.project;
+      notes.push(`EC2 역할 ${SCHOOL_EC2_ROLE_NAME}`);
+    }
+  }
+  return ok(p, notes.length ? [`만든 항목: ${notes.join(", ")}`] : ["이미 모두 있어 새로 만든 항목이 없습니다."]);
 }

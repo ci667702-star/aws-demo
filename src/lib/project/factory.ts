@@ -185,6 +185,7 @@ export function defaultConfig<T extends ResourceType>(type: T, project: Project)
       httpResponseCode: 200,
       userData: "",
       iamRoleId: null,
+      sourceDestCheck: true,
     }),
     alb: () => ({ scheme: "internet-facing" as const, listeners: [newListener("HTTP", 80)], state: "active" as const }),
     "target-group": () => ({ protocol: "HTTP" as const, port: 80, healthCheck: { ...DEFAULT_HEALTH_CHECK } }),

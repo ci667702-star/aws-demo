@@ -6,10 +6,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ResourceIcon } from "@/components/resource-visuals";
 import { DEFAULT_COST_ASSUMPTIONS, estimateCost, resolveCostAssumptions } from "@/lib/engine/cost-engine";
+import { NatCostComparisonCard } from "@/components/docs/nat-cost-comparison";
 import type { CostAssumptions } from "@/lib/engine/resource-models";
 import { setCostAssumptions } from "@/lib/project/mutations";
 import { useProjectStore } from "@/lib/store/project-store";
-import { formatMoney } from "@/lib/ui/format";
+import { formatMoney, formatRate } from "@/lib/ui/format";
 import { useProjectActions } from "../inspector/use-project-actions";
 
 type NumberKey = {
@@ -170,7 +171,7 @@ export function CostPanel({ projectId }: { projectId: string }) {
                       <ul className="space-y-0.5">
                         {line.items.map((i) => (
                           <li key={i.label}>
-                            {i.label}: {i.quantity.toLocaleString()} {i.unit} × {formatMoney(i.rate)} = {formatMoney(i.amount)}
+                            {i.label}: {i.quantity.toLocaleString()} {i.unit} × {formatRate(i.rate)} = {formatMoney(i.amount)}
                           </li>
                         ))}
                         {line.note && <li>{line.note}</li>}
@@ -183,6 +184,7 @@ export function CostPanel({ projectId }: { projectId: string }) {
             </tbody>
           </table>
         )}
+        <NatCostComparisonCard project={project} assumptions={assumptions} className="mt-3" />
         <ul className="mt-3 list-disc space-y-0.5 pl-5 text-[11px] text-muted-foreground">
           {report.notes.map((n) => (
             <li key={n}>{n}</li>

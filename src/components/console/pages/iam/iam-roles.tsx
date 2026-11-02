@@ -3,11 +3,13 @@
 import { useState } from "react";
 import { roleArn, trustPolicyDocument } from "@/lib/engine/iam-engine";
 import type { IamRole } from "@/lib/engine/resource-models";
-import { createRole, deleteRole, instancesUsingRole, setRolePolicies } from "@/lib/project/iam-actions";
+import { actingIdentity } from "@/lib/engine/iam-session";
+import { createRole, deleteRole, instancesUsingRole, setRolePolicies, switchToRole } from "@/lib/project/iam-actions";
 import { formatDateTime } from "@/lib/ui/format";
 import { useProject, useRunAction } from "../../console-context";
 import { withHint } from "../../error-codes";
 import { href, navigate, resourceHref, useHashLocation } from "../../router";
+import { useSessionActions } from "../../shell/identity-menu";
 import { Alert, ErrorAlert } from "../../ui/alert";
 import { Button, ButtonLink } from "../../ui/button";
 import { FormActions, FormField, TextArea, TextInput, Tiles } from "../../ui/form";
@@ -142,7 +144,7 @@ export function CreateRolePage() {
         <>
           <Container header={<ContainerHeader title="역할 세부 정보" />}>
             <SpaceBetween size="m">
-              <FormField label="역할 이름" constraint="최대 64자. 영문자, 숫자, + = , . @ _ - 사용 가능">
+              <FormField help={{ docKey: "iam", field: "role" }} label="역할 이름" constraint="최대 64자. 영문자, 숫자, + = , . @ _ - 사용 가능">
                 <TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="예: web-server-s3-read" maxLength={64} />
               </FormField>
               <FormField label="설명" optional>
@@ -197,6 +199,7 @@ export function RoleDetailPage({ id }: { id: string }) {
   const role = project.services.iam.roles.find((r) => r.id === id);
   const [tab, setTab] = useQueryTab("permissions");
   const [editing, setEditing] = useState(false);
+  const act = useSessionActions();
   if (!role) {
     return (
       <Container>
@@ -207,7 +210,20 @@ export function RoleDetailPage({ id }: { id: string }) {
   const instances = instancesUsingRole(project, role.id);
   return (
     <SpaceBetween>
-      <PageHeader title={role.name} description={role.description || undefined} />
+      <PageHeader
+        title={role.name}
+        description={role.description || undefined}
+        actions={
+          role.trustedEntity === "account" &&
+          (actingIdentity(project).kind === "role" && project.services.iam.session?.id === role.id ? (
+            <Badge color="green">지금 이 역할로 작업 중</Badge>
+          ) : (
+            <Button onClick={() => act("역할 전환", (p) => switchToRole(p, role.id))} data-testid="switch-to-role">
+              이 역할로 전환 (Switch role)
+            </Button>
+          ))
+        }
+      />
       <Container header={<ContainerHeader title="요약" />}>
         <KeyValueGrid
           columns={3}

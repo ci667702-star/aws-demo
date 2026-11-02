@@ -10,6 +10,7 @@ import {
   type Connection,
   type RelationCategory,
   type Resource,
+  isRouteConnection,
 } from "@/lib/engine/resource-models";
 import { displayName, type SubnetKind, type Topology } from "@/lib/engine/topology-engine";
 import type { ValidationFinding } from "@/lib/engine/validation-engine";
@@ -24,6 +25,12 @@ export interface NodeBadge {
 
 export type PathState = "active" | "failed" | "pending" | null;
 
+/** 선택 강조: 선택한 리소스, 그와 직접 연결된 리소스, 나머지(흐리게) */
+export type FocusState = "focus" | "related" | "dim" | null;
+
+/** 이 배율보다 작게 보면 노드는 이름만 크게 보여 주고 선 라벨을 숨긴다 */
+export const COMPACT_ZOOM = 0.7;
+
 export interface ResourceNodeData extends Record<string, unknown> {
   resource: Resource;
   typeLabel: string;
@@ -33,6 +40,7 @@ export interface ResourceNodeData extends Record<string, unknown> {
   warnings: number;
   pathState: PathState;
   pathOrder: number | null;
+  focus?: FocusState;
 }
 
 export interface ZoneNodeData extends Record<string, unknown> {
@@ -49,6 +57,10 @@ export interface RelationEdgeData extends Record<string, unknown> {
   alwaysShowLabel: boolean;
   pathActive: boolean;
   faded: boolean;
+  /** 선택한 리소스에 닿는 선 (굵게, 라벨 표시) */
+  emphasized?: boolean;
+  /** 선택한 리소스와 관계없는 선 (아주 흐리게) */
+  dimmed?: boolean;
 }
 
 export type ResourceFlowNode = Node<ResourceNodeData, "resource">;
@@ -274,9 +286,7 @@ export { findFreePosition, type Rect } from "@/lib/project/layout";
 // ---------------------------------------------------------------- 연결선
 
 export function edgeLabel(c: Connection, topo: Topology): string {
-  if (c.relationType === "route-table-internet-gateway" || c.relationType === "route-table-nat-gateway") {
-    return c.metadata.destinationCidr;
-  }
+  if (isRouteConnection(c)) return c.metadata.destinationCidr;
   if (c.relationType === "alb-target-group") {
     const alb = topo.getOfType(c.sourceResourceId, "alb");
     const listener = alb?.config.listeners.find((l) => l.id === c.metadata.listenerId);
@@ -287,4 +297,32 @@ export function edgeLabel(c: Connection, topo: Topology): string {
 
 export function isMembershipEdge(c: Connection): boolean {
   return RELATION_SPECS[c.relationType].category === "membership";
+}
+
+/** 기본 NACL ↔ 서브넷: 모든 서브넷에 저절로 적용되므로 평소에는 선을 그리지 않는다 (선택하면 보인다) */
+export function isImplicitEdge(c: Connection, topo: Topology): boolean {
+  return c.relationType === "network-acl-subnet" && !!topo.getOfType(c.sourceResourceId, "network-acl")?.config.isDefault;
+}
+
+// ---------------------------------------------------------------- 선택 강조
+
+/** 선택한 리소스와 직접 연결된 리소스·연결선 */
+export function focusNeighborhood(connections: Connection[], focusIds: readonly string[]): { nodes: Set<string>; edges: Set<string> } {
+  const nodes = new Set(focusIds);
+  const edges = new Set<string>();
+  if (!focusIds.length) return { nodes, edges };
+  const focus = new Set(focusIds);
+  for (const c of connections) {
+    if (!focus.has(c.sourceResourceId) && !focus.has(c.targetResourceId)) continue;
+    edges.add(c.id);
+    nodes.add(c.sourceResourceId);
+    nodes.add(c.targetResourceId);
+  }
+  return { nodes, edges };
+}
+
+export function focusStateOf(id: string, focusIds: readonly string[], neighborhood: { nodes: Set<string> }): FocusState {
+  if (!focusIds.length) return null;
+  if (focusIds.includes(id)) return "focus";
+  return neighborhood.nodes.has(id) ? "related" : "dim";
 }

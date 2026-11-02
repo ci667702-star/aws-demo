@@ -114,6 +114,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: "역할", path: "/iam/roles", count: (_t, p) => p.services.iam.roles.length },
       { label: "정책", path: "/iam/policies" },
       { label: "정책 시뮬레이터", path: "/iam/simulator" },
+      { label: "학교 역할 템플릿", path: "/iam/templates" },
     ],
   },
   {

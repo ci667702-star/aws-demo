@@ -162,13 +162,13 @@ export function CreateSecurityGroupPage({ base = "/vpc" }: { base?: "/vpc" | "/e
       <PageGuide topic="security-group" />
       <Container header={<ContainerHeader title="기본 세부 정보" />}>
         <SpaceBetween size="m">
-          <FormField label="보안 그룹 이름" constraint="만든 후에는 이름을 편집할 수 없습니다. 'default'나 'sg-'로 시작하는 이름은 쓸 수 없습니다.">
+          <FormField help={{ docKey: "security-group", field: "name" }} label="보안 그룹 이름" constraint="만든 후에는 이름을 편집할 수 없습니다. 'default'나 'sg-'로 시작하는 이름은 쓸 수 없습니다.">
             <TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="예: web-sg" maxLength={255} />
           </FormField>
-          <FormField label="설명">
+          <FormField help={{ docKey: "security-group", field: "description" }} label="설명">
             <TextInput value={description} onChange={(e) => setDescription(e.target.value)} placeholder="예: 웹 서버용 HTTP 허용" maxLength={255} />
           </FormField>
-          <FormField label="VPC">
+          <FormField help={{ docKey: "security-group", field: "vpc" }} label="VPC">
             <SelectInput value={vpcId} onChange={setVpcId} placeholder="VPC 선택" options={vpcs.map((v) => ({ value: v.id, label: `${v.id} (${displayName(v)})` }))} />
           </FormField>
         </SpaceBetween>
@@ -429,10 +429,10 @@ export function CreateNaclPage() {
       <PageHeader title="네트워크 ACL 생성" info={<InfoLink topic="nacl" />} description="네트워크 ACL은 서브넷 단위의 상태 비저장 방화벽입니다." />
       <Container header={<ContainerHeader title="네트워크 ACL 설정" />}>
         <SpaceBetween size="m">
-          <FormField label="이름" optional>
+          <FormField help={{ docKey: "network-acl", field: "name" }} label="이름" optional>
             <TextInput value={name} onChange={(e) => setName(e.target.value)} maxLength={128} placeholder="my-network-acl-01" />
           </FormField>
-          <FormField label="VPC" error={error ?? undefined}>
+          <FormField help={{ docKey: "network-acl", field: "vpc" }} label="VPC" error={error ?? undefined}>
             <SelectInput value={vpcId} onChange={setVpcId} placeholder="VPC 선택" options={topo.ofType("vpc").map((v) => ({ value: v.id, label: `${v.id} (${displayName(v)})` }))} />
           </FormField>
           <Alert type="info">새 네트워크 ACL에는 규칙이 없어 모든 인바운드·아웃바운드 트래픽을 거부합니다. 서브넷과 연결하기 전에 필요한 규칙을 추가하세요.</Alert>

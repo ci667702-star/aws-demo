@@ -4,10 +4,14 @@
  * 프로젝트 스토어 (Zustand).
  * - 브라우저 저장소에서 프로젝트를 복원하고 변경 시 자동 저장한다 (디바운스).
  * - 모든 편집은 apply()를 통해 순수 변경 연산(console-actions.ts 등)을 실행하고 Undo/Redo 기록을 남긴다.
+ * - IAM 사용자·역할로 작업 중이면(가상 로그인) 변경 내용에 필요한 IAM 권한을 확인하고, 권한이 없으면 적용하지 않는다.
+ *   실행 취소·다시 실행도 같은 규칙으로 확인한다 (iam-permissions.ts).
  * - 첫 방문에도 예시 프로젝트를 만들어 두지 않는다. 사용자가 직접 샌드박스를 만들고 리소스를 구성한다.
  * - pending/provisioning/creating 상태의 리소스는 잠시 후 사용 가능 상태로 바뀐다 (lifecycle.ts).
  */
 import { create } from "zustand";
+import { authorizeChange } from "@/lib/engine/iam-permissions";
+import { templateOwnerOf } from "@/lib/engine/iam-templates";
 import type { Project, Viewport } from "@/lib/engine/resource-models";
 import { labById } from "@/lib/labs/labs";
 import { createEmptyProject } from "@/lib/project/factory";
@@ -30,6 +34,25 @@ interface History {
 }
 
 export type SaveStatus = "saved" | "pending" | "error" | "unavailable";
+
+/** 실행 취소·다시 실행 결과: 되돌릴 것이 없거나, 지금 자격 증명으로는 권한이 없어 거부될 수 있다 */
+export type HistoryResult = { ok: true } | { ok: false; reason: "empty" } | { ok: false; reason: "denied"; error: string; hint?: string };
+
+/** 변경을 지금 자격 증명(가상 로그인)으로 해도 되는지 확인한다. 거부되면 오류 결과 */
+function authorize(before: Project, after: Project, label: string): { ok: false; error: string; hint?: string } | null {
+  const auth = authorizeChange(before, after, label, (action) => templateOwnerOf(before, action));
+  return auth.ok ? null : { ok: false, error: auth.error, hint: auth.hint };
+}
+
+/** 기록에서 꺼낸 프로젝트에 지금 화면 설정과 로그인 상태를 유지한다 (실행 취소로 다른 사람으로 바뀌지 않게) */
+function restoreKeeping(snapshot: Project, current: Project): Project {
+  return {
+    ...snapshot,
+    viewport: current.viewport,
+    preferredMode: current.preferredMode,
+    services: { ...snapshot.services, iam: { ...snapshot.services.iam, session: current.services.iam.session ?? null } },
+  };
+}
 
 export interface ActivityEntry {
   id: string;
@@ -63,8 +86,8 @@ interface ProjectStoreState {
   /** 실행 취소 기록 없이 프로젝트를 갱신한다 (상태 전이, 분석 결과 기록 등). null을 돌려주면 변경하지 않는다. */
   updateWithoutHistory: (projectId: string, update: (project: Project) => Project | null) => boolean;
   setViewport: (projectId: string, viewport: Viewport) => void;
-  undo: (projectId: string) => boolean;
-  redo: (projectId: string) => boolean;
+  undo: (projectId: string) => HistoryResult;
+  redo: (projectId: string) => HistoryResult;
   log: (entry: Omit<ActivityEntry, "id" | "at">) => void;
   dismissLoadErrors: () => void;
 }
@@ -186,6 +209,11 @@ export const useProjectStore = create<ProjectStoreState>()((set, get) => {
         return result;
       }
       if (result.project === current) return result;
+      const denied = authorize(current, result.project, label);
+      if (denied) {
+        get().log({ projectId, kind: "error", message: `${label} 거부: ${denied.error}` });
+        return denied;
+      }
       set((s) => {
         const h = s.history[projectId] ?? { past: [], future: [] };
         return {
@@ -223,29 +251,39 @@ export const useProjectStore = create<ProjectStoreState>()((set, get) => {
     undo: (projectId) => {
       const h = get().history[projectId];
       const current = get().projects[projectId];
-      if (!h?.past.length || !current) return false;
-      const previous = h.past[h.past.length - 1];
+      if (!h?.past.length || !current) return { ok: false, reason: "empty" };
+      const previous = restoreKeeping(h.past[h.past.length - 1], current);
+      const denied = authorize(current, previous, "실행 취소");
+      if (denied) {
+        get().log({ projectId, kind: "error", message: `실행 취소 거부: ${denied.error}` });
+        return { ok: false, reason: "denied", error: denied.error, hint: denied.hint };
+      }
       set((s) => ({
-        projects: { ...s.projects, [projectId]: { ...previous, viewport: current.viewport, preferredMode: current.preferredMode } },
+        projects: { ...s.projects, [projectId]: previous },
         history: { ...s.history, [projectId]: { past: h.past.slice(0, -1), future: [current, ...h.future] } },
       }));
       get().log({ projectId, kind: "undo", message: "실행 취소" });
       scheduleSave();
-      return true;
+      return { ok: true };
     },
 
     redo: (projectId) => {
       const h = get().history[projectId];
       const current = get().projects[projectId];
-      if (!h?.future.length || !current) return false;
-      const next = h.future[0];
+      if (!h?.future.length || !current) return { ok: false, reason: "empty" };
+      const next = restoreKeeping(h.future[0], current);
+      const denied = authorize(current, next, "다시 실행");
+      if (denied) {
+        get().log({ projectId, kind: "error", message: `다시 실행 거부: ${denied.error}` });
+        return { ok: false, reason: "denied", error: denied.error, hint: denied.hint };
+      }
       set((s) => ({
-        projects: { ...s.projects, [projectId]: { ...next, viewport: current.viewport, preferredMode: current.preferredMode } },
+        projects: { ...s.projects, [projectId]: next },
         history: { ...s.history, [projectId]: { past: [...h.past, current], future: h.future.slice(1) } },
       }));
       get().log({ projectId, kind: "redo", message: "다시 실행" });
       scheduleSave();
-      return true;
+      return { ok: true };
     },
 
     log: (entry) => {

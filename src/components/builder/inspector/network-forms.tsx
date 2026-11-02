@@ -49,6 +49,7 @@ export function VpcForm({ vpc, ctx }: { vpc: ResourceOfType<"vpc">; ctx: FormCon
           value={vpc.config.cidr}
           mono
           testId="vpc-cidr"
+          help="cidr"
           validate={(v) => {
             const r = validateVpcCidr(v);
             return r.ok ? null : r.error;
@@ -61,20 +62,26 @@ export function VpcForm({ vpc, ctx }: { vpc: ResourceOfType<"vpc">; ctx: FormCon
         />
         <SwitchField
           label="DNS 확인 (enableDnsSupport)"
+          help="enableDnsSupport"
           description="VPC 안에서 Amazon 제공 DNS로 ALB/RDS 엔드포인트 이름을 해석합니다. 끄면 이름 기반 연결이 실패합니다."
           checked={vpc.config.enableDnsSupport}
           onChange={(v) => ctx.actions.updateConfig(vpc, { enableDnsSupport: v }, "DNS 확인 설정 변경")}
         />
         <SwitchField
           label="DNS 호스트 이름 (enableDnsHostnames)"
+          help="enableDnsHostnames"
           description="퍼블릭 IP가 있는 인스턴스에 DNS 이름을 부여합니다. Publicly Accessible RDS에 필요합니다."
           checked={vpc.config.enableDnsHostnames}
           onChange={(v) => ctx.actions.updateConfig(vpc, { enableDnsHostnames: v }, "DNS 호스트 이름 설정 변경")}
         />
+        <InfoRow label="기본 VPC" help="isDefault">
+          {vpc.config.isDefault ? "예 (기본 VPC)" : "아니요"}
+        </InfoRow>
       </Section>
       <Section title="연결">
         <SelectField
           label="Internet Gateway"
+          help="internetGateway"
           value={igw?.id ?? ""}
           options={[
             { value: "", label: "연결 안 함" },
@@ -88,6 +95,7 @@ export function VpcForm({ vpc, ctx }: { vpc: ResourceOfType<"vpc">; ctx: FormCon
         />
         <SelectField
           label="기본(main) 라우팅 테이블"
+          help="mainRouteTable"
           value={main?.id ?? ""}
           options={[
             { value: "", label: "지정 안 함 (local 경로만 있는 기본 테이블로 가정)" },
@@ -141,12 +149,14 @@ export function SubnetForm({ subnet, ctx }: { subnet: ResourceOfType<"subnet">; 
           options={vpcOptions(ctx, "VPC 선택 안 함")}
           onChange={(v) => ctx.actions.setRelation(subnet.id, "vpc-subnet", v || null, "서브넷 VPC 변경")}
           testId="subnet-vpc"
+          help="vpc"
         />
         <TextField
           label="IPv4 CIDR 블록"
           value={subnet.config.cidr}
           mono
           testId="subnet-cidr"
+          help="cidr"
           validate={(v) => {
             const r = validateSubnetCidr(v);
             return r.ok ? null : r.error;
@@ -163,12 +173,14 @@ export function SubnetForm({ subnet, ctx }: { subnet: ResourceOfType<"subnet">; 
         />
         <SelectField
           label="가용 영역"
+          help="availabilityZone"
           value={subnet.config.availabilityZone}
           options={azOptions}
           onChange={(v) => ctx.actions.updateConfig(subnet, { availabilityZone: v }, "가용 영역 변경")}
         />
         <SwitchField
           label="퍼블릭 IPv4 자동 할당"
+          help="mapPublicIpOnLaunch"
           description="이 서브넷에서 '서브넷 기본값'으로 시작한 EC2에 가상 퍼블릭 IP를 할당합니다. 퍼블릭 IP가 있어도 IGW 경로가 없으면 인터넷과 통신할 수 없습니다."
           checked={subnet.config.mapPublicIpOnLaunch}
           onChange={(v) => ctx.actions.updateConfig(subnet, { mapPublicIpOnLaunch: v }, "퍼블릭 IP 자동 할당 변경")}
@@ -192,6 +204,7 @@ export function SubnetForm({ subnet, ctx }: { subnet: ResourceOfType<"subnet">; 
           ]}
           onChange={(v) => ctx.actions.setRelation(subnet.id, "route-table-subnet", v || null, "라우팅 테이블 연결 변경")}
           testId="subnet-route-table"
+          help="routeTable"
         />
         <div className="overflow-hidden rounded-md border text-xs">
           <div className="bg-muted/50 px-2 py-1 font-medium text-muted-foreground">적용 중인 경로 — {t.routeTableLabel(routing.table)}</div>
@@ -205,6 +218,7 @@ export function SubnetForm({ subnet, ctx }: { subnet: ResourceOfType<"subnet">; 
         </div>
         <SelectField
           label="네트워크 ACL"
+          help="networkAcl"
           value={nacl?.id ?? ""}
           options={[
             { value: "", label: "기본 NACL (모든 트래픽 허용, 가정)" },
@@ -242,7 +256,11 @@ export function IgwForm({ igw, ctx }: { igw: ResourceOfType<"internet-gateway">;
           })}
           onChange={(v) => ctx.actions.setRelation(igw.id, "vpc-internet-gateway", v || null, "IGW 연결 변경")}
           testId="igw-vpc"
+          help="vpc"
         />
+        <InfoRow label="연결 상태" help="attachmentState">
+          {vpcId ? `Attached — ${t.name(vpcId)}` : "Detached (VPC에 연결 안 됨)"}
+        </InfoRow>
         <Callout>
           IGW는 VPC에 연결되어야 하며, 퍼블릭 IP가 있는 인터페이스에 대해 사설 IP ↔ 퍼블릭 IP 1:1 주소 변환을 수행합니다. 서브넷이 퍼블릭이 되려면 라우팅
           테이블에 이 IGW로 향하는 경로가 필요합니다.
@@ -290,6 +308,18 @@ export function RouteTableForm({ rt, ctx }: { rt: ResourceOfType<"route-table">;
         disabled: !!natVpc && !!vpcId && natVpc !== vpcId,
       };
     }),
+    // NAT 인스턴스로 쓰는 EC2도 경로 대상이 될 수 있다
+    ...t
+      .ofType("ec2")
+      .filter((e) => e.config.state !== "terminated")
+      .map((e) => {
+        const ec2Vpc = t.vpcOf(e.id);
+        return {
+          value: e.id,
+          label: `${displayName(e)} (인스턴스${t.subnetOf(e.id) ? `, ${t.name(t.subnetOf(e.id))}` : ", 미배치"})`,
+          disabled: !!ec2Vpc && !!vpcId && ec2Vpc !== vpcId,
+        };
+      }),
   ];
   const associated = new Set(t.outgoing(rt.id, "route-table-subnet").map((c) => c.targetResourceId));
   const subnetItems = t.ofType("subnet").map((s) => {
@@ -314,16 +344,18 @@ export function RouteTableForm({ rt, ctx }: { rt: ResourceOfType<"route-table">;
           value={vpcId ?? ""}
           options={vpcOptions(ctx, "VPC 선택 안 함")}
           onChange={(v) => ctx.actions.setRelation(rt.id, "vpc-route-table", v || null, "라우팅 테이블 VPC 변경")}
+          help="vpc"
         />
         <SwitchField
           label="VPC 기본(main) 라우팅 테이블"
+          help="main"
           description="명시적으로 연결되지 않은 서브넷이 이 테이블을 사용합니다."
           checked={rt.config.main}
           disabled={!vpcId}
           onChange={(v) => vpcId && ctx.actions.run("기본 라우팅 테이블 변경", (p) => setMainRouteTable(p, vpcId, v ? rt.id : null))}
         />
       </Section>
-      <Section title={`경로 (${routes.length + (vpc ? 1 : 0)})`}>
+      <Section title={`경로 (${routes.length + (vpc ? 1 : 0)})`} help="routes">
         <RoutesEditor
           localCidr={vpc?.config.cidr ?? null}
           routes={routes.map((r) => ({ connectionId: r.connectionId!, destination: r.destinationCidr, targetId: r.targetId ?? "" }))}
@@ -344,6 +376,7 @@ export function RouteTableForm({ rt, ctx }: { rt: ResourceOfType<"route-table">;
       <Section title={`연결된 서브넷 (${associated.size})`}>
         <CheckList
           label="서브넷 연결(Association)"
+          help="subnets"
           items={subnetItems}
           empty="서브넷이 없습니다."
           onToggle={(subnetId, checked) =>
@@ -363,10 +396,10 @@ export function EipForm({ eip, ctx }: { eip: ResourceOfType<"elastic-ip">; ctx: 
   const target = ctx.analysis.topology.elasticIpTarget(eip.id);
   return (
     <Section title="탄력적 IP">
-      <InfoRow label="퍼블릭 IPv4 (가상)" mono>
+      <InfoRow label="퍼블릭 IPv4 (가상)" mono help="publicIp">
         {eip.config.publicIp}
       </InfoRow>
-      <InfoRow label="연결 대상">{target ? <ResourceLink ctx={ctx} id={target.id} /> : "연결 안 됨"}</InfoRow>
+      <InfoRow label="연결 대상" help="association">{target ? <ResourceLink ctx={ctx} id={target.id} /> : "연결 안 됨"}</InfoRow>
       <Callout>
         탄력적 IP는 바뀌지 않는 고정 퍼블릭 주소입니다. 캔버스에서 EC2 또는 NAT Gateway와 선으로 이으면 연결됩니다. 실제 공인 IP가 아니라 문서용 대역(198.51.100.0/24)의
         가상 주소입니다.
@@ -385,6 +418,7 @@ export function NatForm({ nat, ctx }: { nat: ResourceOfType<"nat-gateway">; ctx:
       <Section title="배치 및 상태">
         <SelectField
           label="서브넷 (퍼블릭 서브넷 권장)"
+          help="subnet"
           value={subnetId ?? ""}
           options={[
             { value: "", label: "배치 안 함" },
@@ -397,6 +431,7 @@ export function NatForm({ nat, ctx }: { nat: ResourceOfType<"nat-gateway">; ctx:
         )}
         <SelectField
           label="가상 상태"
+          help="state"
           value={nat.config.state}
           options={[
             { value: "available", label: "Available" },
@@ -408,7 +443,7 @@ export function NatForm({ nat, ctx }: { nat: ResourceOfType<"nat-gateway">; ctx:
         />
       </Section>
       <Section title="주소 (가상)">
-        <InfoRow label="가상 Elastic IP" mono>
+        <InfoRow label="가상 Elastic IP" mono help="elasticIp">
           {eni?.publicIp != null ? formatIpv4(eni.publicIp) : "-"}
         </InfoRow>
         <InfoRow label="사설 IP" mono>

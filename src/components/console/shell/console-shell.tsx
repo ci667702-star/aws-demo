@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronRight } from "lucide-react";
+import { BookOpen, ChevronRight } from "lucide-react";
 import { cn } from "cn";
 import { useEffect, useState } from "react";
 import { DISCLAIMER } from "@/components/app/brand";
@@ -12,6 +12,8 @@ import { serviceItemName } from "../service-names";
 import { AlarmWatcher } from "../pages/cloudwatch/cw-overview";
 import { TutorialHost } from "../tutorial/tutorial-host";
 import { SideNav } from "./side-nav";
+import { docTargetForPath } from "./resource-doc-tab";
+import { IdentityBanner } from "./identity-menu";
 import { ToolsPanel } from "./tools-panel";
 import { TopNav } from "./top-nav";
 
@@ -37,6 +39,8 @@ export function ConsoleShell() {
   const setNavOpen = useConsoleUi((s) => s.setNavOpen);
   const toolsOpen = useConsoleUi((s) => s.toolsOpen);
   const setToolsOpen = useConsoleUi((s) => s.setToolsOpen);
+  const toolsTab = useConsoleUi((s) => s.toolsTab);
+  const openResourceDoc = useConsoleUi((s) => s.openResourceDoc);
   const desktop = useIsDesktop();
   const resolved = resolveRoute(location.segments);
   // IAM·S3·CloudWatch 항목은 ID 대신 이름을 보여 준다
@@ -76,6 +80,7 @@ export function ConsoleShell() {
   return (
     <div className="flex min-h-dvh flex-col bg-aws-page text-aws-text">
       <TopNav />
+      <IdentityBanner />
       <div className="relative flex min-h-0 flex-1">
         {navOpen && (
           <>
@@ -92,7 +97,19 @@ export function ConsoleShell() {
         )}
         <main className="flex min-w-0 flex-1 flex-col" id="console-main">
           <div className={cn("mx-auto flex w-full flex-1 flex-col gap-5 px-4 py-6 sm:px-6 lg:px-10", route.fullWidth ? "max-w-none" : "max-w-[1240px]")}>
-            <Breadcrumbs crumbs={route.crumbs} />
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <Breadcrumbs crumbs={route.crumbs} />
+              {docTargetForPath(project, location.segments) && !(toolsOpen && toolsTab === "resource") && (
+                <button
+                  type="button"
+                  onClick={openResourceDoc}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-aws-border px-3 py-1 text-[13px] font-bold text-aws-link hover:border-aws-link hover:bg-aws-info-bg"
+                  data-testid="open-resource-doc"
+                >
+                  <BookOpen className="size-4" aria-hidden /> 이 화면의 리소스 설명
+                </button>
+              )}
+            </div>
             <div className="flex-1" key={location.path} data-tour="page-content">
               {route.element}
             </div>
