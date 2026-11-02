@@ -25,6 +25,7 @@ import {
   simulateWithTopology,
   type SimulationResult,
 } from "./connectivity-engine";
+import { hasNatSoftware, natInstanceScript, natInstanceUsages } from "./nat-instance";
 import { evaluateNacl, findShadowedRules, describeNaclRule } from "./network-acl-engine";
 import { AVAILABILITY_ZONES, type NaclRule, type Project, type SgRule } from "./resource-models";
 import { findDuplicateDestinations } from "./route-engine";
@@ -457,7 +458,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
             cause: `${cls.reason}${instances.length ? ` 이 서브넷의 EC2 ${instances.map((i) => displayName(i)).join(", ")}은(는) 외부와 통신할 수 없습니다.` : ""}`,
             condition: "서브넷 라우팅 테이블에 IGW/NAT 경로 없음",
             fix: [
-              "외부 통신이 필요한 프라이빗 서브넷: 퍼블릭 서브넷에 NAT Gateway를 만들고 0.0.0.0/0 → NAT 경로를 추가하세요.",
+              "외부 통신이 필요한 프라이빗 서브넷: 퍼블릭 서브넷에 NAT Gateway(비용을 줄이려면 NAT 인스턴스)를 만들고 0.0.0.0/0 → NAT 경로를 추가하세요.",
               "인터넷에 직접 노출할 서브넷: 0.0.0.0/0 → Internet Gateway 경로를 추가하세요.",
             ],
             impact: "경로를 추가하면 'EC2 → 인터넷' 시뮬레이션이 NAT 또는 IGW를 거쳐 성공하게 됩니다.",
@@ -1135,6 +1136,195 @@ export const VALIDATION_RULES: ValidationRule[] = [
           fix: ["대상 등록을 해제하세요."],
           impact: "등록을 해제하면 대상 상태 목록이 실제 사용 가능한 대상만 보여줍니다.",
         })),
+  },
+
+  // ------------------------------------------------------------ NAT 인스턴스 (경로 대상이 된 EC2)
+  {
+    id: "EC2-006",
+    category: "compute",
+    severity: "error",
+    title: "소스/대상 확인이 켜진 NAT 인스턴스",
+    concept:
+      "인스턴스는 기본적으로 자기 주소가 출발지나 목적지가 아닌 트래픽을 버립니다(소스/대상 확인). NAT 인스턴스처럼 다른 리소스의 트래픽을 전달하는 인스턴스는 이 기능을 꺼야 합니다.",
+    check: ({ topo }) =>
+      natInstanceUsages(topo)
+        .filter((u) => u.ec2.config.state !== "terminated" && u.ec2.config.sourceDestCheck !== false)
+        .map((u) => ({
+          key: u.ec2.id,
+          resourceIds: [u.ec2.id, ...u.routeTableIds],
+          cause: `${displayName(u.ec2)}은(는) ${u.routeLabels.join(", ")} 경로의 대상이지만 소스/대상 확인이 켜져 있어, 프라이빗 서브넷에서 온 트래픽을 버립니다.`,
+          condition: `${displayName(u.ec2)}.sourceDestCheck = 켜짐`,
+          fix: ["심화 모드: EC2 → 인스턴스 → 작업 → 네트워킹 → '소스/대상 확인 변경'에서 중지하세요.", "쉬운 모드: 인스턴스 설정의 '소스/대상 확인' 스위치를 끄세요."],
+          impact: "끄면 이 인스턴스가 프라이빗 서브넷의 트래픽을 받아 인터넷으로 전달할 수 있습니다.",
+        })),
+  },
+  {
+    id: "EC2-007",
+    category: "compute",
+    severity: "error",
+    title: "NAT 설정(IP 포워딩·MASQUERADE)이 없는 NAT 인스턴스",
+    concept:
+      "NAT 인스턴스는 운영체제 안에서 IP 포워딩을 켜고 iptables MASQUERADE로 출발지 주소를 자기 주소로 바꿔야 합니다. 실제 운영체제는 실행되지 않으므로, 이 시뮬레이터는 사용자 데이터 스크립트에 두 설정이 들어 있는지로 판단합니다.",
+    check: ({ topo }) =>
+      natInstanceUsages(topo)
+        .filter((u) => u.ec2.config.state !== "terminated" && !hasNatSoftware(u.ec2.config.userData))
+        .map((u) => {
+          const missing = [
+            /ip_forward\s*=\s*1/.test(u.ec2.config.userData) ? null : "IP 포워딩(net.ipv4.ip_forward=1)",
+            /MASQUERADE/.test(u.ec2.config.userData) ? null : "iptables MASQUERADE",
+          ].filter((x): x is string => !!x);
+          return {
+            key: u.ec2.id,
+            resourceIds: [u.ec2.id],
+            cause: `${displayName(u.ec2)}은(는) 경로의 대상이지만 사용자 데이터에 ${missing.join("과 ")} 설정이 없어 받은 트래픽을 전달하지 못합니다.`,
+            condition: "사용자 데이터에 NAT 설정 없음",
+            fix: natInstanceScript(u.ec2.config.ami)
+              ? ["심화 모드: 인스턴스를 중지한 뒤 '사용자 데이터 편집'에서 템플릿 'NAT 인스턴스'를 넣으세요.", "쉬운 모드: 인스턴스 설정의 'NAT 설정 스크립트 넣기'를 누르세요."]
+              : ["Windows 인스턴스는 NAT 인스턴스로 쓰지 않습니다. Amazon Linux 2023 인스턴스를 NAT 인스턴스로 사용하세요."],
+            impact: "설정이 들어가면 인스턴스가 받은 트래픽의 출발지를 자기 주소로 바꿔 인터넷으로 내보냅니다.",
+          };
+        }),
+  },
+  {
+    id: "EC2-008",
+    category: "compute",
+    severity: "error",
+    title: "퍼블릭 서브넷에 있지 않은 NAT 인스턴스",
+    concept: "NAT 인스턴스 자신도 인터넷 게이트웨이를 통해 나가야 하므로, 0.0.0.0/0 → IGW 경로가 있는 퍼블릭 서브넷에 있어야 합니다.",
+    check: ({ topo }) =>
+      natInstanceUsages(topo).flatMap((u) => {
+        const subnetId = topo.subnetOf(u.ec2.id);
+        if (!subnetId || u.ec2.config.state === "terminated") return [];
+        const cls = topo.classifySubnet(subnetId);
+        if (cls.kind === "public") return [];
+        const loop = u.subnetIds.includes(subnetId);
+        return [
+          {
+            key: u.ec2.id,
+            resourceIds: [u.ec2.id, subnetId],
+            cause: loop
+              ? `${displayName(u.ec2)}이(가) 있는 서브넷 ${topo.name(subnetId)}도 자기 자신을 대상으로 하는 경로를 써서, 트래픽이 인터넷으로 나가지 못하고 다시 돌아옵니다.`
+              : `${displayName(u.ec2)}이(가) 있는 서브넷 ${topo.name(subnetId)}은(는) 퍼블릭 서브넷이 아닙니다. ${cls.reason}`,
+            condition: "NAT 인스턴스 서브넷에 IGW 경로 없음",
+            fix: ["NAT 인스턴스를 0.0.0.0/0 → IGW 경로가 있는 퍼블릭 서브넷에 두고, 프라이빗 서브넷만 NAT 인스턴스 경로를 쓰게 하세요."],
+            impact: "퍼블릭 서브넷에 두면 NAT 인스턴스를 거친 프라이빗 서브넷의 인터넷 통신이 가능해집니다.",
+          },
+        ];
+      }),
+  },
+  {
+    id: "EC2-009",
+    category: "compute",
+    severity: "error",
+    title: "퍼블릭 IP가 없는 NAT 인스턴스",
+    concept: "NAT 인스턴스는 퍼블릭 IPv4 주소(자동 할당 퍼블릭 IP 또는 탄력적 IP)가 있어야 인터넷 게이트웨이를 통해 나갈 수 있습니다.",
+    check: ({ topo }) =>
+      natInstanceUsages(topo)
+        .filter((u) => u.ec2.config.state === "running" && topo.subnetOf(u.ec2.id) && topo.enisOf(u.ec2.id)[0]?.publicIp == null)
+        .map((u) => ({
+          key: u.ec2.id,
+          resourceIds: [u.ec2.id],
+          cause: `${displayName(u.ec2)}에 퍼블릭 IPv4 주소가 없습니다.`,
+          condition: `publicIpMode = ${u.ec2.config.publicIpMode}, 탄력적 IP 없음`,
+          fix: ["퍼블릭 IP 자동 할당을 켜거나, 탄력적 IP를 할당해 이 인스턴스에 연결하세요."],
+          impact: "퍼블릭 IP가 생기면 인터넷 게이트웨이가 NAT 인스턴스의 주소를 바꿔 내보낼 수 있습니다.",
+        })),
+  },
+  {
+    id: "EC2-010",
+    category: "compute",
+    severity: "error",
+    title: "실행 중이 아닌 NAT 인스턴스 (블랙홀 경로)",
+    concept:
+      "경로의 대상 인스턴스가 중지되거나 종료되면 그 경로는 Blackhole 상태가 되어 트래픽이 버려집니다. NAT 인스턴스 하나에 의존하면 그 인스턴스가 멈추는 순간 프라이빗 서브넷의 외부 통신이 모두 끊깁니다.",
+    check: ({ topo }) =>
+      natInstanceUsages(topo)
+        .filter((u) => u.ec2.config.state !== "running")
+        .map((u) => ({
+          key: u.ec2.id,
+          resourceIds: [u.ec2.id, ...u.routeTableIds],
+          cause: `${displayName(u.ec2)}이(가) ${u.ec2.config.state} 상태라 ${u.routeLabels.join(", ")} 경로가 Blackhole입니다.`,
+          condition: `경로 대상 인스턴스 state = ${u.ec2.config.state}`,
+          fix:
+            u.ec2.config.state === "terminated"
+              ? ["종료된 인스턴스는 되돌릴 수 없습니다. 경로 대상을 실행 중인 NAT 인스턴스나 NAT 게이트웨이로 바꾸세요."]
+              : [`${displayName(u.ec2)}을(를) 시작하세요.`],
+          impact: "대상이 실행 중이 되면 경로가 Active가 되어 프라이빗 서브넷의 외부 통신이 다시 가능해집니다.",
+        })),
+  },
+  {
+    id: "EC2-011",
+    category: "compute",
+    severity: "warning",
+    title: "프라이빗 서브넷 트래픽을 막는 NAT 인스턴스 보안 그룹",
+    concept:
+      "NAT 인스턴스의 보안 그룹은 프라이빗 서브넷에서 들어오는 트래픽(예: HTTP 80, HTTPS 443)을 인바운드로 허용하고, 같은 포트로 인터넷에 나가는 아웃바운드를 허용해야 합니다. AWS 문서의 예시는 프라이빗 서브넷 CIDR에서 오는 80·443을 허용합니다.",
+    check: ({ topo }) =>
+      natInstanceUsages(topo).flatMap((u) => {
+        if (u.ec2.config.state !== "running") return [];
+        const natSubnet = topo.subnetOf(u.ec2.id);
+        const sgs = topo.securityGroupsOf(u.ec2.id);
+        const allows = (direction: "inbound" | "outbound", peerIp: number, peerSgs: string[]) =>
+          [80, 443].some((port) => evaluateSecurityGroups(sgs, direction, { protocol: "tcp", port, peerIp, peerSecurityGroupIds: peerSgs }).allowed);
+        const drafts: FindingDraft[] = [];
+        for (const subnetId of u.subnetIds) {
+          if (subnetId === natSubnet) continue;
+          const sources = topo
+            .ofType("ec2")
+            .filter((e) => e.id !== u.ec2.id && e.config.state === "running" && topo.subnetOf(e.id) === subnetId)
+            .flatMap((e) => topo.enisOf(e.id))
+            .filter((eni) => eni.privateIp !== null);
+          const sample = parseIpv4(topo.suggestPrivateIp(subnetId) ?? "");
+          const blocked = sources.length
+            ? sources.filter((eni) => !allows("inbound", eni.privateIp!, eni.securityGroupIds ?? [])).map((eni) => eni.ownerId)
+            : sample !== null && !allows("inbound", sample, [])
+              ? [subnetId]
+              : [];
+          if (!blocked.length) continue;
+          drafts.push({
+            key: `${u.ec2.id}:${subnetId}`,
+            resourceIds: [u.ec2.id, ...sgs.map((sg) => sg.id), subnetId],
+            cause: `${displayName(u.ec2)}의 보안 그룹이 서브넷 ${topo.name(subnetId)}에서 오는 HTTP(80)·HTTPS(443)를 인바운드로 허용하지 않습니다.`,
+            condition: "NAT 인스턴스 보안 그룹 인바운드에 프라이빗 서브넷 허용 규칙 없음",
+            fix: [`${sgs[0] ? displayName(sgs[0]) : "보안 그룹"}에 인바운드 HTTP·HTTPS, 소스 ${topo.getOfType(subnetId, "subnet")?.config.cidr ?? "프라이빗 서브넷 CIDR"} 규칙을 추가하세요.`],
+            impact: "허용하면 이 서브넷의 서버가 NAT 인스턴스를 거쳐 패키지 설치·외부 API 호출을 할 수 있습니다.",
+          });
+        }
+        const internet = parseIpv4("203.0.113.10")!;
+        if (u.subnetIds.length && !allows("outbound", internet, [])) {
+          drafts.push({
+            key: `${u.ec2.id}:outbound`,
+            resourceIds: [u.ec2.id, ...sgs.map((sg) => sg.id)],
+            cause: `${displayName(u.ec2)}의 보안 그룹이 인터넷으로 나가는 HTTP(80)·HTTPS(443)를 허용하지 않습니다.`,
+            condition: "NAT 인스턴스 보안 그룹 아웃바운드에 80·443 허용 규칙 없음",
+            fix: ["아웃바운드에 HTTP·HTTPS, 대상 0.0.0.0/0 규칙을 추가하세요."],
+            impact: "허용하면 NAT 인스턴스가 주소를 바꾼 트래픽을 인터넷으로 내보낼 수 있습니다.",
+          });
+        }
+        return drafts;
+      }),
+  },
+  {
+    id: "EC2-012",
+    category: "compute",
+    severity: "info",
+    title: "NAT 인스턴스는 직접 관리하는 단일 장애 지점",
+    concept:
+      "NAT 인스턴스는 인스턴스 요금만 들어 실습·소규모 환경에서 비용을 줄일 수 있지만, 인스턴스가 멈추면 외부 통신이 끊기고 패치·대역폭·장애 복구를 직접 챙겨야 합니다. AWS는 가용성이 높고 관리가 필요 없는 NAT 게이트웨이를 권장합니다.",
+    check: ({ topo }) =>
+      natInstanceUsages(topo)
+        .filter((u) => u.ec2.config.state === "running" && u.subnetIds.length > 0)
+        .map((u) => {
+          const azs = [...new Set(u.subnetIds.map((id) => topo.getOfType(id, "subnet")?.config.availabilityZone).filter((x): x is string => !!x))];
+          return {
+            key: u.ec2.id,
+            resourceIds: [u.ec2.id],
+            cause: `프라이빗 서브넷 ${u.subnetIds.length}개(${u.subnetIds.map((id) => topo.name(id)).join(", ")}${azs.length ? ` · 가용 영역 ${azs.join(", ")}` : ""})가 NAT 인스턴스 ${displayName(u.ec2)} 하나에 의존합니다.`,
+            condition: "NAT 인스턴스 1대가 외부 통신을 모두 처리",
+            fix: ["실습·비용 절감 목적이면 그대로 두어도 됩니다.", "중요한 서비스라면 NAT 게이트웨이(AZ마다 하나)로 바꾸는 것을 고려하세요."],
+            impact: "정보 항목입니다. 비용과 가용성의 균형을 이해하는 데 참고하세요.",
+          };
+        }),
   },
 
   // ------------------------------------------------------------ 로드 밸런싱

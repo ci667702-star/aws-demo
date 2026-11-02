@@ -4,7 +4,7 @@ import { X } from "lucide-react";
 import { cn } from "cn";
 import { useState } from "react";
 import { Dialog as DialogPrimitive } from "radix-ui";
-import { Alert } from "./alert";
+import { ErrorAlert } from "./alert";
 import { Button } from "./button";
 import { FormField, TextInput } from "./form";
 
@@ -109,7 +109,7 @@ export function DeleteModal({
             <TextInput value={typed} onChange={(e) => setTyped(e.target.value)} placeholder={confirmText} />
           </FormField>
         )}
-        {error && <Alert type="error" header="작업을 완료할 수 없습니다">{error}</Alert>}
+        {error && <ErrorAlert message={error} header="작업을 완료할 수 없습니다" />}
       </div>
     </Modal>
   );

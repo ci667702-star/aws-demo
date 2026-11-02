@@ -41,7 +41,7 @@ export function Tabs({ tabs, activeId, onChange, ariaLabel }: { tabs: TabItem[];
               onKeyDown={(e) => onKeyDown(e, i)}
               onClick={() => onChange(t.id)}
               className={cn(
-                "relative shrink-0 px-4 py-2 text-sm font-bold whitespace-nowrap transition-colors",
+                "relative shrink-0 px-4 py-2.5 text-[15px] font-bold whitespace-nowrap transition-colors",
                 selected ? "text-aws-link after:absolute after:inset-x-2 after:bottom-0 after:h-1 after:rounded-t after:bg-aws-link" : "text-aws-text-2 hover:text-aws-link",
               )}
             >

@@ -3,6 +3,8 @@
 import { ChevronDown, CircleX, Search, X } from "lucide-react";
 import { cn } from "cn";
 import { createContext, forwardRef, useContext, useId, useMemo, useState } from "react";
+import { FieldHelpButton } from "@/components/docs/field-help";
+import type { DocKey } from "@/lib/docs/types";
 
 const FieldContext = createContext<{ id: string; describedBy?: string; invalid: boolean } | null>(null);
 
@@ -16,9 +18,12 @@ export function FormField({
   children,
   className,
   optional,
+  help,
 }: {
   label?: React.ReactNode;
   info?: React.ReactNode;
+  /** 설정 항목 도움말 (리소스 설명 데이터의 설정 키) */
+  help?: { docKey: DocKey; field: string };
   description?: React.ReactNode;
   constraint?: React.ReactNode;
   error?: React.ReactNode;
@@ -32,29 +37,30 @@ export function FormField({
   const describedBy = [description || constraint ? descId : null, error ? errId : null].filter(Boolean).join(" ") || undefined;
   return (
     <FieldContext.Provider value={{ id, describedBy, invalid: !!error }}>
-      <div className={cn("min-w-0 space-y-1", className)}>
+      <div className={cn("min-w-0 space-y-1", className)} data-field={help?.field}>
         {label && (
           <div className="flex items-center gap-1.5">
-            <label htmlFor={id} className="text-sm font-bold text-aws-text">
+            <label htmlFor={id} className="text-[15px] font-bold text-aws-text">
               {label}
               {optional && <span className="ml-1 font-normal text-aws-text-2 italic">- 선택 사항</span>}
             </label>
+            {help && <FieldHelpButton docKey={help.docKey} field={help.field} side="bottom" className="size-5 [&_svg]:size-4" />}
             {info}
           </div>
         )}
         {description && (
-          <p id={descId} className="text-[13px] leading-[18px] text-aws-text-2">
+          <p id={descId} className="text-sm leading-relaxed text-aws-text-2">
             {description}
           </p>
         )}
         <div>{children}</div>
         {constraint && !error && (
-          <p id={description ? undefined : descId} className="text-xs text-aws-text-2">
+          <p id={description ? undefined : descId} className="text-[13px] leading-snug text-aws-text-2">
             {constraint}
           </p>
         )}
         {error && (
-          <p id={errId} className="flex items-start gap-1 text-xs font-bold text-aws-error" role="alert">
+          <p id={errId} className="flex items-start gap-1 text-[13px] font-bold text-aws-error" role="alert">
             <CircleX className="mt-px size-3.5 shrink-0" aria-hidden />
             {error}
           </p>
@@ -69,7 +75,7 @@ function useField() {
 }
 
 export const inputClass =
-  "h-8 w-full min-w-0 rounded-lg border border-aws-border-strong bg-aws-surface px-3 text-sm text-aws-text placeholder:text-aws-text-3 placeholder:italic focus:border-aws-focus focus:outline-2 focus:outline-offset-0 focus:outline-aws-focus disabled:cursor-not-allowed disabled:border-aws-disabled disabled:bg-aws-disabled disabled:text-aws-text-3 aria-invalid:border-aws-error aria-invalid:border-l-4";
+  "h-9 w-full min-w-0 rounded-lg border border-aws-border-strong bg-aws-surface px-3 text-[15px] text-aws-text placeholder:text-aws-text-3 placeholder:italic focus:border-aws-focus focus:outline-2 focus:outline-offset-0 focus:outline-aws-focus disabled:cursor-not-allowed disabled:border-aws-disabled disabled:bg-aws-disabled disabled:text-aws-text-3 aria-invalid:border-aws-error aria-invalid:border-l-4";
 
 export const TextInput = forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement>>(function TextInput({ className, id, ...props }, ref) {
   const field = useField();

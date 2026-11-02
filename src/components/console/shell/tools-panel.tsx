@@ -10,20 +10,23 @@ import { useAnalysis } from "../analysis-context";
 import { useConsoleProjectId, useProject } from "../console-context";
 import { useConsoleUi } from "../console-store";
 import { HELP_TOPICS } from "../help-topics";
-import { href } from "../router";
+import { href, useHashLocation } from "../router";
 import { Button } from "../ui/button";
 import { ExpandableSection } from "../ui/layout";
 import { Badge } from "../ui/status";
+import { ResourceDocTab } from "./resource-doc-tab";
 
 export function ToolsPanel({ onClose }: { onClose: () => void }) {
   const tab = useConsoleUi((s) => s.toolsTab);
   const setTab = useConsoleUi((s) => s.setToolsTab);
+  const location = useHashLocation();
   return (
     <aside className="flex h-full flex-col bg-aws-surface" aria-label="도움말 및 실습">
       <div className="flex items-center justify-between gap-2 border-b border-aws-divider px-4 py-2">
         <div role="tablist" aria-label="패널 종류" className="flex gap-1">
           {(
             [
+              ["resource", "리소스 설명"],
               ["help", "도움말"],
               ["labs", "실습 가이드"],
             ] as const
@@ -44,7 +47,10 @@ export function ToolsPanel({ onClose }: { onClose: () => void }) {
           <X className="size-4" aria-hidden />
         </button>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">{tab === "help" ? <HelpContent /> : <LabGuide />}</div>
+      {/* 리소스 설명은 화면(경로)이 바뀌면 맨 위부터 보여 준다 */}
+      <div key={tab === "resource" ? location.path : tab} className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+        {tab === "help" ? <HelpContent /> : tab === "resource" ? <ResourceDocTab /> : <LabGuide />}
+      </div>
     </aside>
   );
 }
@@ -53,38 +59,95 @@ function HelpContent() {
   const topicId = useConsoleUi((s) => s.helpTopic) ?? "console";
   const openHelp = useConsoleUi((s) => s.openHelp);
   const topic = HELP_TOPICS[topicId] ?? HELP_TOPICS.console;
-  const related = ["vpc", "subnet", "route-table", "igw", "nat", "security-group", "nacl", "sg-vs-nacl", "ec2-launch", "alb", "reachability"].filter((t) => t !== topicId);
+  const fallback = ["vpc", "subnet", "route-table", "igw", "nat", "security-group", "nacl", "ec2-launch", "alb", "s3", "iam", "cloudwatch", "reachability"];
+  const related = (topic.related ?? fallback).filter((t) => t !== topicId && HELP_TOPICS[t]);
+  const others = fallback.filter((t) => t !== topicId && !related.includes(t));
   return (
-    <article className="space-y-4 text-sm">
-      <h2 className="text-lg font-bold text-aws-text">{topic.title}</h2>
-      {topic.paragraphs.map((p, i) => (
-        <p key={i} className="leading-6 text-aws-text">
-          {p}
-        </p>
-      ))}
+    <article className="space-y-5 text-[15px] leading-relaxed" data-testid="help-content">
+      <div className="space-y-2">
+        <h2 className="text-xl font-bold text-aws-text">{topic.title}</h2>
+        <p className="rounded-xl bg-aws-info-bg px-4 py-3 font-bold text-aws-text">{topic.summary}</p>
+      </div>
+      {topic.analogy && (
+        <section className="rounded-xl border border-aws-border px-4 py-3">
+          <h3 className="mb-1 text-sm font-bold text-aws-warning">💡 비유로 이해하기</h3>
+          <p className="text-aws-text">{topic.analogy}</p>
+        </section>
+      )}
+      <section className="space-y-2">
+        <h3 className="text-sm font-bold text-aws-text-2">자세히</h3>
+        {topic.paragraphs.map((p, i) => (
+          <p key={i} className="text-aws-text">
+            {p}
+          </p>
+        ))}
+      </section>
+      {topic.steps && (
+        <section>
+          <h3 className="mb-1 text-sm font-bold text-aws-text-2">이 시뮬레이터에서 해 보기</h3>
+          <ol className="list-decimal space-y-1 pl-6 text-aws-text">
+            {topic.steps.map((s, i) => (
+              <li key={i}>{s}</li>
+            ))}
+          </ol>
+        </section>
+      )}
+      {topic.mistakes && (
+        <section className="rounded-xl border border-aws-warning/40 bg-aws-warning-bg px-4 py-3">
+          <h3 className="mb-1 text-sm font-bold text-aws-warning">⚠ 자주 하는 실수</h3>
+          <ul className="list-disc space-y-1 pl-5 text-aws-text">
+            {topic.mistakes.map((m, i) => (
+              <li key={i}>{m}</li>
+            ))}
+          </ul>
+        </section>
+      )}
       {topic.simplifications && (
-        <div className="rounded-lg border border-aws-border bg-aws-surface-2 p-3">
-          <p className="mb-1 text-xs font-bold text-aws-text-2">이 시뮬레이터의 단순화</p>
-          <ul className="list-disc space-y-1 pl-4 text-[13px] text-aws-text-2">
+        <section className="rounded-xl border border-aws-border bg-aws-surface-2 px-4 py-3">
+          <h3 className="mb-1 text-sm font-bold text-aws-text-2">이 시뮬레이터의 단순화</h3>
+          <ul className="list-disc space-y-1 pl-5 text-sm text-aws-text-2">
             {topic.simplifications.map((s, i) => (
               <li key={i}>{s}</li>
             ))}
           </ul>
-        </div>
+        </section>
       )}
-      <div className="border-t border-aws-divider pt-3">
-        <p className="mb-2 text-xs font-bold text-aws-text-2">다른 주제</p>
-        <ul className="flex flex-wrap gap-x-3 gap-y-1">
-          {related.map((id) => (
-            <li key={id}>
-              <button type="button" onClick={() => openHelp(id)} className="text-[13px] text-aws-link hover:underline">
-                {HELP_TOPICS[id]?.title}
-              </button>
-            </li>
-          ))}
-        </ul>
+      {topic.links && (
+        <section>
+          <h3 className="mb-1 text-sm font-bold text-aws-text-2">AWS 공식 문서 (새 창)</h3>
+          <ul className="list-disc space-y-1 pl-5 text-sm">
+            {topic.links.map((link) => (
+              <li key={link.url}>
+                <a href={link.url} target="_blank" rel="noreferrer" className="text-aws-link hover:underline">
+                  {link.title}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      <div className="space-y-2 border-t border-aws-divider pt-4">
+        {related.length > 0 && <TopicLinks title="관련 주제" ids={related} onOpen={openHelp} />}
+        <TopicLinks title="다른 주제" ids={others.slice(0, 8)} onOpen={openHelp} />
       </div>
     </article>
+  );
+}
+
+function TopicLinks({ title, ids, onOpen }: { title: string; ids: string[]; onOpen: (id: string) => void }) {
+  return (
+    <div>
+      <p className="mb-1.5 text-sm font-bold text-aws-text-2">{title}</p>
+      <ul className="flex flex-wrap gap-2">
+        {ids.map((id) => (
+          <li key={id}>
+            <button type="button" onClick={() => onOpen(id)} className="rounded-full border border-aws-border px-3 py-1 text-sm text-aws-link hover:border-aws-link hover:bg-aws-info-bg">
+              {HELP_TOPICS[id]?.title}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 

@@ -23,7 +23,7 @@ import {
 } from "./alb-engine";
 import { awsReservedReason, formatIpv4, isPublicRoutableIp, parseIpv4, tryParseCidr, cidrContainsIp } from "./cidr-utils";
 import { evaluateNacl } from "./network-acl-engine";
-import { RESOURCE_TYPE_INFO, type Project } from "./resource-models";
+import { RESOURCE_TYPE_INFO, type ListenerRuleAction, type Project } from "./resource-models";
 import { selectRoute } from "./route-engine";
 import { describeSgRule, evaluateSecurityGroups, type Direction, type PacketProtocol } from "./security-group-engine";
 import {
@@ -34,6 +34,7 @@ import {
   type SimStep,
 } from "./simulation-log";
 import { buildTopology, Topology, VIRTUAL_PUBLIC_POOL, type EffectiveRoute, type Eni, displayName } from "./topology-engine";
+import { hasNatSoftware } from "./nat-instance";
 
 export type EndpointSpec =
   | { kind: "internet"; ip: string }
@@ -49,6 +50,17 @@ export interface SimulationRequest {
   ephemeralPort?: number;
   /** ALB 목적지일 때 분산 확인을 위한 요청 수 (기본 1) */
   requestCount?: number;
+  /** ALB 목적지일 때 리스너 규칙을 평가할 HTTP 경로 (기본 "/") */
+  httpPath?: string;
+}
+
+/** ALB가 리스너 규칙의 고정 응답으로 직접 응답한 경우 */
+export interface AlbFixedResponse {
+  ruleId: string;
+  priority: number;
+  statusCode: number;
+  contentType: string;
+  body: string;
 }
 
 export type SimulationOutcome = "success" | "failure" | "invalid-request" | "engine-error";
@@ -72,6 +84,10 @@ export interface SimulationResult {
   distribution: DistributionEntry[] | null;
   /** 단일 요청에서 ALB가 선택한 대상 */
   selectedTargetId: string | null;
+  /** 리스너 규칙이 고정 응답을 돌려줬다면 그 내용 */
+  fixedResponse?: AlbFixedResponse | null;
+  /** 일치한 리스너 규칙 (기본 작업이면 null) */
+  matchedRuleId?: string | null;
   assumptions: string[];
   truncated: boolean;
   errorMessage?: string;
@@ -90,7 +106,7 @@ export const SIMULATION_ASSUMPTIONS = [
   "응답 트래픽의 임시 포트는 하나의 값으로 단순화합니다. 실제 클라이언트·NAT·ALB는 1024-65535 범위의 포트를 사용할 수 있습니다.",
   "인터넷의 가상 외부 호스트는 요청한 포트에서 응답한다고 가정합니다.",
   "EC2는 설정된 '가상 서비스 포트'에서만 응답한다고 가정합니다. 실제 운영체제나 프로세스는 실행되지 않습니다.",
-  "ALB는 교차 영역 로드 밸런싱이 켜져 있고 라운드 로빈으로 대상을 선택한다고 가정합니다. 리스너 규칙(경로 기반 라우팅)은 지원하지 않습니다.",
+  "ALB는 교차 영역 로드 밸런싱이 켜져 있고 라운드 로빈으로 대상을 선택한다고 가정합니다. 리스너 규칙은 경로 패턴 조건과 전달·고정 응답 작업만 지원합니다 (호스트 헤더·쿼리 문자열·가중치 전달은 지원하지 않음).",
 ];
 
 const CONCEPT = {
@@ -99,10 +115,32 @@ const CONCEPT = {
   route: "라우팅 테이블은 목적지 IP를 포함하는 경로 중 가장 구체적인(접두사가 가장 긴) 경로를 사용합니다. VPC CIDR에 대한 local 경로는 항상 존재합니다.",
   igw: "인터넷 게이트웨이는 VPC에 연결(Attach)되어 있어야 하며, 퍼블릭 IPv4 주소가 있는 인터페이스에 대해 사설 IP ↔ 퍼블릭 IP 1:1 변환을 수행합니다. 라우팅 테이블에 IGW로 향하는 경로가 있는 서브넷이 퍼블릭 서브넷입니다.",
   nat: "NAT 게이트웨이는 프라이빗 서브넷 리소스의 아웃바운드 연결을 자신의 Elastic IP로 변환(SNAT)합니다. NAT는 퍼블릭 서브넷에 있어야 하며 외부에서 시작된 인바운드 연결은 받지 않습니다.",
+  natInstance:
+    "NAT 인스턴스는 퍼블릭 서브넷의 EC2가 NAT 게이트웨이 대신 주소 변환을 하는 방식입니다. 인스턴스 안에서 IP 포워딩과 iptables MASQUERADE를 켜고, 소스/대상 확인을 끄고, 프라이빗 서브넷 경로를 이 인스턴스로 보내야 합니다. 보안 그룹은 프라이빗 서브넷에서 오는 트래픽을 허용해야 합니다. 비용은 인스턴스 요금뿐이지만, 장애 대비·패치·대역폭은 직접 관리해야 합니다.",
   alb: "ALB는 리스너(프로토콜:포트)로 요청을 받고, 리스너의 기본 작업에 따라 대상 그룹의 정상(Healthy) 대상 중 하나로 요청을 전달합니다.",
+  albRules:
+    "리스너 규칙은 우선순위 숫자가 작은 것부터 평가하고, 처음 일치한 규칙 하나의 작업만 수행합니다. 어떤 규칙과도 맞지 않으면 리스너의 기본 작업을 사용합니다. 경로 패턴은 대소문자를 구분하며 *(0자 이상)와 ?(정확히 1자)를 쓸 수 있습니다.",
   dns: "VPC의 DNS 확인(enableDnsSupport)이 켜져 있어야 VPC 안에서 Amazon 제공 DNS로 ALB/RDS 엔드포인트 이름을 해석할 수 있습니다.",
   state: "인스턴스는 Running 상태일 때만 요청을 처리합니다. Stopped 상태에서는 퍼블릭 IP도 해제되며, Terminated 인스턴스는 다시 시작할 수 없습니다.",
 };
+
+/** 요청 경로를 정리한다: 쿼리 문자열을 떼고 /로 시작하게 만든다 */
+export function normalizeHttpPath(path: string | undefined): string {
+  const raw = (path ?? "/").trim().split("?")[0].split("#")[0];
+  if (!raw) return "/";
+  return raw.startsWith("/") ? raw : `/${raw}`;
+}
+
+/** ALB 경로 패턴 일치 (대소문자 구분, * = 0자 이상, ? = 정확히 1자) */
+export function pathPatternMatches(pattern: string, path: string): boolean {
+  const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".");
+  return new RegExp(`^${escaped}$`).test(path);
+}
+
+function ruleActionLabel(topo: Topology, action: ListenerRuleAction): string {
+  if (action.type === "fixed-response") return `고정 응답 ${action.statusCode}`;
+  return topo.get(action.targetGroupId) ? `${topo.name(action.targetGroupId)}(으)로 전달` : `삭제된 대상 그룹 ${action.targetGroupId}`;
+}
 
 interface Packet {
   protocol: PacketProtocol;
@@ -117,6 +155,10 @@ interface Ctx {
   healthCache: Map<string, TargetHealth[]>;
   selectedTargetId: string | null;
   ephemeralPort: number;
+  /** ALB 리스너 규칙을 평가할 HTTP 경로 */
+  httpPath: string;
+  fixedResponse: AlbFixedResponse | null;
+  matchedRuleId: string | null;
 }
 
 type Origin = { kind: "internet"; ip: number } | { kind: "eni"; eni: Eni };
@@ -366,6 +408,7 @@ function fromEni(ctx: Ctx, src: Eni, destination: number, pkt: Packet): void {
   const route = lookupRoute(ctx, src, destination);
   if (route.targetKind === "local") deliverLocal(ctx, src, destination, pkt);
   else if (route.targetKind === "internet-gateway") egressViaIgw(ctx, src, route, destination, pkt);
+  else if (route.targetKind === "instance") egressViaNatInstance(ctx, src, route, destination, pkt);
   else egressViaNat(ctx, src, route, destination, pkt);
 }
 
@@ -600,6 +643,158 @@ function egressViaNat(ctx: Ctx, src: Eni, route: EffectiveRoute, destination: nu
   });
 }
 
+/** 경로 대상이 인스턴스인 경우: NAT 인스턴스로 동작하는지 확인하고 주소 변환해 인터넷으로 내보낸다 */
+function egressViaNatInstance(ctx: Ctx, src: Eni, route: EffectiveRoute, destination: number, pkt: Packet): void {
+  const topo = ctx.topo;
+  const log: SimulationLog = ctx.log;
+  const nat = topo.getOfType(route.targetId, "ec2");
+  if (!nat) {
+    log.fail({
+      kind: "nat",
+      category: "routing",
+      title: "경로의 인스턴스가 존재하지 않음 (블랙홀)",
+      reason: `${route.destinationCidr} 경로가 삭제된 인스턴스를 가리킵니다.`,
+      resourceIds: [src.subnetId],
+      fixes: ["라우팅 테이블의 경로 대상을 실행 중인 NAT 인스턴스나 NAT 게이트웨이로 바꾸세요."],
+      concept: CONCEPT.natInstance,
+      fields: { subnet: "routeTable" },
+    });
+  }
+  const label = topo.label(nat.id);
+  const natEni = topo.enisOf(nat.id)[0];
+  if (!natEni?.subnetId) {
+    log.fail({
+      kind: "nat",
+      category: "configuration",
+      title: `${label}이(가) 서브넷에 배치되지 않음`,
+      resourceIds: [nat.id],
+      fixes: [`${label}을(를) 퍼블릭 서브넷에 두세요.`],
+      concept: CONCEPT.natInstance,
+      fields: { ec2: "subnet" },
+    });
+  }
+  if (natEni.vpcId !== src.vpcId) {
+    log.fail({
+      kind: "nat",
+      category: "routing",
+      title: `${label}이(가) 다른 VPC에 있음`,
+      reason: "라우팅 테이블의 인스턴스 대상은 같은 VPC에 있어야 합니다.",
+      resourceIds: [nat.id],
+      fixes: ["같은 VPC의 퍼블릭 서브넷에 있는 인스턴스를 경로 대상으로 지정하세요."],
+      concept: CONCEPT.natInstance,
+      fields: { ec2: "subnet" },
+    });
+  }
+  if (nat.config.state !== "running") {
+    log.fail({
+      kind: "nat",
+      category: "state",
+      title: `NAT 인스턴스 ${label}이(가) ${nat.config.state} 상태 (블랙홀 경로)`,
+      reason: "경로가 가리키는 인스턴스가 실행 중이 아니어서 트래픽을 받을 수 없습니다. AWS에서는 이 경로가 blackhole로 표시됩니다.",
+      resourceIds: [nat.id],
+      fixes: [`${label}을(를) 시작하세요.`, "인스턴스 하나에 의존하면 장애 시 외부 통신이 모두 끊깁니다. 중요한 환경은 NAT 게이트웨이를 고려하세요."],
+      concept: CONCEPT.natInstance,
+    });
+  }
+  const crossing = src.subnetId !== natEni.subnetId;
+  if (crossing) {
+    checkNacl(ctx, src.subnetId!, "outbound", destination, pkt.protocol, pkt.port, "요청이 서브넷을 나가 NAT 인스턴스로 향함", false);
+    log.hop(natEni.subnetId, `Subnet ${topo.name(natEni.subnetId)}`);
+    checkNacl(ctx, natEni.subnetId, "inbound", src.privateIp!, pkt.protocol, pkt.port, "요청이 NAT 인스턴스 서브넷으로 들어옴", false);
+  }
+  log.hop(nat.id, label);
+  if (nat.config.sourceDestCheck !== false) {
+    log.fail({
+      kind: "nat",
+      category: "configuration",
+      title: `${label}의 소스/대상 확인이 켜져 있어 패킷을 버림`,
+      reason: `패킷의 목적지(${ip(destination)})가 인스턴스 자신이 아니므로, 소스/대상 확인이 켜진 인스턴스는 이 트래픽을 받지 않습니다.`,
+      resourceIds: [nat.id],
+      fixes: ["심화 모드: EC2 → 인스턴스 → 작업 → 네트워킹 → '소스/대상 확인 변경'에서 중지하세요.", "쉬운 모드: 인스턴스 설정의 '소스/대상 확인'을 끄세요."],
+      concept: CONCEPT.natInstance,
+      fields: { ec2: "sourceDestCheck" },
+    });
+  }
+  checkSecurityGroups(ctx, natEni, "inbound", src.privateIp!, src.securityGroupIds ?? [], pkt);
+  if (!hasNatSoftware(nat.config.userData)) {
+    log.fail({
+      kind: "nat",
+      category: "service",
+      title: `${label}에 NAT 설정(IP 포워딩·iptables MASQUERADE)이 없음`,
+      reason: "인스턴스 운영체제가 받은 패킷을 다른 곳으로 넘기고(IP 포워딩) 출발지 주소를 자기 주소로 바꾸도록(MASQUERADE) 설정되어 있지 않아 패킷이 버려집니다.",
+      resourceIds: [nat.id],
+      fixes: [
+        "심화 모드: 인스턴스를 중지한 뒤 '사용자 데이터 편집'에서 템플릿 'NAT 인스턴스'를 넣으세요. 쉬운 모드: 인스턴스 설정의 'NAT 설정 스크립트 넣기'를 누르세요.",
+        "스크립트에는 net.ipv4.ip_forward=1과 iptables -t nat -A POSTROUTING -o <인터페이스> -j MASQUERADE가 들어갑니다.",
+      ],
+      concept: CONCEPT.natInstance,
+      fields: { ec2: "userData" },
+    });
+  }
+  log.pass({
+    kind: "nat",
+    title: `${label} — 출발지 주소 변환 (iptables MASQUERADE)`,
+    detail: `출발지 ${ip(src.privateIp)} → ${ip(natEni.privateIp)} (NAT 인스턴스의 사설 IP)`,
+    resourceIds: [nat.id],
+    concept: CONCEPT.natInstance,
+  });
+  checkSecurityGroups(ctx, natEni, "outbound", destination, [], pkt);
+  const natRoute = lookupRoute(ctx, natEni, destination);
+  if (natRoute.targetKind !== "internet-gateway") {
+    log.fail({
+      kind: "nat",
+      category: "routing",
+      title: `NAT 인스턴스 서브넷(${topo.name(natEni.subnetId)})에 IGW 경로가 없음`,
+      reason:
+        natRoute.targetKind === "instance" || natRoute.targetKind === "nat-gateway"
+          ? "NAT 인스턴스가 있는 서브넷의 경로가 다시 NAT를 가리켜 트래픽이 인터넷으로 나갈 수 없습니다 (경로 루프)."
+          : `NAT 인스턴스가 있는 서브넷의 라우팅이 ${natRoute.destinationCidr} → ${topo.routeTargetLabel(natRoute)}입니다. NAT 인스턴스는 IGW 경로가 있는 퍼블릭 서브넷에 있어야 합니다.`,
+      resourceIds: [nat.id, natEni.subnetId],
+      fixes: ["NAT 인스턴스를 0.0.0.0/0 → IGW 경로가 있는 퍼블릭 서브넷에 두세요."],
+      concept: CONCEPT.natInstance,
+      fields: { ec2: "subnet", subnet: "routeTable" },
+    });
+  }
+  const igw = requireAttachedIgw(ctx, natRoute.targetId, natEni.vpcId, "NAT 인스턴스 서브넷의 인터넷");
+  if (natEni.publicIp === null) {
+    log.fail({
+      kind: "nat",
+      category: "configuration",
+      title: `${label}에 퍼블릭 IPv4 주소가 없음`,
+      reason: "NAT 인스턴스는 퍼블릭 IP(또는 탄력적 IP)가 있어야 인터넷 게이트웨이가 주소를 바꿔 내보낼 수 있습니다.",
+      resourceIds: [nat.id],
+      fixes: ["퍼블릭 IP 자동 할당을 켜고 시작하거나, 탄력적 IP를 할당해 연결하세요."],
+      concept: CONCEPT.natInstance,
+      fields: { ec2: "publicIpMode" },
+    });
+  }
+  checkNacl(ctx, natEni.subnetId, "outbound", destination, pkt.protocol, pkt.port, "NAT 인스턴스에서 IGW로 서브넷을 나감", false);
+  log.pass({
+    kind: "gateway",
+    title: `${topo.label(igw.id)} 통과 — 출발지 주소 변환`,
+    detail: `출발지 ${ip(natEni.privateIp)} → ${ip(natEni.publicIp)} (NAT 인스턴스의 퍼블릭 IP, 1:1 NAT)`,
+    resourceIds: [igw.id],
+  });
+  log.hop(igw.id, topo.label(igw.id));
+  deliverOnInternet(ctx, natEni.publicIp, destination, pkt);
+  inPhase(ctx, "response", () => {
+    checkNacl(ctx, natEni.subnetId!, "inbound", destination, pkt.protocol, responsePort(pkt), "응답이 NAT 인스턴스 서브넷으로 들어옴 (임시 포트)", true);
+    log.pass({
+      kind: "nat",
+      title: `${label} — 응답 주소 복원`,
+      detail: `목적지 ${ip(natEni.publicIp)} → ${ip(src.privateIp)} (iptables 연결 추적 정보 사용)`,
+      resourceIds: [nat.id],
+    });
+    sgStatefulNote(ctx, natEni);
+    if (crossing) {
+      checkNacl(ctx, natEni.subnetId!, "outbound", src.privateIp!, pkt.protocol, responsePort(pkt), "응답이 NAT 인스턴스 서브넷을 나감", true);
+      checkNacl(ctx, src.subnetId!, "inbound", destination, pkt.protocol, responsePort(pkt), "응답이 출발지 서브넷으로 들어옴", true);
+    }
+    sgStatefulNote(ctx, src);
+    log.pass({ kind: "service", title: `응답 도착 — ${src.label}`, detail: "NAT 인스턴스를 거쳐 응답이 도착했습니다.", resourceIds: [src.ownerId] });
+  });
+}
+
 function deliverOnInternet(ctx: Ctx, from: number, destination: number, pkt: Packet): void {
   const topo = ctx.topo;
   const log: SimulationLog = ctx.log;
@@ -696,12 +891,13 @@ function ingressFromInternet(ctx: Ctx, from: number, dst: Eni, pkt: Packet): voi
   inPhase(ctx, "response", () => {
     sgStatefulNote(ctx, dst);
     const back = lookupRoute(ctx, dst, from);
-    if (back.targetKind === "nat-gateway") {
+    if (back.targetKind === "nat-gateway" || back.targetKind === "instance") {
+      const via = back.targetKind === "instance" ? "NAT 인스턴스" : "NAT Gateway";
       log.fail({
         kind: "route",
         category: "routing",
-        title: "응답이 NAT Gateway로 향함 (비대칭 라우팅)",
-        reason: `요청은 IGW로 들어왔지만 서브넷 ${topo.name(dst.subnetId)}의 응답 경로가 NAT Gateway를 가리킵니다. 응답의 출발지 주소가 달라져 연결이 성립하지 않습니다.`,
+        title: `응답이 ${via}로 향함 (비대칭 라우팅)`,
+        reason: `요청은 IGW로 들어왔지만 서브넷 ${topo.name(dst.subnetId)}의 응답 경로가 ${via}를 가리킵니다. 응답의 출발지 주소가 달라져 연결이 성립하지 않습니다.`,
         resourceIds: [dst.subnetId, back.targetId],
         fixes: [
           "인터넷에 직접 노출할 리소스는 0.0.0.0/0 → IGW 경로가 있는 퍼블릭 서브넷에 배치하세요.",
@@ -883,7 +1079,73 @@ function serveAlb(ctx: Ctx, nodeEni: Eni, pkt: Packet): void {
     rules: listenerRows,
     concept: CONCEPT.alb,
   });
-  if (!binding.targetGroupId) {
+  // 리스너 규칙: 우선순위 순서로 경로 조건을 검사하고, 처음 일치한 규칙의 작업을 한다
+  const rules = [...(binding.listener.rules ?? [])].sort((a, b) => a.priority - b.priority);
+  let forwardTgId: string | null = binding.targetGroupId;
+  if (rules.length) {
+    const path = ctx.httpPath;
+    const matched = rules.find((r) => r.pathPatterns.some((p) => pathPatternMatches(p, path)));
+    const ruleRows = [
+      ...rules.map((r) => ({
+        label: `우선순위 ${r.priority}: 경로 ${r.pathPatterns.join(", ")} → ${ruleActionLabel(topo, r.action)}`,
+        note: r === matched ? "일치 (이 규칙의 작업을 수행)" : matched && r.priority > matched.priority ? "평가하지 않음 (앞 규칙이 먼저 일치)" : "경로 불일치",
+        matched: r === matched,
+        decisive: r === matched,
+      })),
+      {
+        label: `기본값 → ${binding.targetGroupId ? `${topo.name(binding.targetGroupId)}(으)로 전달` : "(대상 그룹 없음)"}`,
+        note: matched ? "사용하지 않음" : "일치하는 규칙이 없어 기본 작업 사용",
+        matched: !matched,
+        decisive: !matched,
+      },
+    ];
+    if (matched) {
+      ctx.matchedRuleId = matched.id;
+      if (matched.action.type === "fixed-response") {
+        ctx.fixedResponse = { ruleId: matched.id, priority: matched.priority, statusCode: matched.action.statusCode, contentType: matched.action.contentType, body: matched.action.body };
+        log.pass({
+          kind: "listener",
+          title: `리스너 규칙 ${matched.priority} 일치: ALB가 고정 응답 ${matched.action.statusCode} 반환`,
+          detail: `요청 경로 ${path}이(가) 규칙의 경로 패턴과 일치해, 대상(EC2)으로 보내지 않고 ALB가 직접 응답합니다.`,
+          resourceIds: [alb.id],
+          rules: ruleRows,
+          concept: CONCEPT.albRules,
+        });
+        return;
+      }
+      forwardTgId = matched.action.targetGroupId;
+      if (!topo.getOfType(forwardTgId, "target-group")) {
+        log.fail({
+          kind: "listener",
+          category: "listener",
+          title: `리스너 규칙 ${matched.priority}의 대상 그룹이 없음`,
+          reason: `규칙 ${matched.priority}이(가) 전달할 대상 그룹 ${forwardTgId}이(가) 삭제되었습니다.`,
+          resourceIds: [alb.id],
+          rules: ruleRows,
+          fixes: ["로드 밸런서의 리스너 규칙에서 대상 그룹을 다시 선택하거나 규칙을 삭제하세요."],
+          concept: CONCEPT.albRules,
+        });
+      }
+      log.pass({
+        kind: "listener",
+        title: `리스너 규칙 ${matched.priority} 일치: ${topo.name(forwardTgId)}(으)로 전달`,
+        detail: `요청 경로 ${path}이(가) 경로 패턴 ${matched.pathPatterns.join(", ")}과(와) 일치합니다.`,
+        resourceIds: [alb.id, forwardTgId],
+        rules: ruleRows,
+        concept: CONCEPT.albRules,
+      });
+    } else {
+      log.pass({
+        kind: "listener",
+        title: "일치하는 리스너 규칙 없음: 기본 작업 사용",
+        detail: `요청 경로 ${path}과(와) 일치하는 규칙이 없어 리스너의 기본 작업을 사용합니다.`,
+        resourceIds: [alb.id],
+        rules: ruleRows,
+        concept: CONCEPT.albRules,
+      });
+    }
+  }
+  if (!forwardTgId) {
     log.fail({
       kind: "listener",
       category: "listener",
@@ -894,7 +1156,7 @@ function serveAlb(ctx: Ctx, nodeEni: Eni, pkt: Packet): void {
       concept: CONCEPT.alb,
     });
   }
-  const tg = topo.getOfType(binding.targetGroupId, "target-group")!;
+  const tg = topo.getOfType(forwardTgId, "target-group")!;
   log.hop(tg.id, topo.label(tg.id));
   const health = healthFor(ctx, tg.id);
   const healthRows = health.map((h) => ({
@@ -974,7 +1236,7 @@ function serveAlb(ctx: Ctx, nodeEni: Eni, pkt: Packet): void {
 
 function runHealthProbe(topo: Topology, args: ProbeArgs, ephemeralPort: number): ProbeResult {
   const log: SimulationLog = new SimulationLog();
-  const ctx: Ctx = { topo, log, requestIndex: 0, healthCache: new Map(), selectedTargetId: null, ephemeralPort };
+  const ctx: Ctx = { topo, log, requestIndex: 0, healthCache: new Map(), selectedTargetId: null, ephemeralPort, httpPath: "/", fixedResponse: null, matchedRuleId: null };
   try {
     const targetEni = topo.enisOf(args.target.id)[0];
     if (!targetEni || targetEni.privateIp === null) {
@@ -1294,6 +1556,8 @@ interface SingleRun {
   selectedTargetId: string | null;
   truncated: boolean;
   errorMessage?: string;
+  fixedResponse?: AlbFixedResponse | null;
+  matchedRuleId?: string | null;
 }
 
 function runOnce(
@@ -1304,7 +1568,7 @@ function runOnce(
 ): SingleRun {
   const ephemeralPort = request.ephemeralPort ?? DEFAULT_EPHEMERAL_PORT;
   const log: SimulationLog = new SimulationLog();
-  const ctx: Ctx = { topo, log, requestIndex, healthCache, selectedTargetId: null, ephemeralPort };
+  const ctx: Ctx = { topo, log, requestIndex, healthCache, selectedTargetId: null, ephemeralPort, httpPath: normalizeHttpPath(request.httpPath), fixedResponse: null, matchedRuleId: null };
   const pkt: Packet = {
     protocol: request.protocol,
     port: request.protocol === "icmp" ? null : request.port,
@@ -1314,7 +1578,7 @@ function runOnce(
     const origin = resolveSource(ctx, request.source);
     const destination = resolveDestination(ctx, request.destination, origin);
     transmit(ctx, origin, destination.address, pkt, `${endpointLabel(topo, request.source)} → ${destination.label}`);
-    return { outcome: "success", steps: log.steps, path: log.path, failure: null, selectedTargetId: ctx.selectedTargetId, truncated: log.isTruncated };
+    return { outcome: "success", steps: log.steps, path: log.path, failure: null, selectedTargetId: ctx.selectedTargetId, truncated: log.isTruncated, fixedResponse: ctx.fixedResponse, matchedRuleId: ctx.matchedRuleId };
   } catch (e) {
     if (e instanceof SimulationHalt) {
       return {
@@ -1392,7 +1656,8 @@ export function simulateWithTopology(topo: Topology, request: SimulationRequest)
     let distribution: DistributionEntry[] | null = null;
     const count = request.requestCount ?? 1;
     const destination = request.destination.kind === "resource" ? topo.get(request.destination.resourceId) : undefined;
-    if (destination?.type === "alb" && count > 1) {
+    // 고정 응답 규칙은 대상으로 보내지 않으므로 분산 결과가 없다
+    if (destination?.type === "alb" && count > 1 && !first.fixedResponse) {
       const tally = new Map<string, DistributionEntry>();
       const record = (run: SingleRun) => {
         if (!run.selectedTargetId) return;
@@ -1411,7 +1676,9 @@ export function simulateWithTopology(topo: Topology, request: SimulationRequest)
       distribution = [...tally.values()].sort((a, b) => topo.orderOf(a.targetId) - topo.orderOf(b.targetId));
     }
     const summary =
-      first.outcome === "success"
+      first.outcome === "success" && first.fixedResponse
+        ? `요청 성공 (가상): ${base.sourceLabel} → ${base.destinationLabel} — ALB 리스너 규칙 ${first.fixedResponse.priority}이(가) 고정 응답 ${first.fixedResponse.statusCode}을(를) 돌려줬습니다 (대상 EC2로 전달하지 않음).`
+        : first.outcome === "success"
         ? `요청 성공 (가상): ${base.sourceLabel} → ${base.destinationLabel} (${request.protocol === "icmp" ? "ICMP" : `${request.protocol.toUpperCase()} ${request.port}`}) — 응답이 출발지로 돌아왔습니다.`
         : first.outcome === "failure"
           ? `요청 실패: ${first.failure?.reason}`

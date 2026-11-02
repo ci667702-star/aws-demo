@@ -1,5 +1,6 @@
 "use client";
 
+import { withHint } from "../error-codes";
 import { useState } from "react";
 import type { TargetHealth } from "@/lib/engine/alb-engine";
 import type { HealthCheck, ResourceOfType } from "@/lib/engine/resource-models";
@@ -9,7 +10,8 @@ import { DEFAULT_HEALTH_CHECK } from "@/lib/project/factory";
 import { useAnalysis } from "../analysis-context";
 import { useRunAction } from "../console-context";
 import { href, navigate, resourcePath } from "../router";
-import { Alert } from "../ui/alert";
+import { ErrorAlert } from "../ui/alert";
+import { PageGuide } from "../ui/page-guide";
 import { Button, ButtonDropdown, ButtonLink } from "../ui/button";
 import { Checkbox, FormActions, FormField, SelectInput, TextInput, Tiles } from "../ui/form";
 import { Container, ContainerHeader, EmptyState, ExpandableSection, KeyValueGrid, PageHeader, SpaceBetween } from "../ui/layout";
@@ -49,7 +51,7 @@ function DeleteTgModal({ tg, onClose }: { tg: Tg | undefined; onClose: () => voi
       title="대상 그룹 삭제"
       onConfirm={() => {
         const r = run("DeleteTargetGroup", (p) => deleteTargetGroup(p, tg.id), { success: () => `대상 그룹 ${tg.name}을(를) 삭제했습니다.` });
-        if (!r.ok) return [r.error, r.hint].filter(Boolean).join(" ");
+        if (!r.ok) return withHint(r);
         navigate("/ec2/target-groups");
         return null;
       }}
@@ -70,6 +72,7 @@ export function TargetGroupListPage() {
   const current = tgs.find((t) => t.id === selected[0]);
   return (
     <SpaceBetween>
+      <PageGuide topic="target-group" />
       <ResourceTable<Tg>
         ariaLabel="대상 그룹 목록"
         items={tgs}
@@ -109,12 +112,12 @@ export function TargetGroupListPage() {
         empty={<EmptyState title="대상 그룹 없음" description="로드 밸런서가 요청을 보낼 인스턴스 묶음을 만드세요." action={<ButtonLink href={href("/ec2/target-groups/create")}>대상 그룹 생성</ButtonLink>} />}
         columns={[
           { id: "name", header: "이름", cell: (t) => <TypedResourceLink type="target-group" id={t.id}>{t.name}</TypedResourceLink>, sortValue: (t) => t.name },
-          { id: "id", header: "ID", cell: (t) => <span className="font-mono text-[13px] text-aws-text-2">{t.id}</span>, sortValue: (t) => t.id },
+          { id: "id", optional: true, header: "ID", cell: (t) => <span className="font-mono text-[13px] text-aws-text-2">{t.id}</span>, sortValue: (t) => t.id },
           { id: "port", header: "포트", cell: (t) => t.config.port, sortValue: (t) => t.config.port },
           { id: "protocol", header: "프로토콜", cell: (t) => t.config.protocol },
-          { id: "type", header: "대상 유형", cell: () => "Instance" },
+          { id: "type", optional: true, header: "대상 유형", cell: () => "Instance" },
           { id: "lb", header: "로드 밸런서", cell: (t) => topo.targetGroupAlbs(t.id).map((a) => <ResourceLink key={a.id} id={a.id} showName />) },
-          { id: "vpc", header: "VPC ID", cell: (t) => <ResourceLink id={topo.vpcOf(t.id)} /> },
+          { id: "vpc", optional: true, header: "VPC ID", cell: (t) => <ResourceLink id={topo.vpcOf(t.id)} /> },
           { id: "health", header: "상태", cell: (t) => healthSummary(health.get(t.id)) },
         ]}
       />
@@ -180,16 +183,16 @@ function HealthCheckFields({ draft, onChange }: { draft: HcDraft; onChange: (d: 
   return (
     <SpaceBetween size="m">
       <div className="grid gap-4 sm:grid-cols-2">
-        <FormField label="상태 검사 프로토콜">
+        <FormField help={{ docKey: "target-group", field: "healthCheck" }} label="상태 검사 프로토콜">
           <SelectInput value={draft.protocol} onChange={(v) => set({ protocol: v as "HTTP" | "HTTPS" })} options={[{ value: "HTTP", label: "HTTP" }, { value: "HTTPS", label: "HTTPS" }]} />
         </FormField>
-        <FormField label="상태 검사 경로" constraint="/로 시작, 최대 1024자">
+        <FormField help={{ docKey: "target-group", field: "healthCheckPath" }} label="상태 검사 경로" constraint="/로 시작, 최대 1024자">
           <TextInput value={draft.path} onChange={(e) => set({ path: e.target.value })} placeholder="/" />
         </FormField>
       </div>
       <ExpandableSection header="고급 상태 검사 설정">
         <div className="grid gap-4 sm:grid-cols-2">
-          <FormField label="상태 검사 포트">
+          <FormField help={{ docKey: "target-group", field: "healthCheckPort" }} label="상태 검사 포트">
             <SelectInput value={draft.portMode} onChange={(v) => set({ portMode: v as HcDraft["portMode"] })} options={[{ value: "traffic-port", label: "트래픽 포트" }, { value: "override", label: "재정의" }]} />
           </FormField>
           {draft.portMode === "override" && (
@@ -197,19 +200,19 @@ function HealthCheckFields({ draft, onChange }: { draft: HcDraft; onChange: (d: 
               <TextInput value={draft.port} onChange={(e) => set({ port: e.target.value })} inputMode="numeric" />
             </FormField>
           )}
-          <FormField label="정상 임계값" constraint="2~10">
+          <FormField help={{ docKey: "target-group", field: "healthyThreshold" }} label="정상 임계값" constraint="2~10">
             <TextInput value={draft.healthy} onChange={(e) => set({ healthy: e.target.value })} inputMode="numeric" />
           </FormField>
-          <FormField label="비정상 임계값" constraint="2~10">
+          <FormField help={{ docKey: "target-group", field: "unhealthyThreshold" }} label="비정상 임계값" constraint="2~10">
             <TextInput value={draft.unhealthy} onChange={(e) => set({ unhealthy: e.target.value })} inputMode="numeric" />
           </FormField>
-          <FormField label="제한 시간 (초)" constraint="2~120">
+          <FormField help={{ docKey: "target-group", field: "timeoutSeconds" }} label="제한 시간 (초)" constraint="2~120">
             <TextInput value={draft.timeout} onChange={(e) => set({ timeout: e.target.value })} inputMode="numeric" />
           </FormField>
-          <FormField label="간격 (초)" constraint="5~300, 제한 시간보다 커야 함">
+          <FormField help={{ docKey: "target-group", field: "intervalSeconds" }} label="간격 (초)" constraint="5~300, 제한 시간보다 커야 함">
             <TextInput value={draft.interval} onChange={(e) => set({ interval: e.target.value })} inputMode="numeric" />
           </FormField>
-          <FormField label="성공 코드" constraint='예: 200, 200-299, 200,302'>
+          <FormField help={{ docKey: "target-group", field: "matcher" }} label="성공 코드" constraint='예: 200, 200-299, 200,302'>
             <TextInput value={draft.matcher} onChange={(e) => set({ matcher: e.target.value })} />
           </FormField>
         </div>
@@ -251,7 +254,7 @@ export function CreateTargetGroupPage() {
       success: () => `대상 그룹 ${name.trim()}을(를) 생성했습니다.`,
     });
     if (r.ok && r.createdId) navigate(resourcePath("target-group", r.createdId));
-    else if (!r.ok) setError(r.error);
+    else if (!r.ok) setError(withHint(r));
   };
 
   return (
@@ -271,18 +274,18 @@ export function CreateTargetGroupPage() {
               <FormField label="대상 유형 선택">
                 <Tiles aria-label="대상 유형" value="instance" onChange={() => undefined} columns={2} items={[{ value: "instance", label: "인스턴스", description: "특정 VPC 안의 인스턴스로 로드 밸런싱" }]} />
               </FormField>
-              <FormField label="대상 그룹 이름" constraint="1~32자의 영문자, 숫자, 하이픈. 하이픈으로 시작하거나 끝날 수 없습니다. 만든 뒤에는 바꿀 수 없습니다.">
+              <FormField help={{ docKey: "target-group", field: "name" }} label="대상 그룹 이름" constraint="1~32자의 영문자, 숫자, 하이픈. 하이픈으로 시작하거나 끝날 수 없습니다. 만든 뒤에는 바꿀 수 없습니다.">
                 <TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="my-target-group" maxLength={32} />
               </FormField>
               <div className="grid gap-4 sm:grid-cols-2">
-                <FormField label="프로토콜">
+                <FormField help={{ docKey: "target-group", field: "protocol" }} label="프로토콜">
                   <SelectInput value={protocol} onChange={(v) => setProtocol(v as "HTTP" | "HTTPS")} options={[{ value: "HTTP", label: "HTTP" }, { value: "HTTPS", label: "HTTPS" }]} />
                 </FormField>
-                <FormField label="포트" constraint="대상이 트래픽을 받는 포트">
+                <FormField help={{ docKey: "target-group", field: "port" }} label="포트" constraint="대상이 트래픽을 받는 포트">
                   <TextInput value={port} onChange={(e) => setPort(e.target.value)} inputMode="numeric" />
                 </FormField>
               </div>
-              <FormField label="VPC" description="대상으로 등록할 인스턴스가 있는 VPC">
+              <FormField help={{ docKey: "target-group", field: "vpc" }} label="VPC" description="대상으로 등록할 인스턴스가 있는 VPC">
                 <SelectInput value={vpcId} onChange={(v) => { setVpcId(v); setPending([]); setChecked([]); }} placeholder="VPC 선택" options={vpcs.map((v) => ({ value: v.id, label: `${v.id} (${displayName(v)})` }))} />
               </FormField>
             </SpaceBetween>
@@ -290,7 +293,7 @@ export function CreateTargetGroupPage() {
           <Container header={<ContainerHeader title="상태 검사" info={<InfoLink topic="health-check" />} description="로드 밸런서는 이 설정으로 대상에 주기적으로 요청을 보내 정상 여부를 확인합니다." />}>
             <HealthCheckFields draft={hc} onChange={setHc} />
           </Container>
-          <FormActions error={error ? <Alert type="error">{error}</Alert> : undefined}>
+          <FormActions error={error ? <ErrorAlert message={error} /> : undefined}>
             <ButtonLink variant="link" href={href("/ec2/target-groups")}>
               취소
             </ButtonLink>
@@ -314,7 +317,7 @@ export function CreateTargetGroupPage() {
                   ))}
                 </ul>
                 <div className="flex flex-wrap items-end gap-3">
-                  <FormField label="선택한 인스턴스용 포트">
+                  <FormField help={{ docKey: "target-group", field: "targets" }} label="선택한 인스턴스용 포트">
                     <TextInput value={port} disabled readOnly className="max-w-28" />
                   </FormField>
                   <Button onClick={() => { setPending([...new Set([...pending, ...checked])]); setChecked([]); }} disabled={!checked.length}>
@@ -344,7 +347,7 @@ export function CreateTargetGroupPage() {
               <p className="text-sm text-aws-text-2">보류 중인 대상이 없습니다.</p>
             )}
           </Container>
-          <FormActions error={error ? <Alert type="error">{error}</Alert> : undefined}>
+          <FormActions error={error ? <ErrorAlert message={error} /> : undefined}>
             <Button variant="link" onClick={() => setStep(1)}>
               이전
             </Button>
@@ -541,7 +544,7 @@ export function EditHealthCheckPage({ id }: { id: string }) {
     if (!h.ok) return setError(h.error);
     const r = run("ModifyTargetGroup", (p) => editTargetGroupHealthCheck(p, tg.id, h.value), { success: () => `대상 그룹 ${tg.name}의 상태 검사 설정을 저장했습니다.` });
     if (r.ok) navigate(resourcePath("target-group", tg.id), { query: { tab: "health" } });
-    else setError(r.error);
+    else setError(withHint(r));
   };
   return (
     <SpaceBetween>
@@ -549,7 +552,7 @@ export function EditHealthCheckPage({ id }: { id: string }) {
       <Container header={<ContainerHeader title="상태 검사" />}>
         <HealthCheckFields draft={draft} onChange={setDraft} />
       </Container>
-      <FormActions error={error ? <Alert type="error">{error}</Alert> : undefined}>
+      <FormActions error={error ? <ErrorAlert message={error} /> : undefined}>
         <ButtonLink variant="link" href={href(resourcePath("target-group", tg.id))}>
           취소
         </ButtonLink>

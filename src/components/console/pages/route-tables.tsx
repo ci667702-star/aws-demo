@@ -1,5 +1,6 @@
 "use client";
 
+import { withHint } from "../error-codes";
 import { useState } from "react";
 import { createId } from "@/lib/engine/ids";
 import type { ResourceOfType } from "@/lib/engine/resource-models";
@@ -7,7 +8,8 @@ import { displayName } from "@/lib/engine/topology-engine";
 import { createRouteTable, deleteRouteTable, editRouteTableAssociations, editRoutes, makeMainRouteTable } from "@/lib/project/console-actions";
 import { useRunAction } from "../console-context";
 import { href, navigate, resourcePath } from "../router";
-import { Alert } from "../ui/alert";
+import { Alert, ErrorAlert } from "../ui/alert";
+import { PageGuide } from "../ui/page-guide";
 import { Button, ButtonDropdown, ButtonLink } from "../ui/button";
 import { Checkbox, FormActions, FormField, SelectInput, TextInput } from "../ui/form";
 import { Container, ContainerHeader, EmptyState, KeyValueGrid, PageHeader, SpaceBetween } from "../ui/layout";
@@ -33,7 +35,7 @@ function DeleteRtModal({ rt, onClose }: { rt: RouteTable | undefined; onClose: (
       confirmText="delete"
       onConfirm={() => {
         const r = run("DeleteRouteTable", (p) => deleteRouteTable(p, rt.id), { success: () => `라우팅 테이블 ${rt.id}을(를) 삭제했습니다.` });
-        if (!r.ok) return [r.error, r.hint].filter(Boolean).join(" ");
+        if (!r.ok) return withHint(r);
         navigate("/vpc/route-tables");
         return null;
       }}
@@ -77,6 +79,7 @@ export function RouteTableListPage() {
   const onAction = useRtActionHandler(current, setDeleting, setNaming);
   return (
     <SpaceBetween>
+      <PageGuide topic="route-table" />
       <ResourceTable<RouteTable>
         ariaLabel="라우팅 테이블 목록"
         items={rts}
@@ -113,7 +116,7 @@ export function RouteTableListPage() {
             },
           },
           { id: "main", header: "기본", cell: (r) => (r.config.main ? "예" : "아니요"), sortValue: (r) => (r.config.main ? 0 : 1) },
-          { id: "routes", header: "경로 수", cell: (r) => topo.routesOf(r.id, topo.vpcOf(r.id)).length },
+          { id: "routes", optional: true, header: "경로 수", cell: (r) => topo.routesOf(r.id, topo.vpcOf(r.id)).length },
           { id: "vpc", header: "VPC", cell: (r) => <ResourceLink id={topo.vpcOf(r.id)} showName />, filterValue: (r) => topo.vpcOf(r.id) ?? "" },
         ]}
       />
@@ -136,17 +139,17 @@ export function CreateRouteTablePage() {
       successAction: (res) => ({ label: "라우팅 편집", href: href(`${resourcePath("route-table", res.createdId!)}/edit-routes`) }),
     });
     if (r.ok && r.createdId) navigate(resourcePath("route-table", r.createdId));
-    else if (!r.ok) setError(r.error);
+    else if (!r.ok) setError(withHint(r));
   };
   return (
-    <form onSubmit={submit} className="space-y-6" noValidate>
+    <form onSubmit={submit} className="space-y-6" noValidate data-tour="rt-form">
       <PageHeader title="라우팅 테이블 생성" info={<InfoLink topic="route-table" />} description="라우팅 테이블은 서브넷 또는 게이트웨이의 네트워크 트래픽이 전송되는 위치를 지정합니다." />
       <Container header={<ContainerHeader title="라우팅 테이블 설정" />}>
         <SpaceBetween size="m">
-          <FormField label="이름" optional>
+          <FormField help={{ docKey: "route-table", field: "name" }} label="이름" optional>
             <TextInput value={name} onChange={(e) => setName(e.target.value)} maxLength={128} placeholder="my-route-table-01" />
           </FormField>
-          <FormField label="VPC" description="이 라우팅 테이블에 사용할 VPC" error={error ?? undefined}>
+          <FormField help={{ docKey: "route-table", field: "vpc" }} label="VPC" description="이 라우팅 테이블에 사용할 VPC" error={error ?? undefined}>
             <SelectInput value={vpcId} onChange={setVpcId} placeholder="VPC 선택" options={topo.ofType("vpc").map((v) => ({ value: v.id, label: `${v.id} (${displayName(v)})`, description: v.config.cidr }))} />
           </FormField>
         </SpaceBetween>
@@ -287,18 +290,25 @@ export function EditRoutesPage({ id }: { id: string }) {
   const vpc = topo.getOfType(vpcId, "vpc");
   const igws = topo.ofType("internet-gateway");
   const nats = topo.ofType("nat-gateway").filter((n) => topo.vpcOf(n.id) === vpcId);
+  // NAT 인스턴스로 쓸 EC2 (같은 VPC, 종료되지 않은 것)
+  const instances = topo.ofType("ec2").filter((e) => topo.vpcOf(e.id) === vpcId && e.config.state !== "terminated");
   const targetOptions = [
     ...igws.map((g) => ({ value: g.id, label: `인터넷 게이트웨이 · ${g.id}${g.name ? ` (${g.name})` : ""}`, description: topo.vpcOfIgw(g.id) === vpcId ? undefined : "이 VPC에 연결되지 않음" })),
     ...nats.map((n) => ({ value: n.id, label: `NAT 게이트웨이 · ${n.id}${n.name ? ` (${n.name})` : ""}`, description: n.config.state })),
+    ...instances.map((e) => ({
+      value: e.id,
+      label: `인스턴스 · ${e.id}${e.name ? ` (${e.name})` : ""}`,
+      description: [e.config.state, e.config.sourceDestCheck !== false ? "소스/대상 확인 켜짐 — NAT로 쓰려면 끄세요" : "소스/대상 확인 꺼짐"].join(" · "),
+    })),
   ];
   const save = () => {
     const r = run("ReplaceRoutes", (p) => editRoutes(p, rt.id, drafts.map((d) => ({ destination: d.destination, targetId: d.targetId }))), { success: () => `라우팅 테이블 ${rt.id}의 경로를 업데이트했습니다.` });
     if (r.ok) navigate(resourcePath("route-table", rt.id), { query: { tab: "routes" } });
-    else setError(r.error);
+    else setError(withHint(r));
   };
   const update = (key: string, patch: Partial<RouteDraft>) => setDrafts(drafts.map((d) => (d.key === key ? { ...d, ...patch } : d)));
   return (
-    <SpaceBetween>
+    <div className="flex flex-col gap-6" data-tour="routes-form">
       <PageHeader title="라우팅 편집" info={<InfoLink topic="route-table" />} description={`${rt.id} (${displayName(rt)}) · VPC ${vpcId ?? "없음"}`} />
       <Container header={<ContainerHeader title="라우팅" description="목적지 CIDR과 트래픽을 보낼 대상을 지정합니다. 가장 구체적인 경로가 우선합니다." />}>
         <div className="overflow-x-auto">
@@ -348,11 +358,11 @@ export function EditRoutesPage({ id }: { id: string }) {
         </div>
         {!targetOptions.length && (
           <Alert type="info" className="mt-3">
-            경로 대상으로 쓸 인터넷 게이트웨이나 NAT 게이트웨이가 없습니다. 먼저 <a href={href("/vpc/igws/create")}>인터넷 게이트웨이</a>를 만들어 VPC에 연결하세요.
+            경로 대상으로 쓸 인터넷 게이트웨이, NAT 게이트웨이, 인스턴스가 없습니다. 먼저 <a href={href("/vpc/igws/create")}>인터넷 게이트웨이</a>를 만들어 VPC에 연결하세요.
           </Alert>
         )}
       </Container>
-      <FormActions error={error ? <Alert type="error" header="경로를 저장할 수 없습니다">{error}</Alert> : undefined}>
+      <FormActions error={error ? <ErrorAlert message={error} header="경로를 저장할 수 없습니다" /> : undefined}>
         <ButtonLink variant="link" href={href(resourcePath("route-table", rt.id))}>
           취소
         </ButtonLink>
@@ -360,7 +370,7 @@ export function EditRoutesPage({ id }: { id: string }) {
           변경 사항 저장
         </Button>
       </FormActions>
-    </SpaceBetween>
+    </div>
   );
 }
 
@@ -376,10 +386,10 @@ export function EditRouteTableAssociationsPage({ id }: { id: string }) {
   const save = () => {
     const r = run("AssociateRouteTable", (p) => editRouteTableAssociations(p, rt.id, selected), { success: () => `라우팅 테이블 ${rt.id}의 서브넷 연결을 업데이트했습니다.` });
     if (r.ok) navigate(resourcePath("route-table", rt.id), { query: { tab: "associations" } });
-    else setError(r.error);
+    else setError(withHint(r));
   };
   return (
-    <SpaceBetween>
+    <SpaceBetween tour="rt-associations">
       <PageHeader title="서브넷 연결 편집" info={<InfoLink topic="route-table" />} description={`${rt.id} (${displayName(rt)}) — 다른 테이블에 연결된 서브넷을 선택하면 이 테이블로 연결이 옮겨집니다.`} />
       <Container header={<ContainerHeader title={`사용 가능한 서브넷 (${subnets.length})`} />}>
         {subnets.length ? (
@@ -418,7 +428,7 @@ export function EditRouteTableAssociationsPage({ id }: { id: string }) {
           <p className="text-sm text-aws-text-2">이 VPC에 서브넷이 없습니다.</p>
         )}
       </Container>
-      <FormActions error={error ? <Alert type="error">{error}</Alert> : undefined}>
+      <FormActions error={error ? <ErrorAlert message={error} /> : undefined}>
         <ButtonLink variant="link" href={href(resourcePath("route-table", rt.id))}>
           취소
         </ButtonLink>

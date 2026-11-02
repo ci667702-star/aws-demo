@@ -16,6 +16,8 @@ import {
   type RelationSpec,
   type Resource,
   type ResourceType,
+  isRouteRelation,
+  isRouteConnection,
 } from "./resource-models";
 import { buildTopology, type Topology, displayName } from "./topology-engine";
 
@@ -113,7 +115,7 @@ export function checkConnection(
     .outgoing(source.id, spec.type)
     .filter((c) => c.targetResourceId === target.id && !ignore?.includes(c.id));
 
-  const isRoute = spec.type === "route-table-internet-gateway" || spec.type === "route-table-nat-gateway";
+  const isRoute = isRouteRelation(spec.type);
   if (existingSame.length && !isRoute && spec.type !== "alb-target-group") {
     return reject(`${topo.label(source.id)}와(과) ${topo.label(target.id)}은(는) 이미 '${spec.label}' 관계로 연결되어 있습니다.`);
   }
@@ -172,7 +174,8 @@ export function checkConnection(
       break;
     }
     case "route-table-internet-gateway":
-    case "route-table-nat-gateway": {
+    case "route-table-nat-gateway":
+    case "route-table-ec2": {
       if (options.console && !options.destinationCidr) {
         return reject("경로의 대상(Destination) CIDR을 입력해야 합니다.", "예: 인터넷으로 가는 기본 경로는 0.0.0.0/0");
       }
@@ -188,9 +191,17 @@ export function checkConnection(
             "라우팅 테이블의 IGW 대상은 같은 VPC에 연결된 IGW여야 합니다.",
           );
         }
-      } else {
+      } else if (spec.type === "route-table-nat-gateway") {
         const r = sameVpcCheck(topo, source, target, "라우팅 테이블의 NAT Gateway 대상은 같은 VPC에 있어야 합니다.");
         if (r) return r;
+      } else {
+        const ec2 = target as Extract<Resource, { type: "ec2" }>;
+        if (ec2.config.state === "terminated") return reject(`종료(Terminated)된 인스턴스 ${displayName(ec2)}은(는) 경로 대상으로 지정할 수 없습니다.`);
+        const r = sameVpcCheck(topo, source, target, "라우팅 테이블의 인스턴스 대상은 같은 VPC에 있어야 합니다.");
+        if (r) return r;
+        if (ec2.config.sourceDestCheck !== false) {
+          notes.push(`${displayName(ec2)}의 소스/대상 확인이 켜져 있습니다. NAT 인스턴스로 쓰려면 꺼야 트래픽을 전달합니다.`);
+        }
       }
       const conflict = topo
         .routesOf(source.id, rtVpc)
@@ -253,7 +264,7 @@ export function checkConnection(
           listenerId = free.listener.id;
           notes.push(`리스너 ${free.listener.protocol}:${free.listener.port}이(가) 대상 그룹 ${displayName(target)}(으)로 전달하도록 설정했습니다.`);
         } else if (alb.config.listeners.length === 0 && !options.console) {
-          const listener: Listener = { id: createId("lsn"), protocol: "HTTP", port: 80 };
+          const listener: Listener = { id: createId("lsn"), protocol: "HTTP", port: 80, rules: [] };
           listenerId = listener.id;
           configPatches.push({ resourceId: alb.id, patch: { listeners: [listener] } });
           notes.push(`ALB에 리스너가 없어 기본 리스너 HTTP:80을 만들고 대상 그룹 ${displayName(target)}(으)로 전달하도록 설정했습니다.`);
@@ -337,8 +348,6 @@ export function checkConnection(
 }
 
 export function relationLabel(connection: Connection): string {
-  if (connection.relationType === "route-table-internet-gateway" || connection.relationType === "route-table-nat-gateway") {
-    return connection.metadata.destinationCidr;
-  }
+  if (isRouteConnection(connection)) return connection.metadata.destinationCidr;
   return RELATION_SPECS[connection.relationType].label;
 }

@@ -1,6 +1,7 @@
 /**
  * 샘플 아키텍처. 대시보드의 "샘플 불러오기"와 첫 방문 예시 프로젝트에 사용한다.
  */
+import { natInstanceScript } from "@/lib/engine/nat-instance";
 import type { Project } from "@/lib/engine/resource-models";
 import { ProjectBuilder } from "./builder";
 import { NACL, SG } from "./factory";
@@ -92,6 +93,41 @@ export function createPrivateNatSample(name = "샘플: 프라이빗 서브넷 + 
   return b.build();
 }
 
+/** Public Subnet(NAT 인스턴스) + Private Subnet(EC2). NAT 게이트웨이 대신 EC2 한 대로 비용을 줄이는 구성 */
+export function createNatInstanceSample(name = "샘플: 프라이빗 서브넷 + NAT 인스턴스"): Project {
+  const b = new ProjectBuilder(name, {
+    awsDefaults: true,
+    description:
+      "NAT 게이트웨이 대신 퍼블릭 서브넷의 EC2(NAT 인스턴스)가 프라이빗 서브넷의 외부 통신을 대신합니다. 소스/대상 확인 중지, NAT 설정 스크립트, 인스턴스를 대상으로 하는 경로를 확인할 수 있습니다.",
+  });
+  const vpc = b.vpc("lab-vpc", "10.30.0.0/16");
+  const pub = b.subnet("public-a", vpc, "10.30.1.0/24", "ap-northeast-2a");
+  const priv = b.subnet("private-a", vpc, "10.30.11.0/24", "ap-northeast-2a");
+  const igw = b.igw("lab-igw", vpc);
+  b.routeTable("public-rt", vpc, { subnets: [pub], routes: [{ destination: "0.0.0.0/0", igw }] });
+  const natSg = b.securityGroup("nat-sg", vpc, {
+    description: "NAT 인스턴스: 프라이빗 서브넷의 HTTP/HTTPS 허용",
+    inbound: [
+      SG.tcp(80, "10.30.11.0/24", "HTTP from private subnet"),
+      SG.tcp(443, "10.30.11.0/24", "HTTPS from private subnet"),
+      SG.tcp(22, "203.0.113.0/24", "SSH from admin network"),
+    ],
+    outbound: [SG.tcp(80, "0.0.0.0/0", "HTTP to internet"), SG.tcp(443, "0.0.0.0/0", "HTTPS to internet")],
+  });
+  const nat = b.ec2("nat-instance", pub, {
+    ip: "10.30.1.10",
+    publicIp: "enabled",
+    sgs: [natSg],
+    listenPorts: [22],
+    sourceDestCheck: false,
+    userData: natInstanceScript("amazon-linux-2023") ?? "",
+  });
+  b.routeTable("private-rt", vpc, { subnets: [priv], routes: [{ destination: "0.0.0.0/0", instance: nat }] });
+  const sg = b.securityGroup("worker-sg", vpc, { description: "외부 API 호출용 워커" });
+  b.ec2("worker-1", priv, { ip: "10.30.11.10", sgs: [sg] });
+  return b.build();
+}
+
 export const SAMPLES: SampleDefinition[] = [
   {
     id: "three-tier",
@@ -110,5 +146,11 @@ export const SAMPLES: SampleDefinition[] = [
     title: "프라이빗 서브넷 + NAT Gateway",
     description: "프라이빗 EC2의 아웃바운드 통신과 NACL 동작을 확인합니다.",
     create: () => createPrivateNatSample(),
+  },
+  {
+    id: "private-nat-instance",
+    title: "프라이빗 서브넷 + NAT 인스턴스 (비용 절감)",
+    description: "NAT 게이트웨이 대신 EC2 한 대가 주소를 변환합니다. 소스/대상 확인과 NAT 설정 스크립트를 확인합니다.",
+    create: () => createNatInstanceSample(),
   },
 ];

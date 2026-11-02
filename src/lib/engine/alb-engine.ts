@@ -103,10 +103,13 @@ export function healthCheckPort(tg: ResourceOfType<"target-group">): number {
 
 // ---------------------------------------------------------------- health
 
-/** 대상 그룹을 사용하는(리스너가 실제로 전달하는) ALB를 찾는다. */
+/** 대상 그룹을 사용하는(리스너 기본 작업이나 리스너 규칙이 실제로 전달하는) ALB를 찾는다. */
 export function activeAlbFor(topo: Topology, tgId: string): ResourceOfType<"alb"> | null {
   for (const alb of topo.targetGroupAlbs(tgId)) {
-    if (topo.listenersOf(alb.id).some((b) => b.targetGroupId === tgId)) return alb;
+    const forwards = topo
+      .listenersOf(alb.id)
+      .some((b) => b.targetGroupId === tgId || (b.listener.rules ?? []).some((r) => r.action.type === "forward" && r.action.targetGroupId === tgId));
+    if (forwards) return alb;
   }
   return null;
 }

@@ -1,5 +1,6 @@
 "use client";
 
+import { withHint } from "../error-codes";
 import { useState } from "react";
 import { AVAILABILITY_ZONES, RDS_DEFAULT_PORT, RDS_INSTANCE_CLASSES, type ConfigOf, type ResourceOfType } from "@/lib/engine/resource-models";
 import { displayName } from "@/lib/engine/topology-engine";
@@ -14,7 +15,8 @@ import {
 } from "@/lib/project/console-actions";
 import { useRunAction } from "../console-context";
 import { href, navigate, resourcePath } from "../router";
-import { Alert } from "../ui/alert";
+import { Alert, ErrorAlert } from "../ui/alert";
+import { PageGuide } from "../ui/page-guide";
 import { Button, ButtonDropdown, ButtonLink } from "../ui/button";
 import { FormActions, FormField, MultiSelect, RadioGroup, SelectInput, TextInput, Tiles } from "../ui/form";
 import { Container, ContainerHeader, EmptyState, ExpandableSection, KeyValueGrid, PageHeader, SpaceBetween } from "../ui/layout";
@@ -80,7 +82,7 @@ function DbSubnetGroupFields({
       <FormField label="가용 영역" info={<InfoLink topic="availability-zone" />} constraint="최소 2개 가용 영역">
         <MultiSelect aria-label="가용 영역" selected={azs} onChange={(v) => { setAzs(v); setSubnetIds(subnetIds.filter((id) => v.includes(topo.getOfType(id, "subnet")?.config.availabilityZone ?? ""))); }} options={zoneOptions} empty={vpcId ? "이 VPC에 서브넷이 없습니다." : "먼저 VPC를 선택하세요."} />
       </FormField>
-      <FormField label="서브넷" description="DB 인스턴스는 보통 인터넷 경로가 없는 프라이빗 서브넷에 둡니다.">
+      <FormField help={{ docKey: "db-subnet-group", field: "subnets" }} label="서브넷" description="DB 인스턴스는 보통 인터넷 경로가 없는 프라이빗 서브넷에 둡니다.">
         <MultiSelect aria-label="서브넷" selected={subnetIds} onChange={setSubnetIds} options={subnetOptions} empty="가용 영역을 먼저 선택하세요." />
       </FormField>
     </SpaceBetween>
@@ -96,6 +98,7 @@ export function DbSubnetGroupListPage() {
   const current = groups.find((g) => g.id === selected[0]);
   return (
     <SpaceBetween>
+      <PageGuide topic="db-subnet-group" />
       <ResourceTable<Dbsg>
         ariaLabel="DB 서브넷 그룹 목록"
         items={groups}
@@ -129,7 +132,7 @@ export function DbSubnetGroupListPage() {
           { id: "name", header: "이름", cell: (g) => <TypedResourceLink type="db-subnet-group" id={g.id}>{g.name}</TypedResourceLink>, sortValue: (g) => g.name },
           { id: "desc", header: "설명", cell: (g) => <span className="text-aws-text-2">{g.config.description}</span> },
           { id: "state", header: "상태", cell: () => <StatusIndicator type="success">완료</StatusIndicator> },
-          { id: "vpc", header: "VPC", cell: (g) => <ResourceLink id={topo.vpcsOf(g.id)[0]} /> },
+          { id: "vpc", optional: true, header: "VPC", cell: (g) => <ResourceLink id={topo.vpcsOf(g.id)[0]} /> },
           { id: "subnets", header: "서브넷", cell: (g) => `${topo.dbSubnetGroupSubnets(g.id).length}개` },
         ]}
       />
@@ -140,7 +143,7 @@ export function DbSubnetGroupListPage() {
           title="DB 서브넷 그룹 삭제"
           onConfirm={() => {
             const r = run("DeleteDBSubnetGroup", (p) => deleteDbSubnetGroup(p, current.id), { success: () => `DB 서브넷 그룹 ${current.name}을(를) 삭제했습니다.` });
-            return r.ok ? null : r.error;
+            return r.ok ? null : withHint(r);
           }}
         >
           <p>
@@ -165,17 +168,17 @@ export function CreateDbSubnetGroupPage() {
   const submit = () => {
     const r = run("CreateDBSubnetGroup", (p) => createDbSubnetGroup(p, { name, description, vpcId, subnetIds }), { success: () => `DB 서브넷 그룹 ${name.trim().toLowerCase()}을(를) 생성했습니다.` });
     if (r.ok) navigate("/rds/subnet-groups");
-    else setError(r.error);
+    else setError(withHint(r));
   };
   return (
     <SpaceBetween>
       <PageHeader title="DB 서브넷 그룹 생성" info={<InfoLink topic="db-subnet-group" />} description="DB 인스턴스를 배치할 서브넷 묶음을 만듭니다." />
       <Container header={<ContainerHeader title="서브넷 그룹 세부 정보" />}>
         <SpaceBetween size="m">
-          <FormField label="이름" constraint="영문 소문자, 숫자, 공백, 마침표, 밑줄, 하이픈. 'default'는 쓸 수 없습니다.">
+          <FormField help={{ docKey: "db-subnet-group", field: "name" }} label="이름" constraint="영문 소문자, 숫자, 공백, 마침표, 밑줄, 하이픈. 'default'는 쓸 수 없습니다.">
             <TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="my-db-subnets" maxLength={255} />
           </FormField>
-          <FormField label="설명">
+          <FormField help={{ docKey: "db-subnet-group", field: "description" }} label="설명">
             <TextInput value={description} onChange={(e) => setDescription(e.target.value)} placeholder="DB용 프라이빗 서브넷" maxLength={255} />
           </FormField>
         </SpaceBetween>
@@ -183,7 +186,7 @@ export function CreateDbSubnetGroupPage() {
       <Container header={<ContainerHeader title="서브넷 추가" />}>
         <DbSubnetGroupFields vpcId={vpcId} setVpcId={setVpcId} azs={azs} setAzs={setAzs} subnetIds={subnetIds} setSubnetIds={setSubnetIds} />
       </Container>
-      <FormActions error={error ? <Alert type="error">{error}</Alert> : undefined}>
+      <FormActions error={error ? <ErrorAlert message={error} /> : undefined}>
         <ButtonLink variant="link" href={href("/rds/subnet-groups")}>
           취소
         </ButtonLink>
@@ -243,20 +246,20 @@ export function EditDbSubnetGroupPage({ id }: { id: string }) {
   const save = () => {
     const r = run("ModifyDBSubnetGroup", (p) => editDbSubnetGroup(p, group.id, { description, subnetIds }), { success: () => `DB 서브넷 그룹 ${group.name}을(를) 수정했습니다.` });
     if (r.ok) navigate(resourcePath("db-subnet-group", group.id));
-    else setError(r.error);
+    else setError(withHint(r));
   };
   return (
     <SpaceBetween>
       <PageHeader title="DB 서브넷 그룹 편집" description={group.name} />
       <Container header={<ContainerHeader title="서브넷 그룹 세부 정보" />}>
-        <FormField label="설명">
+        <FormField help={{ docKey: "db-subnet-group", field: "description" }} label="설명">
           <TextInput value={description} onChange={(e) => setDescription(e.target.value)} maxLength={255} />
         </FormField>
       </Container>
       <Container header={<ContainerHeader title="서브넷" />}>
         <DbSubnetGroupFields vpcId={vpcId} setVpcId={setVpcId} azs={azs} setAzs={setAzs} subnetIds={subnetIds} setSubnetIds={setSubnetIds} lockVpc />
       </Container>
-      <FormActions error={error ? <Alert type="error">{error}</Alert> : undefined}>
+      <FormActions error={error ? <ErrorAlert message={error} /> : undefined}>
         <ButtonLink variant="link" href={href(resourcePath("db-subnet-group", group.id))}>
           취소
         </ButtonLink>
@@ -281,7 +284,7 @@ function DbDeleteModal({ db, onClose }: { db: Db | undefined; onClose: () => voi
       confirmText="delete me"
       onConfirm={() => {
         const r = run("DeleteDBInstance", (p) => deleteDatabase(p, db.id), { success: () => `DB 인스턴스 ${db.name}을(를) 삭제했습니다.` });
-        if (!r.ok) return r.error;
+        if (!r.ok) return withHint(r);
         navigate("/rds/databases");
         return null;
       }}
@@ -300,6 +303,7 @@ export function DatabaseListPage() {
   const current = dbs.find((d) => d.id === selected[0]);
   return (
     <SpaceBetween>
+      <PageGuide topic="rds" />
       <ResourceTable<Db>
         ariaLabel="데이터베이스 목록"
         items={dbs}
@@ -342,12 +346,12 @@ export function DatabaseListPage() {
         columns={[
           { id: "name", header: "DB 식별자", cell: (d) => <TypedResourceLink type="rds" id={d.id}>{d.name}</TypedResourceLink>, sortValue: (d) => d.name },
           { id: "state", header: "상태", cell: (d) => <DbState state={d.config.state} /> },
-          { id: "role", header: "역할", cell: () => "인스턴스" },
+          { id: "role", optional: true, header: "역할", cell: () => "인스턴스" },
           { id: "engine", header: "엔진", cell: (d) => (d.config.engine === "mysql" ? "MySQL Community" : "PostgreSQL") },
-          { id: "az", header: "리전 및 AZ", cell: (d) => topo.rdsPlacement(d.id).primary?.config.availabilityZone ?? "–" },
+          { id: "az", optional: true, header: "리전 및 AZ", cell: (d) => topo.rdsPlacement(d.id).primary?.config.availabilityZone ?? "–" },
           { id: "size", header: "크기", cell: (d) => d.config.instanceClass },
-          { id: "vpc", header: "VPC", cell: (d) => <ResourceLink id={topo.vpcOf(d.id)} /> },
-          { id: "maz", header: "다중 AZ", cell: (d) => (d.config.multiAz ? "예" : "아니요") },
+          { id: "vpc", optional: true, header: "VPC", cell: (d) => <ResourceLink id={topo.vpcOf(d.id)} /> },
+          { id: "maz", optional: true, header: "다중 AZ", cell: (d) => (d.config.multiAz ? "예" : "아니요") },
         ]}
       />
       <DbDeleteModal db={deleting ? current : undefined} onClose={() => setDeleting(false)} />
@@ -370,12 +374,12 @@ function DbInstanceFields({ draft, set, vpcId }: { draft: DbNetworkDraft; set: (
   return (
     <>
       <Container header={<ContainerHeader title="인스턴스 구성" />}>
-        <FormField label="DB 인스턴스 클래스" description="성능은 시뮬레이션하지 않으며 가상 비용 추정에만 사용됩니다.">
+        <FormField help={{ docKey: "rds", field: "instanceClass" }} label="DB 인스턴스 클래스" description="성능은 시뮬레이션하지 않으며 가상 비용 추정에만 사용됩니다.">
           <SelectInput value={draft.instanceClass} onChange={(v) => set({ instanceClass: v as InstanceClass })} options={RDS_INSTANCE_CLASSES.map((c) => ({ value: c, label: c, description: CLASS_INFO[c] }))} />
         </FormField>
       </Container>
       <Container header={<ContainerHeader title="스토리지" />}>
-        <FormField label="할당된 스토리지 (GiB)" constraint="20~65536 GiB">
+        <FormField help={{ docKey: "rds", field: "allocatedStorageGb" }} label="할당된 스토리지 (GiB)" constraint="20~65536 GiB">
           <TextInput value={draft.storage} onChange={(e) => set({ storage: e.target.value })} inputMode="numeric" className="max-w-40" />
         </FormField>
       </Container>
@@ -392,7 +396,7 @@ function DbInstanceFields({ draft, set, vpcId }: { draft: DbNetworkDraft; set: (
       </Container>
       <Container header={<ContainerHeader title="연결" info={<InfoLink topic="rds-public" />} />}>
         <SpaceBetween size="m">
-          <FormField label="퍼블릭 액세스" info={<InfoLink topic="rds-public" />}>
+          <FormField help={{ docKey: "rds", field: "publiclyAccessible" }} label="퍼블릭 액세스" info={<InfoLink topic="rds-public" />}>
             <RadioGroup
               aria-label="퍼블릭 액세스"
               value={draft.publiclyAccessible ? "yes" : "no"}
@@ -403,11 +407,11 @@ function DbInstanceFields({ draft, set, vpcId }: { draft: DbNetworkDraft; set: (
               ]}
             />
           </FormField>
-          <FormField label="VPC 보안 그룹(방화벽)" constraint="DB 포트를 필요한 소스(예: 앱 서버 보안 그룹)에만 허용하세요.">
+          <FormField help={{ docKey: "rds", field: "securityGroups" }} label="VPC 보안 그룹(방화벽)" constraint="DB 포트를 필요한 소스(예: 앱 서버 보안 그룹)에만 허용하세요.">
             <MultiSelect aria-label="VPC 보안 그룹" selected={draft.sgIds} onChange={(v) => set({ sgIds: v })} max={5} empty={vpcId ? "이 VPC에 보안 그룹이 없습니다." : "먼저 DB 서브넷 그룹을 선택하세요."} options={groups.map((g) => ({ value: g.id, label: `${g.name} (${g.id})`, description: g.config.description }))} />
           </FormField>
           <ExpandableSection header="추가 구성">
-            <FormField label="데이터베이스 포트" constraint="1150~65535">
+            <FormField help={{ docKey: "rds", field: "port" }} label="데이터베이스 포트" constraint="1150~65535">
               <TextInput value={draft.port} onChange={(e) => set({ port: e.target.value })} inputMode="numeric" className="max-w-32" />
             </FormField>
           </ExpandableSection>
@@ -454,11 +458,12 @@ export function CreateDatabasePage() {
       { success: () => `데이터베이스 ${identifier.trim()}을(를) 생성하는 중입니다.` },
     );
     if (r.ok && r.createdId) navigate(resourcePath("rds", r.createdId));
-    else if (!r.ok) setError([r.error, r.hint].filter(Boolean).join(" "));
+    else if (!r.ok) setError(withHint(r));
   };
   return (
     <SpaceBetween>
       <PageHeader title="데이터베이스 생성" info={<InfoLink topic="rds" />} description="표준 생성 — 가상 DB 인스턴스를 만듭니다. 실제 데이터베이스 엔진은 실행되지 않으며 네트워크 연결만 시뮬레이션합니다." />
+      <PageGuide topic="rds" />
       <Container header={<ContainerHeader title="엔진 옵션" />}>
         <Tiles
           aria-label="엔진 유형"
@@ -488,7 +493,7 @@ export function CreateDatabasePage() {
       </Container>
       <Container header={<ContainerHeader title="설정" />}>
         <SpaceBetween size="m">
-          <FormField label="DB 인스턴스 식별자" constraint="영문 소문자로 시작, 1~63자의 영문 소문자·숫자·하이픈. 하이픈으로 끝나거나 연속 하이픈을 쓸 수 없습니다.">
+          <FormField help={{ docKey: "rds", field: "name" }} label="DB 인스턴스 식별자" constraint="영문 소문자로 시작, 1~63자의 영문 소문자·숫자·하이픈. 하이픈으로 끝나거나 연속 하이픈을 쓸 수 없습니다.">
             <TextInput value={identifier} onChange={(e) => setIdentifier(e.target.value)} maxLength={63} />
           </FormField>
           <Alert type="info" header="자격 증명 설정 없음">
@@ -511,7 +516,7 @@ export function CreateDatabasePage() {
               options={topo.ofType("vpc").map((v) => ({ value: v.id, label: `${v.id} (${displayName(v)})` }))}
             />
           </FormField>
-          <FormField label="DB 서브넷 그룹" description="DB 인스턴스가 사용할 서브넷과 IP 범위">
+          <FormField help={{ docKey: "rds", field: "dbSubnetGroup" }} label="DB 서브넷 그룹" description="DB 인스턴스가 사용할 서브넷과 IP 범위">
             <SelectInput value={groupId} onChange={setGroupId} placeholder={groups.length ? "DB 서브넷 그룹 선택" : "사용 가능한 DB 서브넷 그룹 없음"} options={groups.map((g) => ({ value: g.id, label: g.name, description: g.config.description }))} />
           </FormField>
           {!groups.length && (
@@ -521,7 +526,7 @@ export function CreateDatabasePage() {
           )}
         </SpaceBetween>
       </Container>
-      <FormActions error={error ? <Alert type="error" header="데이터베이스를 생성할 수 없습니다">{error}</Alert> : undefined}>
+      <FormActions error={error ? <ErrorAlert message={error} header="데이터베이스를 생성할 수 없습니다" /> : undefined}>
         <ButtonLink variant="link" href={href("/rds/databases")}>
           취소
         </ButtonLink>
@@ -665,14 +670,14 @@ export function ModifyDatabasePage({ id }: { id: string }) {
       { success: () => `DB 인스턴스 ${db.name}을(를) 수정했습니다. (변경 사항 즉시 적용)` },
     );
     if (r.ok) navigate(resourcePath("rds", db.id));
-    else setError([r.error, r.hint].filter(Boolean).join(" "));
+    else setError(withHint(r));
   };
   return (
     <SpaceBetween>
       <PageHeader title={`DB 인스턴스 수정: ${db.name}`} info={<InfoLink topic="rds" />} />
       {db.config.state !== "available" && <Alert type="warning">DB 인스턴스가 ‘사용 가능’ 상태일 때만 수정할 수 있습니다. 현재 상태: {db.config.state}</Alert>}
       <DbInstanceFields draft={draft} set={set} vpcId={topo.vpcOf(db.id)} />
-      <FormActions error={error ? <Alert type="error" header="수정할 수 없습니다">{error}</Alert> : undefined}>
+      <FormActions error={error ? <ErrorAlert message={error} header="수정할 수 없습니다" /> : undefined}>
         <ButtonLink variant="link" href={href(resourcePath("rds", db.id))}>
           취소
         </ButtonLink>

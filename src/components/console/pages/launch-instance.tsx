@@ -1,6 +1,7 @@
 "use client";
 
 /** EC2 인스턴스 시작 마법사 (AWS 콘솔의 단일 페이지 구성) */
+import { withHint } from "../error-codes";
 import { useMemo, useState } from "react";
 import { EC2_INSTANCE_TYPES, type ConfigOf, type Project, type SgRule } from "@/lib/engine/resource-models";
 import { displayName } from "@/lib/engine/topology-engine";
@@ -10,11 +11,13 @@ import { touch } from "@/lib/project/mutations";
 import { useRunAction } from "../console-context";
 import { href, navigate, resourcePath } from "../router";
 import { Alert } from "../ui/alert";
+import { PageGuide } from "../ui/page-guide";
 import { Button, ButtonLink } from "../ui/button";
 import { Checkbox, FormField, MultiSelect, RadioGroup, SelectInput, TextInput, Tiles } from "../ui/form";
 import { Container, ContainerHeader, ExpandableSection, KeyValueGrid, PageHeader, SpaceBetween } from "../ui/layout";
 import { InfoLink } from "../ui/links";
 import { useTopology } from "./common";
+import { Ec2RoleSelect, InstanceRoleLink } from "./iam/instance-role";
 import { UserDataFields, useUserDataDraft } from "./user-data";
 
 type Ami = ConfigOf<"ec2">["ami"];
@@ -39,6 +42,7 @@ export function LaunchInstancePage() {
   const [allowHttps, setAllowHttps] = useState(false);
   const [privateIp, setPrivateIp] = useState("");
   const [count, setCount] = useState("1");
+  const [iamRoleId, setIamRoleId] = useState("");
   const userData = useUserDataDraft(ami);
   const [error, setError] = useState<string | null>(null);
 
@@ -91,6 +95,7 @@ export function LaunchInstancePage() {
           httpResponseCode: ud.value.httpResponseCode,
           userData: ud.value.userData,
           count: Number.isInteger(n) ? n : NaN,
+          iamRoleId: iamRoleId || null,
         });
         if (!launched.ok) return launched;
         ids.push(...launched.project.resources.filter((r) => r.type === "ec2" && !p.resources.some((x) => x.id === r.id)).map((r) => r.id));
@@ -98,17 +103,18 @@ export function LaunchInstancePage() {
       },
       { success: () => `인스턴스를 시작했습니다: ${ids.join(", ")}` },
     );
-    if (!result.ok) setError([result.error, result.hint].filter(Boolean).join(" "));
+    if (!result.ok) setError(withHint(result));
     else navigate(ids.length === 1 ? resourcePath("ec2", ids[0]) : "/ec2/instances");
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" data-tour="launch-form">
       <PageHeader title="인스턴스 시작" info={<InfoLink topic="ec2-launch" />} description="아래 단계에 따라 가상 EC2 인스턴스를 구성합니다. 실제 서버는 실행되지 않으며, 네트워크 동작만 시뮬레이션합니다." />
+      <PageGuide topic="ec2-launch" />
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
         <SpaceBetween>
           <Container header={<ContainerHeader title="이름 및 태그" />}>
-            <FormField label="이름">
+            <FormField help={{ docKey: "ec2", field: "name" }} label="이름">
               <TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="예: My Web Server" maxLength={128} />
             </FormField>
           </Container>
@@ -126,7 +132,7 @@ export function LaunchInstancePage() {
           </Container>
 
           <Container header={<ContainerHeader title="인스턴스 유형" />}>
-            <FormField label="인스턴스 유형" description="성능은 시뮬레이션하지 않으며 가상 비용 추정에만 사용됩니다.">
+            <FormField help={{ docKey: "ec2", field: "instanceType" }} label="인스턴스 유형" description="성능은 시뮬레이션하지 않으며 가상 비용 추정에만 사용됩니다.">
               <SelectInput
                 value={instanceType}
                 onChange={(v) => setInstanceType(v as typeof instanceType)}
@@ -160,7 +166,7 @@ export function LaunchInstancePage() {
                   VPC가 없습니다. 먼저 <a href={href("/vpc/vpcs/create")}>VPC</a>와 <a href={href("/vpc/subnets/create")}>서브넷</a>을 만드세요.
                 </Alert>
               )}
-              <FormField label="서브넷">
+              <FormField help={{ docKey: "ec2", field: "subnet" }} label="서브넷">
                 <SelectInput
                   value={subnetId}
                   onChange={setSubnetId}
@@ -173,7 +179,7 @@ export function LaunchInstancePage() {
                   }))}
                 />
               </FormField>
-              <FormField label="퍼블릭 IP 자동 할당" info={<InfoLink topic="public-ip" />}>
+              <FormField help={{ docKey: "ec2", field: "publicIpMode" }} label="퍼블릭 IP 자동 할당" info={<InfoLink topic="public-ip" />}>
                 <SelectInput
                   value={publicIpMode}
                   onChange={(v) => setPublicIpMode(v as typeof publicIpMode)}
@@ -184,7 +190,7 @@ export function LaunchInstancePage() {
                   ]}
                 />
               </FormField>
-              <FormField label="방화벽(보안 그룹)" info={<InfoLink topic="security-group" />} description="보안 그룹은 인스턴스에 대한 트래픽을 제어하는 방화벽 규칙 집합입니다.">
+              <FormField help={{ docKey: "ec2", field: "securityGroups" }} label="방화벽(보안 그룹)" info={<InfoLink topic="security-group" />} description="보안 그룹은 인스턴스에 대한 트래픽을 제어하는 방화벽 규칙 집합입니다.">
                 <RadioGroup
                   aria-label="방화벽"
                   value={sgMode}
@@ -197,7 +203,7 @@ export function LaunchInstancePage() {
               </FormField>
               {sgMode === "create" ? (
                 <div className="space-y-3 rounded-xl border border-aws-border p-4">
-                  <FormField label="보안 그룹 이름">
+                  <FormField help={{ docKey: "security-group", field: "name" }} label="보안 그룹 이름">
                     <TextInput value={newSgName} onChange={(e) => setNewSgName(e.target.value)} maxLength={255} />
                   </FormField>
                   <p className="text-[13px] text-aws-text-2">다음 규칙으로 새 보안 그룹을 만듭니다. 아무것도 선택하지 않으면 인바운드 트래픽이 모두 거부됩니다.</p>
@@ -205,7 +211,7 @@ export function LaunchInstancePage() {
                     {windows ? "RDP" : "SSH"} 트래픽 허용
                   </Checkbox>
                   {allowSsh && (
-                    <FormField label="소스 CIDR" constraint="0.0.0.0/0은 모든 IP에서 접근을 허용합니다. 보통 관리자 네트워크로 제한합니다.">
+                    <FormField help={{ docKey: "security-group", field: "peer" }} label="소스 CIDR" constraint="0.0.0.0/0은 모든 IP에서 접근을 허용합니다. 보통 관리자 네트워크로 제한합니다.">
                       <TextInput value={sshFrom} onChange={(e) => setSshFrom(e.target.value)} className="max-w-64" />
                     </FormField>
                   )}
@@ -217,7 +223,7 @@ export function LaunchInstancePage() {
                   </Checkbox>
                 </div>
               ) : (
-                <FormField label="공통 보안 그룹" constraint="선택한 VPC의 보안 그룹, 1~5개">
+                <FormField help={{ docKey: "ec2", field: "securityGroups" }} label="공통 보안 그룹" constraint="선택한 VPC의 보안 그룹, 1~5개">
                   <MultiSelect
                     aria-label="보안 그룹 선택"
                     selected={existingSgs}
@@ -229,7 +235,7 @@ export function LaunchInstancePage() {
                 </FormField>
               )}
               <ExpandableSection header="고급 네트워크 구성">
-                <FormField label="기본 IP" optional description="비워 두면 서브넷에서 사용 가능한 주소가 자동으로 할당됩니다." constraint={subnet ? `${subnet.config.cidr} 범위 · 처음 4개와 마지막 주소는 AWS 예약` : undefined}>
+                <FormField help={{ docKey: "ec2", field: "privateIp" }} label="기본 IP" optional description="비워 두면 서브넷에서 사용 가능한 주소가 자동으로 할당됩니다." constraint={subnet ? `${subnet.config.cidr} 범위 · 처음 4개와 마지막 주소는 AWS 예약` : undefined}>
                   <TextInput value={privateIp} onChange={(e) => setPrivateIp(e.target.value)} placeholder="자동 할당" className="max-w-64" />
                 </FormField>
               </ExpandableSection>
@@ -237,7 +243,19 @@ export function LaunchInstancePage() {
           </Container>
 
           <ExpandableSection variant="container" header="고급 세부 정보" defaultExpanded>
-            <UserDataFields ami={ami} draft={userData} />
+            <SpaceBetween size="m">
+              <FormField help={{ docKey: "ec2", field: "iamRoleId" }}
+                label="IAM 인스턴스 프로파일"
+                info={<InfoLink topic="iam-role" />}
+                description="서버 안의 프로그램이 S3 같은 서비스를 호출할 때 쓸 IAM 역할입니다. 액세스 키를 서버에 넣는 대신 역할을 연결하세요."
+              >
+                <Ec2RoleSelect value={iamRoleId} onChange={setIamRoleId} />
+              </FormField>
+              <p className="text-sm text-aws-text-2">
+                EC2용 역할이 없다면 IAM → 역할에서 먼저 만드세요. 인스턴스를 시작한 뒤에도 작업 → 보안 → IAM 역할 수정에서 연결할 수 있습니다.
+              </p>
+              <UserDataFields ami={ami} draft={userData} />
+            </SpaceBetween>
           </ExpandableSection>
         </SpaceBetween>
 
@@ -255,6 +273,7 @@ export function LaunchInstancePage() {
                   { label: "방화벽(보안 그룹)", value: sgMode === "create" ? `새 보안 그룹 (${newSgName})` : existingSgs.join(", ") || "선택 안 됨" },
                   { label: "서브넷", value: subnet ? `${subnet.id} · ${subnet.config.availabilityZone}` : "선택 안 됨" },
                   { label: "퍼블릭 IPv4", value: subnet ? (willHavePublicIp ? "할당됨" : "할당 안 됨") : "–" },
+                  { label: "IAM 역할", value: iamRoleId ? <InstanceRoleLink roleId={iamRoleId} /> : "없음" },
                   { label: "가상 서비스 포트", value: (() => { const v = userData.toValue(ami); return v.ok ? v.value.listenPorts.join(", ") : "입력 확인 필요"; })() },
                 ]}
               />

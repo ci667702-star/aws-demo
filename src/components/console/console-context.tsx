@@ -7,7 +7,8 @@ import { createContext, useCallback, useContext } from "react";
 import type { Project } from "@/lib/engine/resource-models";
 import type { ActionResult } from "@/lib/project/console-actions";
 import { useProjectStore } from "@/lib/store/project-store";
-import { useConsoleUi } from "./console-store";
+import { errorCode, explainError } from "./error-codes";
+import { notify } from "./notify";
 
 const ProjectIdContext = createContext<string | null>(null);
 
@@ -27,16 +28,16 @@ export function useProject(): Project {
 }
 
 export interface RunOptions {
-  /** 성공 시 알림 표시줄에 보여줄 메시지 */
+  /** 성공 시 토스트 제목 */
   success?: (result: Extract<ActionResult, { ok: true }>) => string;
   /** 성공 알림에 붙일 이동 버튼 */
   successAction?: (result: Extract<ActionResult, { ok: true }>) => { label: string; href: string };
-  /** 실패를 알림 표시줄에 표시 (양식 안에 표시할 때는 false) */
+  /** 실패를 토스트로 표시 (양식 안에 오류를 표시할 때는 false) */
   flashError?: boolean;
 }
 
 /**
- * 콘솔 동작 실행: 프로젝트 스토어에 적용하고(실행 취소 기록 포함) 결과를 알림 표시줄로 알린다.
+ * 콘솔 동작 실행: 프로젝트 스토어에 적용하고(실행 취소 기록 포함) 결과를 토스트로 알린다.
  * eventName은 활동 기록에 남는 API 이름이다 (예: CreateVpc).
  */
 export function useRunAction() {
@@ -44,16 +45,12 @@ export function useRunAction() {
   return useCallback(
     (eventName: string, mutate: (project: Project) => ActionResult, options: RunOptions = {}): ActionResult => {
       const result = useProjectStore.getState().apply(projectId, eventName, mutate);
-      const ui = useConsoleUi.getState();
       if (result.ok && options.success) {
-        ui.pushFlash({
-          type: "success",
-          content: options.success(result),
-          notes: result.notes.length ? result.notes : undefined,
-          action: options.successAction?.(result),
-        });
+        notify({ type: "success", title: options.success(result), notes: result.notes, action: options.successAction?.(result) });
       } else if (!result.ok && options.flashError) {
-        ui.pushFlash({ type: "error", header: `${eventName} 실패`, content: result.error, notes: result.hint ? [result.hint] : undefined });
+        const explanation = explainError(result.error);
+        const notes = [result.hint ? `해결 방법: ${result.hint}` : null, explanation ? `${errorCode(result.error)} 오류란? ${explanation}` : null].filter((n): n is string => !!n);
+        notify({ type: "error", title: "작업을 완료할 수 없습니다", description: result.error, notes });
       }
       return result;
     },

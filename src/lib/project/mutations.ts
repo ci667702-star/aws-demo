@@ -19,6 +19,7 @@ import {
   type Resource,
   type ResourceType,
   type Viewport,
+  isRouteConnection,
 } from "@/lib/engine/resource-models";
 import { buildTopology } from "@/lib/engine/topology-engine";
 import { createResource } from "./factory";
@@ -61,9 +62,22 @@ export function deleteResources(project: Project, ids: string[]): MutationResult
   const removedConnections = project.connections.filter((c) => remove.has(c.sourceResourceId) || remove.has(c.targetResourceId));
   if (removedConnections.length) notes.push(`관련 연결 ${removedConnections.length}개를 함께 삭제했습니다.`);
   let strippedRules = 0;
+  let strippedListenerRules = 0;
   const resources = project.resources
     .filter((r) => !remove.has(r.id))
     .map((r) => {
+      if (r.type === "alb") {
+        // 삭제된 대상 그룹으로 전달하던 리스너 규칙은 함께 지운다
+        let dropped = 0;
+        const listeners = r.config.listeners.map((l) => {
+          const rules = (l.rules ?? []).filter((rule) => !(rule.action.type === "forward" && remove.has(rule.action.targetGroupId)));
+          dropped += (l.rules ?? []).length - rules.length;
+          return rules.length === (l.rules ?? []).length ? l : { ...l, rules };
+        });
+        if (!dropped) return r;
+        strippedListenerRules += dropped;
+        return { ...r, config: { ...r.config, listeners } };
+      }
       if (r.type !== "security-group") return r;
       const keep = (rule: (typeof r.config.inboundRules)[number]) =>
         !(rule.peer.kind === "security-group" && remove.has(rule.peer.securityGroupId));
@@ -75,6 +89,7 @@ export function deleteResources(project: Project, ids: string[]): MutationResult
       return { ...r, config: { ...r.config, inboundRules, outboundRules } };
     });
   if (strippedRules) notes.push(`삭제된 보안 그룹을 참조하던 규칙 ${strippedRules}개를 정리했습니다.`);
+  if (strippedListenerRules) notes.push(`삭제된 대상 그룹으로 전달하던 리스너 규칙 ${strippedListenerRules}개를 정리했습니다.`);
   return ok(
     touch({
       ...project,
@@ -241,7 +256,7 @@ export function addRoute(project: Project, routeTableId: string, targetId: strin
 /** 라우팅 경로의 Destination 수정 */
 export function updateRouteDestination(project: Project, connectionId: string, destinationCidr: string): MutationResult {
   const conn = project.connections.find((c) => c.id === connectionId);
-  if (!conn || (conn.relationType !== "route-table-internet-gateway" && conn.relationType !== "route-table-nat-gateway")) {
+  if (!conn || !isRouteConnection(conn)) {
     return fail("경로를 찾을 수 없습니다.");
   }
   const parsed = parseCidr(destinationCidr);
@@ -257,10 +272,10 @@ export function updateRouteDestination(project: Project, connectionId: string, d
   return ok(touch({ ...project, connections: project.connections.map((c) => (c.id === conn.id ? updated : c)) }));
 }
 
-/** 라우팅 경로의 대상(IGW/NAT) 변경 */
+/** 라우팅 경로의 대상(IGW/NAT 게이트웨이/인스턴스) 변경 */
 export function updateRouteTarget(project: Project, connectionId: string, targetId: string): MutationResult {
   const conn = project.connections.find((c) => c.id === connectionId);
-  if (!conn || (conn.relationType !== "route-table-internet-gateway" && conn.relationType !== "route-table-nat-gateway")) {
+  if (!conn || !isRouteConnection(conn)) {
     return fail("경로를 찾을 수 없습니다.");
   }
   return connectResources(project, conn.sourceResourceId, targetId, {

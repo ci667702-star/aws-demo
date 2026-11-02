@@ -60,6 +60,8 @@ export interface FailureInfo {
   resourceIds: string[];
   fixes: string[];
   concept?: string;
+  /** 이 실패와 가장 관련된 설정 항목 (리소스 유형 → 설정 키). 없으면 분류(category)의 기본 항목을 쓴다 */
+  fields?: Partial<Record<string, string>>;
 }
 
 export interface PathHop {
@@ -92,6 +94,7 @@ export interface FailInput extends StepInput {
   category: FailureCategory;
   reason?: string;
   fixes?: string[];
+  fields?: FailureInfo["fields"];
 }
 
 export class SimulationLog {
@@ -146,6 +149,7 @@ export class SimulationLog {
       resourceIds: step.resourceIds,
       fixes: input.fixes ?? [],
       concept: input.concept,
+      ...(input.fields ? { fields: input.fields } : {}),
     });
   }
 

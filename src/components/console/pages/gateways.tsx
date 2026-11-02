@@ -1,6 +1,7 @@
 "use client";
 
 /** 인터넷 게이트웨이, 탄력적 IP, NAT 게이트웨이 */
+import { withHint } from "../error-codes";
 import { useState } from "react";
 import type { ResourceOfType } from "@/lib/engine/resource-models";
 import { displayName } from "@/lib/engine/topology-engine";
@@ -18,7 +19,8 @@ import {
 } from "@/lib/project/console-actions";
 import { useRunAction } from "../console-context";
 import { href, navigate, resourceHref, resourcePath } from "../router";
-import { Alert } from "../ui/alert";
+import { Alert, ErrorAlert } from "../ui/alert";
+import { PageGuide } from "../ui/page-guide";
 import { Button, ButtonDropdown, ButtonLink } from "../ui/button";
 import { FormActions, FormField, RadioGroup, SelectInput, TextInput } from "../ui/form";
 import { Container, ContainerHeader, EmptyState, KeyValueGrid, PageHeader, SpaceBetween } from "../ui/layout";
@@ -59,7 +61,7 @@ function IgwModals({ igw, mode, onClose }: { igw: Igw | undefined; mode: "detach
         actionLabel="인터넷 게이트웨이 분리"
         onConfirm={() => {
           const r = actions.detach(igw);
-          return r.ok ? null : [r.error, r.hint].filter(Boolean).join(" ");
+          return r.ok ? null : withHint(r);
         }}
       >
         <p>
@@ -76,7 +78,7 @@ function IgwModals({ igw, mode, onClose }: { igw: Igw | undefined; mode: "detach
       confirmText="delete"
       onConfirm={() => {
         const r = actions.remove(igw);
-        if (!r.ok) return [r.error, r.hint].filter(Boolean).join(" ");
+        if (!r.ok) return withHint(r);
         navigate("/vpc/igws");
         return null;
       }}
@@ -98,6 +100,7 @@ export function IgwListPage() {
   const attached = current ? !!topo.vpcOfIgw(current.id) : false;
   return (
     <SpaceBetween>
+      <PageGuide topic="igw" />
       <ResourceTable<Igw>
         ariaLabel="인터넷 게이트웨이 목록"
         items={igws}
@@ -140,7 +143,7 @@ export function IgwListPage() {
           { id: "name", header: "Name", cell: (g) => <NameCell r={g} />, sortValue: sortName, filterValue: (g) => g.name },
           { id: "id", header: "인터넷 게이트웨이 ID", cell: (g) => <TypedResourceLink type="internet-gateway" id={g.id} />, sortValue: (g) => g.id },
           { id: "state", header: "상태", cell: (g) => <IgwState attached={!!topo.vpcOfIgw(g.id)} /> },
-          { id: "vpc", header: "VPC ID", cell: (g) => <ResourceLink id={topo.vpcOfIgw(g.id)} showName fallback="–" /> },
+          { id: "vpc", optional: true, header: "VPC ID", cell: (g) => <ResourceLink id={topo.vpcOfIgw(g.id)} showName fallback="–" /> },
         ]}
       />
       <IgwModals igw={current} mode={mode} onClose={() => setMode(null)} />
@@ -160,17 +163,18 @@ export function CreateIgwPage() {
       successAction: (res) => ({ label: "VPC에 연결", href: href(`${resourcePath("internet-gateway", res.createdId!)}/attach`) }),
     });
     if (r.ok && r.createdId) navigate(resourcePath("internet-gateway", r.createdId));
-    else if (!r.ok) setError(r.error);
+    else if (!r.ok) setError(withHint(r));
   };
   return (
-    <form onSubmit={submit} className="space-y-6" noValidate>
+    <form onSubmit={submit} className="space-y-6" noValidate data-tour="igw-form">
       <PageHeader title="인터넷 게이트웨이 생성" info={<InfoLink topic="igw" />} description="인터넷 게이트웨이는 VPC와 인터넷을 연결하는 가상 라우터입니다. 만든 뒤 VPC에 연결해야 합니다." />
+      <PageGuide topic="igw" />
       <Container header={<ContainerHeader title="인터넷 게이트웨이 설정" />}>
-        <FormField label="이름 태그" optional constraint="최대 128자">
+        <FormField help={{ docKey: "internet-gateway", field: "name" }} label="이름 태그" optional constraint="최대 128자">
           <TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="my-internet-gateway-01" maxLength={128} />
         </FormField>
       </Container>
-      <FormActions error={error ? <Alert type="error">{error}</Alert> : undefined}>
+      <FormActions error={error ? <ErrorAlert message={error} /> : undefined}>
         <ButtonLink variant="link" href={href("/vpc/igws")}>
           취소
         </ButtonLink>
@@ -193,13 +197,13 @@ export function AttachIgwPage({ id }: { id: string }) {
   const submit = () => {
     const r = run("AttachInternetGateway", (p) => attachInternetGateway(p, igw.id, vpcId), { success: () => `인터넷 게이트웨이 ${igw.id}을(를) VPC ${vpcId}에 연결했습니다.` });
     if (r.ok) navigate(resourcePath("internet-gateway", igw.id));
-    else setError(r.error);
+    else setError(withHint(r));
   };
   return (
-    <SpaceBetween>
+    <div className="flex flex-col gap-6" data-tour="igw-attach">
       <PageHeader title="VPC에 연결" info={<InfoLink topic="igw" />} description={`${igw.id} (${displayName(igw)})`} />
       <Container header={<ContainerHeader title="VPC" description="인터넷 게이트웨이를 VPC에 연결해 VPC와 인터넷 간 통신을 활성화합니다." />}>
-        <FormField label="사용 가능한 VPC" description="인터넷 게이트웨이가 연결되지 않은 VPC만 표시됩니다." error={error ?? undefined}>
+        <FormField help={{ docKey: "internet-gateway", field: "vpc" }} label="사용 가능한 VPC" description="인터넷 게이트웨이가 연결되지 않은 VPC만 표시됩니다." error={error ?? undefined}>
           <SelectInput value={vpcId} onChange={setVpcId} placeholder="VPC 선택" options={vpcs.map((v) => ({ value: v.id, label: `${v.id} (${displayName(v)})`, description: v.config.cidr }))} />
         </FormField>
         {!vpcs.length && (
@@ -216,7 +220,7 @@ export function AttachIgwPage({ id }: { id: string }) {
           인터넷 게이트웨이 연결
         </Button>
       </FormActions>
-    </SpaceBetween>
+    </div>
   );
 }
 
@@ -286,6 +290,7 @@ export function EipListPage({ base = "/vpc" }: { base?: "/vpc" | "/ec2" }) {
   const target = current ? topo.elasticIpTarget(current.id) : undefined;
   return (
     <SpaceBetween>
+      <PageGuide topic="eip" />
       <ResourceTable<Eip>
         ariaLabel="탄력적 IP 목록"
         items={eips}
@@ -329,11 +334,11 @@ export function EipListPage({ base = "/vpc" }: { base?: "/vpc" | "/ec2" }) {
         columns={[
           { id: "name", header: "Name", cell: (e) => <NameCell r={e} />, sortValue: sortName, filterValue: (e) => e.name },
           { id: "ip", header: "할당된 IPv4 주소", cell: (e) => <a href={resourceHref("elastic-ip", e.id)} className="font-mono text-[13px] text-aws-link hover:underline">{e.config.publicIp}</a>, sortValue: (e) => e.config.publicIp },
-          { id: "type", header: "유형", cell: () => "Public IP" },
-          { id: "alloc", header: "할당 ID", cell: (e) => <span className="font-mono text-[13px]">{e.id}</span>, sortValue: (e) => e.id },
+          { id: "type", optional: true, header: "유형", cell: () => "Public IP" },
+          { id: "alloc", optional: true, header: "할당 ID", cell: (e) => <span className="font-mono text-[13px]">{e.id}</span>, sortValue: (e) => e.id },
           { id: "instance", header: "연결된 인스턴스 ID", cell: (e) => { const t = topo.elasticIpTarget(e.id); return t?.type === "ec2" ? <ResourceLink id={t.id} /> : "–"; } },
-          { id: "nat", header: "NAT 게이트웨이 ID", cell: (e) => { const t = topo.elasticIpTarget(e.id); return t?.type === "nat-gateway" ? <ResourceLink id={t.id} /> : "–"; } },
-          { id: "private", header: "프라이빗 IP 주소", cell: (e) => { const t = topo.elasticIpTarget(e.id); return t ? ipText(topo.enisOf(t.id)[0]?.privateIp) : "–"; } },
+          { id: "nat", optional: true, header: "NAT 게이트웨이 ID", cell: (e) => { const t = topo.elasticIpTarget(e.id); return t?.type === "nat-gateway" ? <ResourceLink id={t.id} /> : "–"; } },
+          { id: "private", optional: true, header: "프라이빗 IP 주소", cell: (e) => { const t = topo.elasticIpTarget(e.id); return t ? ipText(topo.enisOf(t.id)[0]?.privateIp) : "–"; } },
         ]}
       />
       {releasing && current && (
@@ -344,7 +349,7 @@ export function EipListPage({ base = "/vpc" }: { base?: "/vpc" | "/ec2" }) {
           actionLabel="릴리스"
           onConfirm={() => {
             const r = run("ReleaseAddress", (p) => releaseElasticIp(p, current.id), { success: () => `탄력적 IP ${current.config.publicIp}을(를) 릴리스했습니다.` });
-            return r.ok ? null : [r.error, r.hint].filter(Boolean).join(" ");
+            return r.ok ? null : withHint(r);
           }}
         >
           <p>
@@ -368,7 +373,7 @@ export function AllocateEipPage({ base = "/vpc" }: { base?: "/vpc" | "/ec2" }) {
       successAction: (res) => ({ label: "이 탄력적 IP 주소 연결", href: href(`${resourcePath("elastic-ip", res.createdId!)}/associate`) }),
     });
     if (r.ok) navigate(`${base}/eips`);
-    else setError(r.error);
+    else setError(withHint(r));
   };
   return (
     <form onSubmit={submit} className="space-y-6" noValidate>
@@ -378,7 +383,7 @@ export function AllocateEipPage({ base = "/vpc" }: { base?: "/vpc" | "/ec2" }) {
           <FormField label="네트워크 경계 그룹">
             <TextInput value="ap-northeast-2 (가상)" disabled readOnly />
           </FormField>
-          <FormField label="퍼블릭 IPv4 주소 풀">
+          <FormField help={{ docKey: "elastic-ip", field: "publicIp" }} label="퍼블릭 IPv4 주소 풀">
             <RadioGroup
               value="amazon"
               onChange={() => undefined}
@@ -386,12 +391,12 @@ export function AllocateEipPage({ base = "/vpc" }: { base?: "/vpc" | "/ec2" }) {
               items={[{ value: "amazon", label: "가상 IPv4 주소 풀", description: "198.51.100.0/24(문서용 예약 대역)에서 주소를 할당합니다. 실제 공인 IP가 아닙니다." }]}
             />
           </FormField>
-          <FormField label="Name 태그" optional>
+          <FormField help={{ docKey: "elastic-ip", field: "name" }} label="Name 태그" optional>
             <TextInput value={name} onChange={(e) => setName(e.target.value)} maxLength={128} placeholder="my-eip" />
           </FormField>
         </SpaceBetween>
       </Container>
-      <FormActions error={error ? <Alert type="error">{error}</Alert> : undefined}>
+      <FormActions error={error ? <ErrorAlert message={error} /> : undefined}>
         <ButtonLink variant="link" href={href(`${base}/eips`)}>
           취소
         </ButtonLink>
@@ -415,17 +420,17 @@ export function AssociateEipPage({ id }: { id: string }) {
   const submit = () => {
     const r = run("AssociateAddress", (p) => associateElasticIp(p, eip.id, instanceId), { success: () => `탄력적 IP ${eip.config.publicIp}을(를) ${instanceId}에 연결했습니다.` });
     if (r.ok) navigate(resourcePath("elastic-ip", eip.id));
-    else setError(r.error);
+    else setError(withHint(r));
   };
   return (
     <SpaceBetween>
       <PageHeader title="탄력적 IP 주소 연결" info={<InfoLink topic="eip" />} description={`${eip.config.publicIp} (${eip.id})`} />
       <Container header={<ContainerHeader title="탄력적 IP 주소" />}>
         <SpaceBetween size="m">
-          <FormField label="리소스 유형">
+          <FormField help={{ docKey: "elastic-ip", field: "association" }} label="리소스 유형">
             <RadioGroup value="instance" onChange={() => undefined} aria-label="리소스 유형" items={[{ value: "instance", label: "인스턴스", description: "네트워크 인터페이스 직접 연결은 지원하지 않습니다." }]} />
           </FormField>
-          <FormField label="인스턴스" description="탄력적 IP가 연결되지 않은, 종료되지 않은 인스턴스" error={error ?? undefined}>
+          <FormField help={{ docKey: "elastic-ip", field: "association" }} label="인스턴스" description="탄력적 IP가 연결되지 않은, 종료되지 않은 인스턴스" error={error ?? undefined}>
             <SelectInput
               value={instanceId}
               onChange={setInstanceId}
@@ -507,7 +512,7 @@ export function EipDetailPage({ id }: { id: string }) {
           actionLabel="릴리스"
           onConfirm={() => {
             const r = run("ReleaseAddress", (p) => releaseElasticIp(p, eip.id), { success: () => `탄력적 IP ${eip.config.publicIp}을(를) 릴리스했습니다.` });
-            if (!r.ok) return [r.error, r.hint].filter(Boolean).join(" ");
+            if (!r.ok) return withHint(r);
             navigate("/vpc/eips");
             return null;
           }}
@@ -537,7 +542,7 @@ function DeleteNatModal({ nat, onClose }: { nat: Nat | undefined; onClose: () =>
       confirmText="delete"
       onConfirm={() => {
         const r = run("DeleteNatGateway", (p) => deleteNatGateway(p, nat.id), { success: () => `NAT 게이트웨이 ${nat.id}을(를) 삭제했습니다.` });
-        if (!r.ok) return r.error;
+        if (!r.ok) return withHint(r);
         navigate("/vpc/nat-gateways");
         return null;
       }}
@@ -558,6 +563,7 @@ export function NatListPage() {
   const current = nats.find((n) => n.id === selected[0]);
   return (
     <SpaceBetween>
+      <PageGuide topic="nat" />
       <ResourceTable<Nat>
         ariaLabel="NAT 게이트웨이 목록"
         items={nats}
@@ -598,8 +604,8 @@ export function NatListPage() {
           { id: "type", header: "연결 유형", cell: () => "Public" },
           { id: "state", header: "상태", cell: (n) => <NatState state={n.config.state} />, sortValue: (n) => n.config.state },
           { id: "public", header: "기본 퍼블릭 IPv4 주소", cell: (n) => ipText(topo.enisOf(n.id)[0]?.publicIp) },
-          { id: "private", header: "기본 프라이빗 IPv4 주소", cell: (n) => ipText(topo.enisOf(n.id)[0]?.privateIp) },
-          { id: "vpc", header: "VPC", cell: (n) => <ResourceLink id={topo.vpcOf(n.id)} /> },
+          { id: "private", optional: true, header: "기본 프라이빗 IPv4 주소", cell: (n) => ipText(topo.enisOf(n.id)[0]?.privateIp) },
+          { id: "vpc", optional: true, header: "VPC", cell: (n) => <ResourceLink id={topo.vpcOf(n.id)} /> },
           { id: "subnet", header: "서브넷", cell: (n) => <ResourceLink id={topo.subnetOf(n.id)} /> },
         ]}
       />
@@ -623,7 +629,7 @@ export function CreateNatPage() {
     if (!subnetId) return setError("서브넷을 선택하세요.");
     const r = run("CreateNatGateway", (p) => createNatGateway(p, { name, subnetId, eipId }), { success: (res) => `NAT 게이트웨이 ${res.createdId}을(를) 생성했습니다.` });
     if (r.ok && r.createdId) navigate(resourcePath("nat-gateway", r.createdId));
-    else if (!r.ok) setError([r.error, r.hint].filter(Boolean).join(" "));
+    else if (!r.ok) setError(withHint(r));
   };
   const allocate = () => {
     const r = run("AllocateAddress", (p) => allocateElasticIp(p, { name: "" }), { flashError: true });
@@ -632,12 +638,13 @@ export function CreateNatPage() {
   return (
     <form onSubmit={submit} className="space-y-6" noValidate>
       <PageHeader title="NAT 게이트웨이 생성" info={<InfoLink topic="nat" />} description="프라이빗 서브넷의 인스턴스가 VPC 외부 서비스에 연결할 수 있게 해 주는 가상 NAT 서비스입니다." />
+      <PageGuide topic="nat" />
       <Container header={<ContainerHeader title="NAT 게이트웨이 설정" />}>
         <SpaceBetween size="m">
-          <FormField label="이름" optional constraint="최대 128자">
+          <FormField help={{ docKey: "nat-gateway", field: "name" }} label="이름" optional constraint="최대 128자">
             <TextInput value={name} onChange={(e) => setName(e.target.value)} maxLength={128} placeholder="my-nat-gateway-01" />
           </FormField>
-          <FormField label="서브넷" description="NAT 게이트웨이를 만들 서브넷을 선택합니다. 퍼블릭 NAT는 퍼블릭 서브넷(IGW 경로가 있는 서브넷)에 두어야 합니다.">
+          <FormField help={{ docKey: "nat-gateway", field: "subnet" }} label="서브넷" description="NAT 게이트웨이를 만들 서브넷을 선택합니다. 퍼블릭 NAT는 퍼블릭 서브넷(IGW 경로가 있는 서브넷)에 두어야 합니다.">
             <SelectInput
               value={subnetId}
               onChange={setSubnetId}
@@ -653,7 +660,7 @@ export function CreateNatPage() {
           <FormField label="연결 유형">
             <RadioGroup value="public" onChange={() => undefined} aria-label="연결 유형" items={[{ value: "public", label: "퍼블릭", description: "프라이빗 NAT 게이트웨이는 지원하지 않습니다." }]} />
           </FormField>
-          <FormField label="탄력적 IP 할당 ID" info={<InfoLink topic="eip" />} description="NAT 게이트웨이에 연결할 탄력적 IP를 선택합니다.">
+          <FormField help={{ docKey: "nat-gateway", field: "elasticIp" }} label="탄력적 IP 할당 ID" info={<InfoLink topic="eip" />} description="NAT 게이트웨이에 연결할 탄력적 IP를 선택합니다.">
             <div className="flex flex-wrap gap-2">
               <SelectInput
                 className="min-w-64 flex-1"
@@ -667,7 +674,7 @@ export function CreateNatPage() {
           </FormField>
         </SpaceBetween>
       </Container>
-      <FormActions error={error ? <Alert type="error" header="NAT 게이트웨이를 생성할 수 없습니다">{error}</Alert> : undefined}>
+      <FormActions error={error ? <ErrorAlert message={error} header="NAT 게이트웨이를 생성할 수 없습니다" /> : undefined}>
         <ButtonLink variant="link" href={href("/vpc/nat-gateways")}>
           취소
         </ButtonLink>

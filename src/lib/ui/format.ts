@@ -24,6 +24,11 @@ export function formatTime(iso: string): string {
   return new Intl.DateTimeFormat("ko", { hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(t);
 }
 
+/** 단가 표시: $0.005처럼 1센트보다 작은 값도 그대로 보여 준다 (곱셈이 맞아 보이도록) */
+export function formatRate(rate: number): string {
+  return `$${rate.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`;
+}
+
 export function formatMoney(amount: number): string {
   return `$${amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
