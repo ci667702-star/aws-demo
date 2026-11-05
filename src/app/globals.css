@@ -530,8 +530,9 @@ body.pg-tour-dock-space {
 [data-tour] {
   scroll-margin-top: 72px;
 }
-/* 실습 단계는 화면을 어둡게 덮지 않고, 해야 할 영역에 테두리를 둘러 알려 준다 */
-.pg-tour-light .driver-active-element {
+/* 튜토리얼은 배경을 어둡게 낮추고, 지금 조작할 영역만 밝은 테두리로 분리한다 */
+.pg-tour-spotlight .driver-active-element {
   outline: 3px solid var(--aws-link);
-  outline-offset: 6px;
+  outline-offset: 5px;
+  box-shadow: 0 0 0 8px color-mix(in oklch, var(--aws-link) 18%, transparent);
 }

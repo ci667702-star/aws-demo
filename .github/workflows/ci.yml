@@ -1,0 +1,39 @@
+name: TypeScript CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: [ 24.14.0 ] # 사용하는 Node.js 버전 지정
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm' # npm 캐시 사용 (yarn/pnpm인 경우 수정)
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Type Check
+        run: npm run typecheck
+        # package.json에 "typecheck": "tsc --noEmit" 이 정의되어 있어야 함
+
+      - name: Lint
+        run: npm run lint
+        # package.json에 "lint": "eslint ." 등이 정의되어 있어야 함
+
+      - name: Run Tests
+        run: npm test

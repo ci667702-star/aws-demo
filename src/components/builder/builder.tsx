@@ -44,9 +44,10 @@ export function Builder({ projectId }: { projectId: string }) {
   const [rightOpen, setRightOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
 
+  const isLab = !!project.labId;
   useEffect(() => {
-    resetEditor(projectId);
-  }, [projectId, resetEditor]);
+    resetEditor(projectId, { lab: isLab });
+  }, [projectId, resetEditor, isLab]);
 
   const analysis = useMemo(() => {
     void revalidateNonce;

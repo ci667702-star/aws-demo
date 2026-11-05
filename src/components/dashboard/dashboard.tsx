@@ -52,7 +52,7 @@ function SiteHeader() {
           <Cloud className="size-3.5" aria-hidden />
         </span>
         <span className="flex flex-col leading-none">
-          <span className="text-[13px] font-bold">AWS Playground</span>
+          <span className="text-[13px] font-bold">AWSP</span>
           <span className="text-[10px] text-aws-nav-muted">비공식 학습용 · 가상 환경</span>
         </span>
       </Link>
@@ -126,11 +126,11 @@ function DashboardContent() {
       {saveStatus === "unavailable" && <Alert type="warning">브라우저 저장소를 사용할 수 없어 새로고침하면 작업 내용이 사라집니다. 필요하면 JSON으로 내보내세요.</Alert>}
 
       <PageHeader
-        title="AWS Playground"
-        description="실제 AWS 계정이나 요금 없이, AWS 콘솔과 비슷한 화면에서 VPC·EC2·ALB·RDS를 직접 만들고 통신을 분석해 보는 학습용 시뮬레이터입니다."
+        title="AWSP"
+        description="실제 AWS 계정이나 요금 없이, AWS 콘솔과 비슷한 화면에서 AWS의 아키텍처를 직접 만들고 통신을 분석해 보는 학습용 시뮬레이터입니다."
       />
       <Alert type="info" header="학습용 시뮬레이터">
-        AWSP는 AWS를 실습해볼 수 있는 사이트로, 실제 AWS 계정·자격 증명·리소스를 사용하지 않으며 요금이 발생하지 않습니다. 또한 모든 리소스와 통신 결과는 이 브라우저 안에서 계산되는 가상 결과입니다.
+        AWSP는 AWS를 실습해볼 수 있는 사이트로, 실제 AWS 계정·자격 증명·리소스를 사용하지 않으며 요금이 부과되지 않습니다. 또한 모든 리소스와 통신 결과는 이 브라우저 안에서 계산되는 가상 결과입니다.
       </Alert>
 
       <ResourceTable<Project>
@@ -185,8 +185,9 @@ function DashboardContent() {
           {
             id: "name",
             header: "이름",
+            minWidth: 190,
             cell: (p) => (
-              <a href={p.preferredMode === "easy" ? `/projects/${p.id}` : `/console/${p.id}#/`} className="font-bold text-aws-link hover:underline" data-testid="sandbox-link">
+              <a href={p.preferredMode === "easy" ? `/projects/${p.id}` : `/console/${p.id}#/`} className="font-bold whitespace-nowrap text-aws-link hover:underline" data-testid="sandbox-link">
                 {p.name}
               </a>
             ),

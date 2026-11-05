@@ -76,14 +76,6 @@ export function MapLegend({
             );
           })}
         </ul>
-        <ul className="ml-2 flex flex-wrap items-center gap-x-3 gap-y-1" aria-label="서브넷 영역 색">
-          {ZONES.map((z) => (
-            <li key={z.label} className="flex items-center gap-1.5" title={z.help}>
-              <ZoneSwatch className={z.className} />
-              {z.label}
-            </li>
-          ))}
-        </ul>
       </div>
     );
   }

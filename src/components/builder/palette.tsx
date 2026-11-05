@@ -23,7 +23,7 @@ export function Palette({ onAdd, onInfo }: { onAdd: (type: ResourceType) => void
     <nav className="flex h-full flex-col overflow-y-auto" aria-label="AWS 리소스 팔레트" data-testid="palette">
       <div className="border-b px-3 py-2">
         <p className="text-xs font-semibold">리소스</p>
-        <p className="text-[11px] text-muted-foreground">끌어다 놓거나 클릭해 추가{onInfo ? " · ? 버튼으로 설명 보기" : ""}</p>
+        <p className="text-[11px] text-muted-foreground">끌어다 놓거나 클릭해 추가</p>
       </div>
       <div className="flex-1 space-y-3 p-2">
         {GROUPS.map((group) => (
@@ -33,7 +33,7 @@ export function Palette({ onAdd, onInfo }: { onAdd: (type: ResourceType) => void
               {group.types.map((type) => {
                 const info = RESOURCE_TYPE_INFO[type];
                 return (
-                  <li key={type} className="relative">
+                  <li key={type} className="group relative">
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <button
@@ -60,7 +60,8 @@ export function Palette({ onAdd, onInfo }: { onAdd: (type: ResourceType) => void
                     {onInfo && (
                       <button
                         type="button"
-                        className="absolute top-1/2 right-1 inline-flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground/80 hover:bg-background hover:text-sky-600 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                        // 마우스를 쓰는 화면에서는 항목에 올렸을 때만 보인다 (터치 화면·키보드 포커스에서는 항상 보인다)
+                        className="absolute top-1/2 right-1 inline-flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground/80 group-focus-within:opacity-100 group-hover:opacity-100 hover:bg-background hover:text-sky-600 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none [@media(hover:hover)]:opacity-0"
                         aria-label={`${info.label} 설명 보기`}
                         title={`${info.label} 설명 보기`}
                         data-testid={`palette-info-${type}`}
@@ -77,7 +78,9 @@ export function Palette({ onAdd, onInfo }: { onAdd: (type: ResourceType) => void
         ))}
         {onInfo && (
           <div>
-            <p className="px-1 pb-1 text-[10px] font-semibold tracking-wide text-muted-foreground uppercase">서비스 (VPC 밖)</p>
+            <p className="px-1 pb-1 text-[10px] font-semibold tracking-wide text-muted-foreground uppercase" title="캔버스에 놓지 않는 가상 서비스입니다. 누르면 설명과 현재 구성을 봅니다.">
+              서비스 (VPC 밖)
+            </p>
             <ul className="space-y-0.5">
               {SERVICE_DOC_KEYS.map((key) => (
                 <li key={key}>
@@ -95,13 +98,8 @@ export function Palette({ onAdd, onInfo }: { onAdd: (type: ResourceType) => void
                 </li>
               ))}
             </ul>
-            <p className="px-1 pt-1 text-[10px] leading-snug text-muted-foreground">캔버스에 놓지 않는 가상 서비스입니다. 누르면 설명과 현재 구성을 봅니다.</p>
           </div>
         )}
-      </div>
-      <div className="border-t p-2 text-[11px] leading-relaxed text-muted-foreground">
-        <p>VPC/서브넷 영역 위에 놓으면 자동으로 연결됩니다.</p>
-        <p>리소스를 선택한 상태에서 클릭하면 선택한 리소스와 연결을 시도합니다.</p>
       </div>
     </nav>
   );

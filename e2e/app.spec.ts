@@ -3,7 +3,7 @@ import { expect, test, type Page } from "@playwright/test";
 /** 첫 화면에서 빈 샌드박스를 만들고 콘솔 홈으로 이동한다 */
 async function createSandbox(page: Page, name: string) {
   await page.goto("/");
-  await page.getByRole("button", { name: "샌드박스 생성" }).first().click();
+  await page.getByRole("button", { name: "생성" }).first().click();
   await page.getByRole("dialog").getByLabel("이름").fill(name);
   await page.getByRole("button", { name: "생성 후 열기" }).click();
   await expect(page).toHaveURL(/\/console\/proj-[^#]+#\/$/);
@@ -67,7 +67,7 @@ test("첫 화면에는 미리 만든 프로젝트가 없고, 새 샌드박스는
   await page.goto("/");
   await expect(page.getByText("샌드박스 없음")).toBeVisible();
   // 학습용 시뮬레이터 안내: 실제 AWS 계정·자격 증명·리소스를 쓰지 않고 요금이 없다는 점을 안내 상자와 바닥글에 보여 준다
-  await expect(page.getByText(/실제 AWS 계정·자격 증명·리소스를 사용하지 않으며 요금이 발생하지 않습니다\. 또한 모든 리소스와 통신 결과는/)).toBeVisible();
+  await expect(page.getByText(/실제 AWS 계정·자격 증명·리소스를 사용하지 않으며 요금이 부과되지 않습니다\. 또한 모든 리소스와 통신 결과는/)).toBeVisible();
   await expect(page.locator("footer")).toContainText("실제 AWS 계정·자격 증명·리소스를 사용하지 않으며 요금이 발생하지 않습니다.");
   await createSandbox(page, "E2E 빈 샌드박스");
   await go(page, "#/vpc/vpcs");
@@ -259,7 +259,7 @@ test("튜토리얼은 '다음'을 눌러야 넘어가고, 화면도 자동으로
   await expect(page.getByRole("heading", { name: "e2e-tour-2026", level: 1 })).toBeVisible();
 
   // 완료되어도 자동으로 넘어가지 않는다
-  await expect(popover).toContainText("완료했습니다");
+  await expect(popover.locator(".pg-tour-status-done")).toBeVisible();
   await page.waitForTimeout(1500);
   await expect(popover).toContainText("① 버킷 만들기");
   await expect(next).toBeEnabled();
@@ -299,7 +299,7 @@ test("튜토리얼은 '다음'을 눌러야 넘어가고, 화면도 자동으로
     });
   await expect.poll(stageHeight).toBeGreaterThan(formBox.height - 40);
   await page.getByRole("button", { name: "변경 사항 저장" }).click();
-  await expect(popover).toContainText("완료했습니다");
+  await expect(popover.locator(".pg-tour-status-done")).toBeVisible();
   await expect(popover).toContainText("③ 정적 웹 사이트 호스팅 켜기");
 });
 
@@ -381,7 +381,7 @@ test("NAT 인스턴스 튜토리얼: 안내대로 콘솔에서 따라 하면 모
     if (await button.isVisible()) await button.click();
   };
   const finishStep = async () => {
-    await expect(popover).toContainText("완료했습니다");
+    await expect(popover.locator(".pg-tour-status-done")).toBeVisible();
     await next.click();
   };
   const selectByText = async (label: string, text: string) => {

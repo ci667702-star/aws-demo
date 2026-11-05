@@ -291,14 +291,14 @@ function Bullets({ items }: { items: string[] }) {
 
 // ---------------------------------------------------------------- A, B, F (일반 개념)
 
-export function GeneralSection({ docKey }: { docKey: string }) {
+export function GeneralSection({ docKey, defaultOpen = true }: { docKey: string; defaultOpen?: boolean }) {
   const doc = getResourceDoc(docKey);
   // "네트워킹 · AWS::EC2::VPC" → 분류와 CloudFormation 유형 이름을 나눠 보여 준다
   const split = doc.resourceType.indexOf(" · ");
   const category = split >= 0 ? doc.resourceType.slice(0, split) : null;
   const typeName = split >= 0 ? doc.resourceType.slice(split + 3) : doc.resourceType;
   return (
-    <DocSection letter="A" title="기본 정보" kind="concept" testId="doc-section-basic">
+    <DocSection letter="A" title="기본 정보" kind="concept" defaultOpen={defaultOpen} testId="doc-section-basic">
       <dl className="divide-y rounded-lg border text-[12px]">
         <div className="flex items-start justify-between gap-3 px-2.5 py-1.5">
           <dt className="shrink-0 text-muted-foreground">AWS 서비스</dt>
@@ -456,10 +456,20 @@ function LinkedItemButton({ entry, actions }: { entry: LinkedItem; actions: DocP
   );
 }
 
-export function RelationsSection({ docKey, relations, actions }: { docKey: string; relations: RelationGroup[] | null; actions: DocPanelActions }) {
+export function RelationsSection({
+  docKey,
+  relations,
+  actions,
+  defaultOpen = true,
+}: {
+  docKey: string;
+  relations: RelationGroup[] | null;
+  actions: DocPanelActions;
+  defaultOpen?: boolean;
+}) {
   const doc = getResourceDoc(docKey);
   return (
-    <DocSection letter="D" title="관련 리소스" kind={relations ? "mixed" : "concept"} testId="doc-section-relations">
+    <DocSection letter="D" title="관련 리소스" kind={relations ? "mixed" : "concept"} defaultOpen={defaultOpen} testId="doc-section-relations">
       {relations && (
         <div className="space-y-2 rounded-lg border border-violet-500/30 bg-violet-500/[0.03] p-2.5" data-testid="current-relations">
           <p className="flex items-center gap-1.5 text-[11px] font-semibold text-violet-700 dark:text-violet-300">

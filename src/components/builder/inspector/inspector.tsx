@@ -166,7 +166,8 @@ function ResourceInspector({ resource, ctx, onShowValidation }: { resource: Reso
         </button>
       </DocHeader>
       <DocSectionNav rootRef={rootRef} />
-      <GeneralSection docKey={resource.type} />
+      {/* 위의 한 줄 요약으로 충분할 때가 많아 개념 설명(A·B·D·F)은 접어 두고, 설정(C)과 현재 구성 분석(E)을 펼친다 */}
+      <GeneralSection docKey={resource.type} defaultOpen={false} />
       <WhySection docKey={resource.type} />
       <DocSection letter="C" title="주요 설정" kind="mixed" flush testId="doc-section-settings">
         {pinned && <PinnedFieldHelp docKey={resource.type} field={pinned} onClose={() => setPinned(null)} />}
@@ -180,15 +181,11 @@ function ResourceInspector({ resource, ctx, onShowValidation }: { resource: Reso
               validate={(v) => (!v.trim() ? "이름을 입력하세요." : v.trim().length > 128 ? "128자 이하여야 합니다." : null)}
               onCommit={(v) => ctx.actions.rename(resource, v.trim())}
             />
-            <p className="flex items-start gap-1 text-[11px] text-muted-foreground">
-              <Info className="mt-0.5 size-3 shrink-0" aria-hidden />
-              설정 이름 옆 ? 아이콘에 마우스를 올리면 짧은 설명, 누르면 자세한 설명이 나옵니다. 값을 바꾸면 아래 분석·검증·시뮬레이션에 바로 반영됩니다.
-            </p>
           </div>
           <ResourceForm resource={resource} ctx={ctx} />
         </FieldHelpScope>
       </DocSection>
-      <RelationsSection docKey={resource.type} relations={analysis?.relations ?? []} actions={docActions} />
+      <RelationsSection docKey={resource.type} relations={analysis?.relations ?? []} actions={docActions} defaultOpen={false} />
       {analysis && (
         <AnalysisSection
           docKey={resource.type}
@@ -342,15 +339,11 @@ function ProjectOverview({ ctx, onShowValidation }: { ctx: FormContext; onShowVa
       <div className="border-b p-4" data-testid="inspector-empty-hint">
         <Callout>
           <p className="flex items-center gap-1 font-medium">
-            <Info className="size-3.5" aria-hidden /> 리소스를 선택하면 상세 설명과 설정 가이드를 확인할 수 있습니다.
-          </p>
-          <p className="mt-0.5 text-muted-foreground">
-            캔버스의 리소스를 누르세요. 왼쪽 팔레트의 ? 버튼은 리소스 유형 설명을, &lsquo;서비스 (VPC 밖)&rsquo;는 S3·IAM·CloudWatch 설명과 현재 구성을 보여 줍니다.
+            <Info className="size-3.5" aria-hidden /> 캔버스에서 리소스를 누르면 설명과 설정이 여기에 나옵니다.
           </p>
         </Callout>
       </div>
-      <div className="space-y-3 border-b p-4">
-        <p className="text-xs font-medium text-muted-foreground">프로젝트</p>
+      <Section title="프로젝트 이름·설명" defaultOpen={false}>
         <TextField
           label="프로젝트 이름"
           value={project.name}
@@ -370,7 +363,7 @@ function ProjectOverview({ ctx, onShowValidation }: { ctx: FormContext; onShowVa
             }))
           }
         />
-      </div>
+      </Section>
       <Section title="검증 요약">
         <div className="flex flex-wrap gap-1.5">
           <ToneBadge tone={analysis.counts.error ? "error" : "ok"}>오류 {analysis.counts.error}</ToneBadge>
@@ -381,7 +374,7 @@ function ProjectOverview({ ctx, onShowValidation }: { ctx: FormContext; onShowVa
           검증 센터 열기
         </Button>
       </Section>
-      <Section title={`리소스 (${project.resources.length})`}>
+      <Section title={`리소스 (${project.resources.length})`} defaultOpen={false}>
         <ul className="grid grid-cols-2 gap-1.5 text-xs">
           {counts.map(([type, n]) => (
             <li key={type} className="flex items-center gap-1.5">
@@ -392,9 +385,11 @@ function ProjectOverview({ ctx, onShowValidation }: { ctx: FormContext; onShowVa
           ))}
         </ul>
       </Section>
-      <Section title="사용 방법">
+      <Section title="사용 방법" defaultOpen={false}>
         <ul className="space-y-1.5 text-xs text-muted-foreground">
           <li>• 팔레트 항목을 캔버스로 끌어다 놓거나 클릭해 추가 (VPC/서브넷 영역 위에 놓으면 자동 연결)</li>
+          <li>• 리소스를 선택한 상태에서 팔레트 항목을 누르면 선택한 리소스와 연결을 시도</li>
+          <li>• 팔레트의 ? 버튼: 리소스 유형 설명 · &lsquo;서비스 (VPC 밖)&rsquo;: S3·IAM·CloudWatch 설명과 현재 구성</li>
           <li>• 노드 위·아래의 연결점(●)을 다른 노드로 드래그해 관계 생성</li>
           <li>• 연결선을 클릭해 선택한 뒤 × 버튼이나 Delete 키로 삭제</li>
           <li>• Shift + 드래그: 영역 선택 · Ctrl/⌘ + 클릭: 다중 선택</li>
