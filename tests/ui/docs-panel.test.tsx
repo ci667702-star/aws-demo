@@ -58,7 +58,26 @@ const inspector = () => screen.getByTestId("inspector");
 describe("리소스 상세 설명 패널 (쉬운 모드)", () => {
   it("아무것도 선택하지 않으면 안내 문구를 보여 준다", async () => {
     setup(createThreeTierSample());
-    expect(await screen.findByTestId("inspector-empty-hint")).toHaveTextContent("리소스를 선택하면 상세 설명과 설정 가이드를 확인할 수 있습니다.");
+    expect(await screen.findByTestId("inspector-empty-hint")).toHaveTextContent("캔버스에서 리소스를 누르면 설명과 설정이 여기에 나옵니다.");
+  });
+
+  it("처음에는 설정(C)과 현재 구성 분석(E)만 펼쳐져 있고, 개념 설명은 접혀 있다", async () => {
+    const p = createThreeTierSample();
+    const { user } = setup(p);
+    select([idOf(p, "app-1")]);
+    await screen.findByTestId("doc-header");
+    expect(screen.getByTestId("doc-section-settings")).toHaveAttribute("data-open", "true");
+    expect(screen.getByTestId("doc-section-analysis")).toHaveAttribute("data-open", "true");
+    for (const id of ["doc-section-basic", "doc-section-why", "doc-section-relations", "doc-section-limits"]) {
+      expect(screen.getByTestId(id), id).toHaveAttribute("data-open", "false");
+    }
+    // 머리글의 한 줄 요약은 접혀 있어도 보인다
+    expect(within(inspector()).getByTestId("doc-summary")).toHaveTextContent(getResourceDoc("ec2").summary);
+    // 누르면 펼쳐지고, 다른 리소스를 골라도 그 선택이 유지된다
+    await user.click(within(screen.getByTestId("doc-section-basic")).getByRole("button", { name: /기본 정보/ }));
+    expect(screen.getByTestId("doc-section-basic")).toHaveAttribute("data-open", "true");
+    select([idOf(p, "app-2")]);
+    await waitFor(() => expect(screen.getByTestId("doc-section-basic")).toHaveAttribute("data-open", "true"));
   });
 
   it("다른 리소스를 선택하면 이전 리소스의 설명이 남지 않는다", async () => {
@@ -117,6 +136,8 @@ describe("리소스 상세 설명 패널 (쉬운 모드)", () => {
     const p = createThreeTierSample();
     const { user } = setup(p);
     select([idOf(p, "app-1")]);
+    // 관련 리소스(D)는 접혀 있으므로 펼친다
+    await user.click(within(await screen.findByTestId("doc-section-relations")).getByRole("button", { name: /관련 리소스/ }));
     const relations = await screen.findByTestId("current-relations");
     await user.click(within(relations).getAllByRole("button", { name: /app-a/ })[0]);
     await waitFor(() => expect(screen.getByTestId("doc-header")).toHaveAttribute("data-doc-key", "subnet"));

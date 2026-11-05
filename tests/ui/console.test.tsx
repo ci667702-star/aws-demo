@@ -1,6 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { HELP_TOPICS } from "@/components/console/help-topics";
 import { sequentialIdGenerator, setIdGenerator } from "@/lib/engine/ids";
 import type { Project } from "@/lib/engine/resource-models";
 import * as aws from "@/lib/project/console-actions";
@@ -161,5 +162,27 @@ describe("콘솔", () => {
     expect(within(guide).getByText("Public EC2 구성")).toBeInTheDocument();
     expect(within(guide).getByTestId("lab-progress")).toHaveTextContent("4/7");
     expect(useProjectStore.getState().projects[base.project.id].labId).toBe("lab-1-public-ec2");
+  });
+});
+
+describe("쉽게 이해하기 안내", () => {
+  it("처음에는 한 줄 요약만 보이고, 펼치면 해 볼 순서가 나오며, 펼친 상태를 기억한다", async () => {
+    const p = createEmptyProject("안내");
+    seedStore([p]);
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    const view = renderConsole(p.id, "#/vpc/subnets/create");
+    const guide = await screen.findByTestId("page-guide");
+    const toggle = within(guide).getByRole("button", { name: /쉽게 이해하기: 서브넷/ });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(toggle).toHaveTextContent(HELP_TOPICS.subnet.summary);
+    expect(within(guide).queryByText("이렇게 해 보세요")).not.toBeInTheDocument();
+
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(within(guide).getByText("이렇게 해 보세요")).toBeInTheDocument();
+
+    view.unmount();
+    renderConsole(p.id, "#/vpc/subnets/create");
+    expect(within(await screen.findByTestId("page-guide")).getByRole("button", { name: /쉽게 이해하기: 서브넷/ })).toHaveAttribute("aria-expanded", "true");
   });
 });

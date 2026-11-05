@@ -51,7 +51,8 @@ interface EditorState {
   /** '설정으로 이동' 요청: 오른쪽 패널이 해당 설정 항목을 펼치고 강조한다 */
   fieldFocus: { resourceId: string; field: string; nonce: number } | null;
 
-  reset: (projectId: string) => void;
+  /** 다른 프로젝트를 열 때 편집 상태를 초기화한다. 실습 프로젝트면 아래 패널에 실습 가이드를 연다 */
+  reset: (projectId: string, options?: { lab?: boolean }) => void;
   setSelection: (resourceIds: string[], connectionIds: string[]) => void;
   focusResources: (ids: string[]) => void;
   setBottomTab: (tab: BottomTab) => void;
@@ -81,9 +82,11 @@ export const useEditorStore = create<EditorState>()((set) => ({
   selectedConnectionIds: [],
   focusRequest: null,
   bottomTab: "validation",
-  bottomOpen: true,
+  // 캔버스를 넓게 쓰도록 아래 패널은 접어서 시작한다 (탭 줄의 검증 개수는 항상 보인다)
+  bottomOpen: false,
   showZones: true,
-  showMembershipEdges: true,
+  // 소속 관계는 VPC/서브넷 영역으로 보이므로 선은 숨겨서 시작한다
+  showMembershipEdges: false,
   pendingRequest: null,
   runs: [],
   activeRunId: null,
@@ -91,12 +94,13 @@ export const useEditorStore = create<EditorState>()((set) => ({
   inspectorDoc: null,
   fieldFocus: null,
 
-  reset: (projectId) =>
+  reset: (projectId, options) =>
     set((s) =>
       s.projectId === projectId
         ? s
         : {
             projectId,
+            ...(options?.lab ? { bottomTab: "lab" as const, bottomOpen: true } : {}),
             selectedResourceIds: [],
             selectedConnectionIds: [],
             focusRequest: null,
