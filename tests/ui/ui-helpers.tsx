@@ -9,6 +9,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type { Project } from "@/lib/engine/resource-models";
 import { useEditorStore } from "@/lib/store/editor-store";
+import { resetGuidePrefs } from "@/lib/store/guide-prefs";
 import { resetProjectStore, useProjectStore } from "@/lib/store/project-store";
 
 export { routerPush } from "./router-mock";
@@ -23,6 +24,7 @@ export function seedStore(projects: Project[]) {
   resetProjectStore();
   resetConsoleUi();
   resetTutorialStore();
+  resetGuidePrefs();
   useEditorStore.setState({
     projectId: null,
     selectedResourceIds: [],

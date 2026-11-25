@@ -38,14 +38,14 @@ export function LabPanel({ projectId }: { projectId: string }) {
     return (
       <div className="space-y-3 overflow-auto p-3" data-testid="lab-panel">
         <p className="flex items-center gap-2 text-sm font-medium">
-          <GraduationCap className="size-4" aria-hidden /> 이 프로젝트는 Guided Lab이 아닙니다.
+          <GraduationCap className="size-4" aria-hidden /> 이 샌드박스는 실습 문제가 아닙니다.
         </p>
-        <p className="text-xs text-muted-foreground">실습을 시작하면 새 프로젝트가 만들어지고, 단계별 완료 여부가 실제 설정과 검증 결과로 판정됩니다.</p>
+        <p className="text-xs text-muted-foreground">실습 문제는 목표만 주어지고 방법은 스스로 찾는 연습입니다. 시작하면 새 샌드박스가 만들어지고, 단계별 완료 여부가 실제 설정과 검증 결과로 판정됩니다.</p>
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
           {LABS.map((l) => (
             <div key={l.id} className="rounded-lg border p-3">
               <p className="text-xs text-muted-foreground">
-                Lab {l.order} · {l.level}
+                실습 문제 {l.order} · {l.level}
               </p>
               <p className="text-sm font-medium">{l.title}</p>
               <Button
@@ -70,7 +70,7 @@ export function LabPanel({ projectId }: { projectId: string }) {
     <div className="h-full space-y-3 overflow-auto p-3" data-testid="lab-panel">
       <div className="space-y-1">
         <p className="text-xs text-muted-foreground">
-          Lab {lab.order} · {lab.level}
+          실습 문제 {lab.order} · {lab.level}
         </p>
         <p className="font-semibold">{lab.title}</p>
         <p className="text-xs text-muted-foreground">{lab.summary}</p>

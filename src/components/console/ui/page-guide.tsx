@@ -2,6 +2,7 @@
 
 import { BookOpen, ChevronDown, ChevronRight, Lightbulb } from "lucide-react";
 import { useState } from "react";
+import { GlossaryText } from "@/components/docs/glossary-text";
 import { HELP_TOPICS } from "../help-topics";
 import { InfoLink } from "./links";
 
@@ -48,13 +49,15 @@ export function PageGuide({ topic }: { topic: string }) {
       </button>
       {open && (
         <div className="space-y-3 px-5 pb-5 text-[15px] leading-relaxed text-aws-text">
-          <p className="font-bold">{t.summary}</p>
+          <p className="font-bold">
+            <GlossaryText text={t.summary} />
+          </p>
           {t.analogy && (
             <p className="flex gap-2 rounded-xl bg-aws-surface px-4 py-3">
               <Lightbulb className="mt-1 size-4 shrink-0 text-aws-warning" aria-hidden />
               <span>
                 <span className="font-bold">비유로 보면 </span>
-                {t.analogy}
+                <GlossaryText text={t.analogy} limit={2} />
               </span>
             </p>
           )}

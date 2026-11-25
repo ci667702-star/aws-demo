@@ -6,7 +6,6 @@ import { Suspense } from "react";
 import { lazyGroup } from "@/components/app/lazy";
 import { Button } from "@/components/ui/button";
 import { useEditorStore, type BottomTab } from "@/lib/store/editor-store";
-import { useProjectStore } from "@/lib/store/project-store";
 import { useAnalysis } from "@/components/console/analysis-context";
 import { ValidationCenter } from "./validation-center";
 
@@ -32,7 +31,6 @@ export function BottomPanel({
   const setTab = useEditorStore((s) => s.setBottomTab);
   const setOpen = useEditorStore((s) => s.setBottomOpen);
   const analysis = useAnalysis();
-  const isLab = useProjectStore((s) => !!s.projects[projectId]?.labId);
 
   const tabs: { id: BottomTab; label: string; icon: typeof Zap; badge?: React.ReactNode }[] = [
     {
@@ -47,7 +45,7 @@ export function BottomPanel({
       ),
     },
     { id: "simulation", label: "시뮬레이션", icon: Zap },
-    { id: "lab", label: isLab ? "실습 가이드" : "Guided Lab", icon: GraduationCap },
+    { id: "lab", label: "실습 문제", icon: GraduationCap },
     { id: "cost", label: "가상 비용", icon: Calculator },
     { id: "activity", label: "실행 로그", icon: History },
   ];

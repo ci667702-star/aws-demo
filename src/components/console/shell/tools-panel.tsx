@@ -21,14 +21,14 @@ export function ToolsPanel({ onClose }: { onClose: () => void }) {
   const setTab = useConsoleUi((s) => s.setToolsTab);
   const location = useHashLocation();
   return (
-    <aside className="flex h-full flex-col bg-aws-surface" aria-label="도움말 및 실습">
+    <aside className="flex h-full flex-col bg-aws-surface" aria-label="도움말 및 실습 문제">
       <div className="flex items-center justify-between gap-2 border-b border-aws-divider px-4 py-2">
         <div role="tablist" aria-label="패널 종류" className="flex gap-1">
           {(
             [
               ["resource", "리소스 설명"],
               ["help", "도움말"],
-              ["labs", "실습 가이드"],
+              ["labs", "실습 문제"],
             ] as const
           ).map(([id, label]) => (
             <button
@@ -174,9 +174,9 @@ function LabGuide() {
     return (
       <div className="space-y-4 text-sm">
         <div>
-          <h2 className="text-lg font-bold text-aws-text">실습 가이드</h2>
+          <h2 className="text-lg font-bold text-aws-text">실습 문제</h2>
           <p className="mt-1 text-aws-text-2">
-            실습을 고르면 단계별 목표가 표시되고, 이 샌드박스의 실제 설정과 분석 결과로 완료 여부를 자동으로 확인합니다. 리소스는 직접 만들어야 합니다.
+            목표만 주어지고 방법은 스스로 찾는 연습입니다. 실습을 고르면 단계별 목표가 표시되고, 이 샌드박스의 실제 설정과 분석 결과로 완료 여부를 자동으로 확인합니다. 리소스는 직접 만들어야 합니다.
           </p>
         </div>
         <ul className="space-y-3">

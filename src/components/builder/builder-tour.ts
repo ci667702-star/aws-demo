@@ -1,6 +1,6 @@
 "use client";
 
-/** 쉬운 모드(그림 빌더) 둘러보기 — driver.js 단계 팝업 */
+/** 쉬운 모드(그림 빌더) 화면 둘러보기 — driver.js 단계 팝업 */
 import { driver } from "driver.js";
 import "driver.js/dist/driver.css";
 
@@ -13,7 +13,7 @@ const steps = [
   {
     element: '[data-testid="palette"]',
     title: "① 리소스 팔레트",
-    description: "<p>VPC, 서브넷, EC2 같은 리소스를 클릭하거나 캔버스로 끌어다 놓아 추가합니다. VPC나 서브넷 영역 위에 놓으면 자동으로 그 안에 연결됩니다.</p>",
+    description: "<p>VPC, 서브넷, EC2 같은 리소스를 클릭하거나 캔버스로 끌어다 놓아 추가합니다. VPC나 서브넷 영역 위에 놓으면 자동으로 그 안에 연결됩니다. 처음에는 자주 쓰는 리소스만 보이고, '리소스 더 보기'로 나머지를 엽니다.</p>",
     side: "right" as const,
   },
   {
@@ -42,8 +42,8 @@ const steps = [
   },
   {
     element: '[data-testid="tab-lab"]',
-    title: "⑥ Guided Lab",
-    description: "<p>목표가 주어지는 실습입니다. 설정이 맞으면 단계가 자동으로 완료됩니다.</p>",
+    title: "⑥ 실습 문제",
+    description: "<p>목표만 주어지고 방법은 스스로 찾는 연습입니다. 설정이 맞으면 단계가 자동으로 완료됩니다.</p>",
     side: "top" as const,
   },
   {
@@ -58,7 +58,7 @@ export function startBuilderTour() {
   const d = driver({
     popoverClass: "pg-tour",
     showProgress: true,
-    progressText: "쉬운 모드 둘러보기 · {{current}} / {{total}}",
+    progressText: "화면 둘러보기 · {{current}} / {{total}}",
     nextBtnText: "다음",
     prevBtnText: "이전",
     doneBtnText: "마치기",

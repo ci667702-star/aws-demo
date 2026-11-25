@@ -35,7 +35,7 @@ export function IamDashboardPage() {
         description="IAM(Identity and Access Management)은 '누가 무엇을 할 수 있는지' 정하는 서비스입니다. 이 샌드박스의 IAM은 가상이며 실제 AWS 계정·자격 증명과 연결되지 않습니다."
         actions={
           <>
-            <StartTutorialButton tutorialId="iam-access-key" label="따라하기 튜토리얼" />
+            <StartTutorialButton tutorialId="iam-access-key" label="따라하기" />
             <ButtonLink href={href("/iam/templates")}>학교 역할 템플릿</ButtonLink>
             <ButtonLink variant="primary" href={href("/iam/users/create")}>
               사용자 생성

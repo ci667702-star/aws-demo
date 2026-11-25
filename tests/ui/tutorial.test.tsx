@@ -21,7 +21,7 @@ async function startFirstWebServer() {
   seedStore([p]);
   const user = userEvent.setup({ pointerEventsCheck: 0 });
   renderConsole(p.id, "#/");
-  await user.click(await screen.findByRole("button", { name: "튜토리얼 시작" }));
+  await user.click(await screen.findByRole("button", { name: "따라하기 시작" }));
   return { p, user };
 }
 
@@ -85,7 +85,7 @@ describe("튜토리얼 안내 패널", () => {
     expect(stepTitle("① VPC 만들기")).toBeInTheDocument();
 
     // 끝내면 패널이 사라지고, 상단 메뉴에서 다시 시작할 수 있다
-    await user.click(within(panel()).getByRole("button", { name: "튜토리얼 끝내기" }));
+    await user.click(within(panel()).getByRole("button", { name: "따라하기 끝내기" }));
     expect(screen.queryByTestId("tutorial-panel")).not.toBeInTheDocument();
     expect(useTutorialStore.getState().active).toBeNull();
   });

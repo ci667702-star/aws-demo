@@ -22,7 +22,6 @@ import {
 } from "@xyflow/react";
 import { useTheme } from "next-themes";
 import { toast } from "sonner";
-import { MousePointerClick } from "lucide-react";
 import { checkConnection } from "@/lib/engine/connection-rules";
 import {
   isResourceType,
@@ -551,17 +550,6 @@ export function ArchitectureCanvas({
           {project.resources.length > 0 && (
             <Panel position="top-left">
               <MapLegend variant="panel" hidden={legendHidden} onToggle={toggleCategory} />
-            </Panel>
-          )}
-          {project.resources.length === 0 && (
-            <Panel position="top-center" className="pointer-events-none mt-16">
-              <div className="flex max-w-sm flex-col items-center gap-2 rounded-xl border border-dashed bg-background/90 p-6 text-center shadow-sm">
-                <MousePointerClick className="size-6 text-muted-foreground" aria-hidden />
-                <p className="font-medium">빈 캔버스입니다</p>
-                <p className="text-sm text-muted-foreground">
-                  왼쪽 팔레트에서 VPC부터 끌어다 놓거나 클릭해 추가하세요. 리소스 아래/위의 연결점을 드래그하면 관계를 만들 수 있습니다.
-                </p>
-              </div>
             </Panel>
           )}
         </ReactFlow>

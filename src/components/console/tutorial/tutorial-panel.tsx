@@ -10,6 +10,7 @@
 import { ArrowRight, Check, ChevronDown, ChevronRight, ChevronUp, Circle, CircleCheck, Copy, GraduationCap, Minimize2, X } from "lucide-react";
 import { cn } from "cn";
 import { useEffect, useState } from "react";
+import { GlossaryText } from "@/components/docs/glossary-text";
 import { navigate } from "../router";
 import { Button } from "../ui/button";
 import { useTutorialStore } from "./tutorial-store";
@@ -124,7 +125,9 @@ function StepContent({ view }: { view: TutorialView }) {
           {bodyOpen && (
             <div className="mt-1.5 space-y-1.5 text-[14px] leading-relaxed text-aws-text">
               {step.body.map((p, i) => (
-                <p key={i}>{p}</p>
+                <p key={i}>
+                  <GlossaryText text={p} />
+                </p>
               ))}
             </div>
           )}
@@ -132,7 +135,9 @@ function StepContent({ view }: { view: TutorialView }) {
       ) : (
         <div className="space-y-2 text-[15px] leading-relaxed text-aws-text">
           {step.body.map((p, i) => (
-            <p key={i}>{p}</p>
+            <p key={i}>
+              <GlossaryText text={p} />
+            </p>
           ))}
         </div>
       )}
@@ -156,7 +161,13 @@ function StepContent({ view }: { view: TutorialView }) {
       {hasWork && (
         <section className="space-y-2 rounded-xl border border-aws-border p-3">
           <h4 className="text-[13px] font-bold text-aws-info">지금 할 일</h4>
-          {step.todo?.length ? <TodoList view={view} /> : <p className="text-[15px] leading-relaxed text-aws-text">{step.task}</p>}
+          {step.todo?.length ? (
+            <TodoList view={view} />
+          ) : (
+            <p className="text-[15px] leading-relaxed text-aws-text">
+              <GlossaryText text={step.task ?? ""} />
+            </p>
+          )}
         </section>
       )}
 
@@ -236,7 +247,7 @@ function NavButtons({ view, compact }: { view: TutorialView; compact?: boolean }
 
 function Progress({ view }: { view: TutorialView }) {
   return (
-    <div className="h-1.5 overflow-hidden rounded-full bg-aws-divider" role="progressbar" aria-label="튜토리얼 진행" aria-valuemin={1} aria-valuemax={view.total} aria-valuenow={view.index + 1}>
+    <div className="h-1.5 overflow-hidden rounded-full bg-aws-divider" role="progressbar" aria-label="따라하기 진행" aria-valuemin={1} aria-valuemax={view.total} aria-valuenow={view.index + 1}>
       <div className="h-full rounded-full bg-aws-link transition-all" style={{ width: `${((view.index + 1) / view.total) * 100}%` }} />
     </div>
   );
@@ -258,7 +269,7 @@ function DimToggle() {
 function SidePanel({ view }: { view: TutorialView }) {
   const [listOpen, setListOpen] = useState(false);
   return (
-    <aside className="flex h-full flex-col bg-aws-surface" aria-label="튜토리얼 안내" data-testid="tutorial-panel" data-done={view.done || undefined}>
+    <aside className="flex h-full flex-col bg-aws-surface" aria-label="따라하기 안내" data-testid="tutorial-panel" data-done={view.done || undefined}>
       <header className="space-y-2 border-b border-aws-divider px-5 pt-3 pb-3">
         <div className="flex items-start justify-between gap-2">
           <p className="flex min-w-0 items-center gap-1.5 text-[15px] font-bold text-aws-text">
@@ -269,7 +280,7 @@ function SidePanel({ view }: { view: TutorialView }) {
             <button type="button" className="rounded p-1.5 text-aws-text-2 hover:bg-aws-surface-2 hover:text-aws-text" aria-label="안내 접기" title="안내 접기 (오른쪽 아래 버튼으로 다시 엽니다)" onClick={() => store().setMinimized(true)}>
               <Minimize2 className="size-4" aria-hidden />
             </button>
-            <button type="button" className="rounded p-1.5 text-aws-text-2 hover:bg-aws-surface-2 hover:text-aws-text" aria-label="튜토리얼 끝내기" title="튜토리얼 끝내기 (상단 '튜토리얼' 메뉴에서 이어서 할 수 있습니다)" onClick={() => store().stop()}>
+            <button type="button" className="rounded p-1.5 text-aws-text-2 hover:bg-aws-surface-2 hover:text-aws-text" aria-label="따라하기 끝내기" title="따라하기 끝내기 (상단 '따라하기' 메뉴에서 이어서 할 수 있습니다)" onClick={() => store().stop()}>
               <X className="size-4" aria-hidden />
             </button>
           </div>
@@ -324,7 +335,7 @@ function SheetPanel({ view }: { view: TutorialView }) {
   return (
     <aside
       className="fixed inset-x-0 bottom-0 z-[46] rounded-t-2xl border-t border-aws-border bg-aws-surface shadow-[0_-10px_30px_rgba(0,7,22,0.28)]"
-      aria-label="튜토리얼 안내"
+      aria-label="따라하기 안내"
       data-testid="tutorial-panel"
       data-done={view.done || undefined}
     >
@@ -347,7 +358,7 @@ function SheetPanel({ view }: { view: TutorialView }) {
           ) : (
             <NavButtons view={view} compact />
           ))}
-        <button type="button" className="rounded p-1.5 text-aws-text-2 hover:bg-aws-surface-2" aria-label="튜토리얼 끝내기" onClick={() => store().stop()}>
+        <button type="button" className="rounded p-1.5 text-aws-text-2 hover:bg-aws-surface-2" aria-label="따라하기 끝내기" onClick={() => store().stop()}>
           <X className="size-4" aria-hidden />
         </button>
       </div>
@@ -382,7 +393,7 @@ export function TutorialChip({ onOpen }: { onOpen: () => void }) {
       data-testid="tutorial-chip"
     >
       {view.done ? <CircleCheck className="size-[18px] text-aws-success" aria-hidden /> : <GraduationCap className="size-[18px]" aria-hidden />}
-      튜토리얼 {view.index + 1}/{view.total} 열기
+      따라하기 {view.index + 1}/{view.total} 열기
     </button>
   );
 }

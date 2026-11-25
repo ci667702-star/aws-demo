@@ -1,9 +1,10 @@
 import { expect, test, type Page } from "@playwright/test";
 
-/** 첫 화면에서 빈 샌드박스를 만들고 콘솔 홈으로 이동한다 */
+/** 첫 화면에서 빈 샌드박스를 심화 모드(콘솔)로 만들고 콘솔 홈으로 이동한다 (생성 대화 상자의 기본값은 쉬운 모드) */
 async function createSandbox(page: Page, name: string) {
   await page.goto("/");
-  await page.getByRole("button", { name: "생성" }).first().click();
+  await page.getByRole("button", { name: "빈 샌드박스 만들기" }).first().click();
+  await page.getByRole("dialog").getByRole("radio", { name: /심화 모드/ }).check();
   await page.getByRole("dialog").getByLabel("이름").fill(name);
   await page.getByRole("button", { name: "생성 후 열기" }).click();
   await expect(page).toHaveURL(/\/console\/proj-[^#]+#\/$/);
@@ -100,9 +101,9 @@ async function buildPublicWebServer(page: Page) {
 
 test("첫 화면에는 미리 만든 프로젝트가 없고, 새 샌드박스는 리소스 없이 시작한다", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByText("샌드박스 없음")).toBeVisible();
-  // 학습용 시뮬레이터 안내: 실제 AWS 계정·자격 증명·리소스를 쓰지 않고 요금이 없다는 점을 안내 상자와 바닥글에 보여 준다
-  await expect(page.getByText(/실제 AWS 계정·자격 증명·리소스를 사용하지 않으며 요금이 부과되지 않습니다\. 또한 모든 리소스와 통신 결과는/)).toBeVisible();
+  await expect(page.getByTestId("no-sandbox")).toContainText("아직 샌드박스가 없습니다");
+  // 학습용 시뮬레이터 안내: 실제 AWS 계정·자격 증명·요금을 쓰지 않는다는 점을 제목 아래 설명과 바닥글에 보여 준다
+  await expect(page.getByText(/실제 AWS 계정·자격 증명·요금을 쓰지 않으며, 모든 결과는 이 브라우저 안에서 계산되는 가상 결과입니다/)).toBeVisible();
   await expect(page.locator("footer")).toContainText("실제 AWS 계정·자격 증명·리소스를 사용하지 않으며 요금이 발생하지 않습니다.");
   await createSandbox(page, "E2E 빈 샌드박스");
   await go(page, "#/vpc/vpcs");
@@ -233,7 +234,7 @@ test("IAM 가상 액세스 키를 발급하고, S3 버킷을 정적 웹 사이�
 
 test("리소스 설명 패널: 선택한 리소스의 설명·설정 도움말을 보여 주고, 도움말이 화면 밖으로 나가지 않는다", async ({ page }) => {
   await page.goto("/");
-  await page.getByRole("button", { name: "완성된 예시 아키텍처 살펴보기" }).click();
+  await page.getByRole("button", { name: /예시 구경하기/ }).click();
   await page.getByRole("button", { name: "예시 열기" }).first().click();
   await expect(page).toHaveURL(/\/console\/proj-/);
   const projectId = new URL(page.url()).pathname.split("/")[2];
@@ -345,7 +346,7 @@ test("튜토리얼은 '다음'을 눌러야 넘어가고, 화면도 자동으로
 
 test("NAT 인스턴스 예시: 리소스 맵 범례·선택 강조, 프라이빗 서버의 외부 통신, 소스/대상 확인을 켜면 막히는 이유", async ({ page }) => {
   await page.goto("/");
-  await page.getByRole("button", { name: "완성된 예시 아키텍처 살펴보기" }).click();
+  await page.getByRole("button", { name: /예시 구경하기/ }).click();
   await page.getByRole("button", { name: "예시 열기" }).nth(3).click();
   await expect(page.getByTestId("resource-map")).toBeVisible();
   await expect(page.getByTestId("node-nat-instance")).toBeVisible();
@@ -580,7 +581,7 @@ test("Lambda 튜토리얼: 함수를 만들어 테스트하고, 일정으로 호
 
 test("서버리스 예시: 세 함수가 모두 성공하고, 테스트 이벤트가 EC2 중지 규칙과 일치한다", async ({ page }) => {
   await page.goto("/");
-  await page.getByRole("button", { name: "완성된 예시 아키텍처 살펴보기" }).click();
+  await page.getByRole("button", { name: /예시 구경하기/ }).click();
   await page.getByRole("button", { name: "예시 열기" }).nth(4).click();
   await expect(page.getByTestId("resource-map")).toBeVisible();
   await expect(page.getByTestId("node-attendance-report")).toBeVisible();
@@ -643,4 +644,27 @@ test("CloudFront·Secrets Manager·Parameter Store: 비공개 버킷을 OAC로 �
   await go(page, "#/ssm/parameters/create");
   await page.getByRole("button", { name: "파라미터 생성" }).click();
   await expect(page.getByTestId("parameter-value")).toHaveText("db.internal.example");
+});
+
+test("처음 온 사람: 첫 화면의 시작 버튼 하나로 따라하기가 열리고, 끝낸 뒤에도 다음 할 일 줄이 순서를 알려 준다", async ({ page }) => {
+  await page.goto("/");
+  await page.getByTestId("quick-start").getByRole("button", { name: "첫 웹 서버 따라하기 시작" }).click();
+  await expect(page).toHaveURL(/\/console\/proj-[^#]+#\/$/);
+  const panel = page.getByTestId("tutorial-panel");
+  await expect(panel).toBeVisible();
+  await expect(panel.getByRole("heading", { level: 3 })).toContainText("무엇을 만들까요?");
+
+  // 안내 글 속 용어는 밑줄을 긋고, 마우스를 올리면 한 줄 풀이를 보여 준다
+  const term = panel.getByTestId("glossary-term").first();
+  await term.hover();
+  await expect(page.getByTestId("glossary-popover")).toBeVisible();
+
+  // 따라하기를 끝내면 위쪽 '다음 할 일' 줄이 첫 단계로 안내한다
+  await panel.getByRole("button", { name: "따라하기 끝내기" }).click();
+  await go(page, "#/vpc/vpcs");
+  const bar = page.getByTestId("next-step-bar");
+  await expect(bar).toContainText("VPC 만들기");
+  await bar.getByTestId("next-step-go").click();
+  await expect(page.getByRole("heading", { name: "VPC 생성", level: 1 })).toBeVisible();
+  await expect(bar).toContainText("지금 이 화면에서 하면 됩니다");
 });

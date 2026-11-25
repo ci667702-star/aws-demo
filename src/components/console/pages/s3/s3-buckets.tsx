@@ -62,7 +62,7 @@ export function BucketListPage() {
             description="버킷은 파일(객체)을 담는 상자입니다. 버킷 이름은 전 세계 모든 AWS 계정에서 하나뿐이어야 합니다."
             actions={
               <>
-                <StartTutorialButton tutorialId="s3-static-site" label="따라하기 튜토리얼" />
+                <StartTutorialButton tutorialId="s3-static-site" label="따라하기" />
                 <Button disabled={!current} onClick={() => setModal("empty")}>
                   비우기
                 </Button>

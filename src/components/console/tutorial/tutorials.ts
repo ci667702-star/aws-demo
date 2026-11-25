@@ -13,6 +13,7 @@ import type { Project, ResourceOfType, S3Bucket } from "@/lib/engine/resource-mo
 import { findObject, websiteRequest } from "@/lib/engine/s3-engine";
 import { evaluateSecurityGroups } from "@/lib/engine/security-group-engine";
 import type { Topology } from "@/lib/engine/topology-engine";
+import { TUTORIAL_TOPICS } from "./tutorial-topics";
 
 export interface TutorialContext {
   project: Project;
@@ -146,10 +147,7 @@ function loadTarget(t: Topology) {
 
 export const TUTORIALS: Tutorial[] = [
   {
-    id: "console-tour",
-    title: "콘솔 둘러보기",
-    description: "화면의 각 부분이 무엇인지 1분 안에 살펴봅니다.",
-    minutes: 1,
+    ...TUTORIAL_TOPICS["console-tour"],
     steps: [
       {
         id: "welcome",
@@ -184,7 +182,7 @@ export const TUTORIALS: Tutorial[] = [
       {
         id: "home-cards",
         title: "무엇부터 할지 모르겠다면",
-        body: ["따라하기 튜토리얼은 오른쪽 안내를 따라 첫 웹 서버를 직접 만들어 보는 과정입니다. 실습 가이드는 목표만 주어지는 연습 문제입니다."],
+        body: ["따라하기는 오른쪽 안내를 따라 한 단계씩 직접 만들어 보는 과정입니다. 실습 문제는 목표만 주어지고, 설정이 맞으면 자동으로 완료되는 연습입니다."],
         target: '[data-tour="home-tutorial"]',
         side: "bottom",
         path: "/",
@@ -192,7 +190,7 @@ export const TUTORIALS: Tutorial[] = [
       {
         id: "help",
         title: "도움말",
-        body: ["각 화면의 '정보' 링크나 이 버튼을 누르면 오른쪽에 쉬운 설명(비유, 순서, 자주 하는 실수)이 열립니다. 실습 가이드도 여기에 있습니다."],
+        body: ["각 화면의 '정보' 링크나 이 버튼을 누르면 오른쪽에 쉬운 설명(비유, 순서, 자주 하는 실수)이 열립니다. 실습 문제도 여기에 있습니다."],
         target: '[data-tour="help-button"]',
         side: "bottom",
       },
@@ -213,15 +211,12 @@ export const TUTORIALS: Tutorial[] = [
       {
         id: "end",
         title: "준비 완료!",
-        body: ["이제 '따라하기 튜토리얼: 첫 웹 서버 만들기'로 직접 만들어 보세요. 상단의 '튜토리얼' 메뉴에서 언제든 다시 볼 수 있습니다."],
+        body: ["이제 '따라하기: 첫 웹 서버 만들기'로 직접 만들어 보세요. 상단의 '따라하기' 메뉴에서 언제든 다시 볼 수 있습니다."],
       },
     ],
   },
   {
-    id: "first-web-server",
-    title: "첫 웹 서버 만들기",
-    description: "VPC부터 EC2까지 직접 만들고 인터넷에서 접속되는지 확인합니다. 단계마다 실제 설정이 맞는지 확인해 '완료'로 표시합니다.",
-    minutes: 10,
+    ...TUTORIAL_TOPICS["first-web-server"],
     steps: [
       {
         id: "intro",
@@ -383,16 +378,13 @@ export const TUTORIALS: Tutorial[] = [
         title: "완성했습니다! 🎉",
         body: [
           "인터넷 → 인터넷 게이트웨이 → 퍼블릭 서브넷 → 보안 그룹 → 웹 서버까지 통신 경로를 직접 만들었습니다.",
-          "다음 도전: 보안 그룹의 HTTP 규칙을 지우고 다시 분석해 보세요(막히는 위치가 보입니다). 또는 실습 가이드의 'ALB와 EC2 구성', CloudWatch의 가상 부하와 경보를 해 보세요.",
+          "다음 도전: 보안 그룹의 HTTP 규칙을 지우고 다시 분석해 보세요(막히는 위치가 보입니다). 또는 실습 문제의 'ALB와 EC2 구성', CloudWatch의 가상 부하와 경보를 해 보세요.",
         ],
       },
     ],
   },
   {
-    id: "iam-access-key",
-    title: "IAM 사용자와 가상 액세스 키 발급",
-    description: "그룹으로 권한을 주고, 사용자를 만든 뒤 가상 액세스 키를 발급해 봅니다. 실제 키는 만들어지지 않습니다.",
-    minutes: 5,
+    ...TUTORIAL_TOPICS["iam-access-key"],
     steps: [
       {
         id: "intro",
@@ -482,10 +474,7 @@ export const TUTORIALS: Tutorial[] = [
     ],
   },
   {
-    id: "s3-static-site",
-    title: "S3로 정적 웹 사이트 공개하기",
-    description: "버킷을 만들고 index.html을 올린 뒤, 퍼블릭 액세스 차단·버킷 정책을 바꿔 웹 사이트로 공개합니다.",
-    minutes: 7,
+    ...TUTORIAL_TOPICS["s3-static-site"],
     steps: [
       {
         id: "intro",
@@ -612,10 +601,7 @@ export const TUTORIALS: Tutorial[] = [
     ],
   },
   {
-    id: "cloudwatch-alarm",
-    title: "CloudWatch로 과부하 경보 받기",
-    description: "서버에 가상 부하를 주고 CPU 그래프를 본 뒤, 기준을 넘으면 알려 주는 경보를 만듭니다.",
-    minutes: 6,
+    ...TUTORIAL_TOPICS["cloudwatch-alarm"],
     steps: [
       {
         id: "intro",
@@ -629,7 +615,7 @@ export const TUTORIALS: Tutorial[] = [
       {
         id: "server",
         title: "① 부하를 받을 서버 준비",
-        body: ["실행 중인 EC2 인스턴스나 로드 밸런서가 필요합니다. 없다면 '첫 웹 서버 만들기' 튜토리얼이나 샌드박스 목록의 예시 아키텍처로 준비하세요."],
+        body: ["실행 중인 EC2 인스턴스나 로드 밸런서가 필요합니다. 없다면 '첫 웹 서버 만들기' 따라하기나 첫 화면의 '예시 구경하기'로 준비하세요."],
         task: "실행 중인(Running) 인스턴스가 하나 이상 있으면 이 단계가 완료됩니다.",
         path: "/ec2/instances",
         isDone: ({ topo }) => !!loadTarget(topo),
@@ -705,10 +691,7 @@ export const TUTORIALS: Tutorial[] = [
     ],
   },
   {
-    id: "nat-instance",
-    title: "NAT 인스턴스로 비용 줄이기",
-    description: "NAT 게이트웨이 대신 EC2 한 대로 프라이빗 서브넷의 외부 통신을 만듭니다. AWS 문서의 NAT 인스턴스 절차를 따라 하고 비용을 비교합니다.",
-    minutes: 15,
+    ...TUTORIAL_TOPICS["nat-instance"],
     steps: [
       {
         id: "intro",
@@ -724,7 +707,7 @@ export const TUTORIALS: Tutorial[] = [
         id: "public",
         title: "준비: 퍼블릭 서브넷",
         body: ["NAT 인스턴스는 인터넷 게이트웨이 경로(0.0.0.0/0 → IGW)가 있는 퍼블릭 서브넷에 둡니다. NAT 인스턴스 자신도 그 길로 인터넷에 나가기 때문입니다."],
-        task: "퍼블릭 서브넷이 없다면 '첫 웹 서버 만들기' 튜토리얼의 ①~④를 먼저 하세요. 이미 있으면 '다음'을 누르세요.",
+        task: "퍼블릭 서브넷이 없다면 '첫 웹 서버 만들기' 따라하기의 ①~④를 먼저 하세요. 이미 있으면 '다음'을 누르세요.",
         path: "/vpc/subnets",
         isDone: ({ topo }) => publicSubnets(topo).length > 0,
       },
@@ -936,10 +919,7 @@ export const TUTORIALS: Tutorial[] = [
     ],
   },
   {
-    id: "lambda-schedule",
-    title: "Lambda를 일정에 따라 실행하기",
-    description: "서버 없이 코드를 실행하는 Lambda 함수를 만들고, EventBridge Scheduler 일정으로 정해진 시각마다 호출되게 합니다. 실행 역할과 지표도 확인합니다.",
-    minutes: 10,
+    ...TUTORIAL_TOPICS["lambda-schedule"],
     steps: [
       {
         id: "intro",
