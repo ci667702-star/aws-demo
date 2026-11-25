@@ -39,6 +39,8 @@ export interface NavGroup {
   /** 그룹 대표 화면 */
   root: string;
   items: NavItem[];
+  /** 처음부터 사이드 메뉴에 보이는 기본 서비스 (나머지는 '서비스 더 보기'로 연다) */
+  core?: boolean;
 }
 
 const n = (type: Parameters<Topology["ofType"]>[0]) => (t: Topology) => t.ofType(type).length;
@@ -50,6 +52,7 @@ export const NAV_GROUPS: NavGroup[] = [
     description: "나만의 가상 네트워크를 만들고 구역(서브넷)과 길(라우팅)을 정합니다.",
     icon: Network,
     root: "/vpc",
+    core: true,
     items: [
       { label: "VPC 대시보드", path: "/vpc" },
       { label: "VPC", path: "/vpc/vpcs", count: n("vpc") },
@@ -66,6 +69,7 @@ export const NAV_GROUPS: NavGroup[] = [
     description: "어떤 트래픽을 들여보내고 내보낼지 방화벽 규칙을 정합니다.",
     icon: ShieldCheck,
     root: "/vpc/security-groups",
+    core: true,
     items: [
       { label: "보안 그룹", path: "/vpc/security-groups", count: n("security-group") },
       { label: "네트워크 ACL", path: "/vpc/network-acls", count: n("network-acl") },
@@ -77,6 +81,7 @@ export const NAV_GROUPS: NavGroup[] = [
     description: "가상 서버를 실행하고, 로드 밸런서로 요청을 나눠 보냅니다.",
     icon: Server,
     root: "/ec2",
+    core: true,
     items: [
       { label: "EC2 대시보드", path: "/ec2" },
       { label: "인스턴스", path: "/ec2/instances", count: (t) => t.ofType("ec2").filter((e) => e.config.state !== "terminated").length },
@@ -123,6 +128,7 @@ export const NAV_GROUPS: NavGroup[] = [
     description: "파일(객체)을 버킷에 저장하고 공개 범위를 관리합니다.",
     icon: HardDrive,
     root: "/s3",
+    core: true,
     items: [
       { label: "버킷", path: "/s3", count: (_t, p) => p.services.s3.buckets.length },
       { label: "S3 접근 테스트", path: "/s3/access-test" },
@@ -142,6 +148,7 @@ export const NAV_GROUPS: NavGroup[] = [
     description: "사용자·역할을 만들고 누가 무엇을 할 수 있는지 정책으로 정합니다.",
     icon: KeyRound,
     root: "/iam",
+    core: true,
     items: [
       { label: "IAM 대시보드", path: "/iam" },
       { label: "사용자", path: "/iam/users", count: (_t, p) => p.services.iam.users.length },
@@ -194,6 +201,7 @@ export const NAV_GROUPS: NavGroup[] = [
     description: "통신 경로 분석, 구성 검사, 리소스 맵, 비용 추정, 작업 기록",
     icon: Waypoints,
     root: "/vpc/reachability",
+    core: true,
     items: [
       { label: "Reachability Analyzer", path: "/vpc/reachability", count: (_t, p) => p.networkPaths.length },
       { label: "리소스 맵", path: "/map" },

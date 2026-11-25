@@ -17,7 +17,8 @@ import { downloadTextFile } from "@/lib/ui/download";
 import { analyzeProject, AnalysisProvider } from "@/components/console/analysis-context";
 import { ArchitectureCanvas, type CanvasCommands } from "./canvas/architecture-canvas";
 import { Inspector } from "./inspector/inspector";
-import { Palette } from "./palette";
+import { NextStepGuide } from "./next-step-guide";
+import { BASIC_PALETTE_TYPES, Palette } from "./palette";
 import { BottomPanel } from "./panels/bottom-panel";
 import { notifyHistory } from "./history-toast";
 import { BuilderToolbar } from "./toolbar";
@@ -98,6 +99,23 @@ export function Builder({ projectId }: { projectId: string }) {
     setLeftOpen(false);
   };
 
+  // 다음 할 일의 '팔레트에서 찾기': 좁은 화면에서는 팔레트를 열고, 그 항목으로 스크롤해 잠깐 강조한다
+  const findInPalette = (type: ResourceType) => {
+    setLeftOpen(true);
+    window.setTimeout(() => {
+      const el = document.querySelector<HTMLElement>(`[data-testid="palette-${type}"]`);
+      if (!el) return;
+      el.scrollIntoView?.({ block: "center" });
+      el.removeAttribute("data-field-flash");
+      void el.offsetWidth;
+      el.setAttribute("data-field-flash", "");
+      el.focus({ preventScroll: true });
+      window.setTimeout(() => el.removeAttribute("data-field-flash"), 1800);
+    }, 50);
+  };
+  // 샌드박스에 이미 '자주 쓰는 리소스' 밖의 리소스가 있거나 실습 문제라면 팔레트를 처음부터 모두 펼친다
+  const paletteShowAll = !!project.labId || project.resources.some((r) => !BASIC_PALETTE_TYPES.includes(r.type));
+
   // 팔레트의 설명 버튼: 보던 리소스를 기억해 두고(돌아가기용) 설명을 연다
   const onInfo = (doc: InspectorDoc) => {
     showDoc({ ...doc, from: useEditorStore.getState().selectedResourceIds[0] ?? null });
@@ -126,11 +144,12 @@ export function Builder({ projectId }: { projectId: string }) {
               )}
               aria-label="리소스 팔레트"
             >
-              <Palette onAdd={onAdd} onInfo={onInfo} />
+              <Palette onAdd={onAdd} onInfo={onInfo} showAllByDefault={paletteShowAll} />
             </aside>
             <div className="flex min-w-0 flex-1 flex-col">
               <div className="relative min-h-0 flex-1">
                 <ArchitectureCanvas projectId={projectId} commandsRef={commandsRef} />
+                <NextStepGuide project={project} onFind={findInPalette} />
               </div>
               <BottomPanel
                 projectId={projectId}

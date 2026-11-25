@@ -84,7 +84,7 @@ export function TopNav() {
           className={cn(navButton, toolsOpen && "bg-aws-nav-hover")}
           onClick={() => setToolsOpen(!toolsOpen)}
           aria-pressed={toolsOpen}
-          aria-label="도움말 및 실습 패널"
+          aria-label="도움말 및 실습 문제 패널"
           data-tour="help-button"
         >
           <HelpCircle className="size-[18px]" aria-hidden />

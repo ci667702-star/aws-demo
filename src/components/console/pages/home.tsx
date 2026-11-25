@@ -5,6 +5,8 @@ import Link from "next/link";
 import { cn } from "cn";
 import { useMemo } from "react";
 import { estimateCost } from "@/lib/engine/cost-engine";
+import { firstWebServerSteps } from "@/lib/project/first-steps";
+import { useGuidePrefs } from "@/lib/store/guide-prefs";
 import { formatMoney } from "@/lib/ui/format";
 import { useAnalysis } from "../analysis-context";
 import { useConsoleProjectId, useProject } from "../console-context";
@@ -24,18 +26,9 @@ export function ConsoleHomePage() {
   const openLabs = useConsoleUi((s) => s.openLabs);
   const cost = useMemo(() => estimateCost(project), [project]);
 
-  const vpcs = topo.ofType("vpc");
-  const hasPublicSubnet = topo.ofType("subnet").some((s) => topo.classifySubnet(s.id).kind === "public");
-  const steps = [
-    { done: vpcs.length > 0, text: "VPC 만들기", detail: "내 전용 네트워크의 주소 범위(예: 10.0.0.0/16)를 정합니다.", path: "/vpc/vpcs/create" },
-    { done: topo.ofType("subnet").length > 0, text: "서브넷 만들기", detail: "VPC를 구역으로 나눕니다. 서버는 서브넷 안에 놓입니다.", path: "/vpc/subnets/create" },
-    { done: vpcs.some((v) => !!topo.igwOfVpc(v.id)), text: "인터넷 게이트웨이 연결", detail: "VPC에 인터넷으로 나가는 문을 답니다.", path: "/vpc/igws" },
-    { done: hasPublicSubnet, text: "라우팅 테이블에 인터넷 경로 추가", detail: "0.0.0.0/0 → 인터넷 게이트웨이 경로가 있어야 퍼블릭 서브넷이 됩니다.", path: "/vpc/route-tables" },
-    { done: topo.ofType("security-group").some((g) => !g.config.isDefault), text: "보안 그룹 만들기", detail: "서버에 들어올 수 있는 트래픽(예: HTTP 80)을 정합니다.", path: "/vpc/security-groups/create" },
-    { done: topo.ofType("ec2").length > 0, text: "EC2 인스턴스 시작", detail: "서브넷·퍼블릭 IP·보안 그룹·웹 서버 설치를 고릅니다.", path: "/ec2/instances/launch" },
-    { done: project.networkPaths.some((p) => p.lastAnalysis), text: "통신 경로 분석", detail: "인터넷에서 서버까지 실제로 도달하는지 단계별로 확인합니다.", path: "/vpc/reachability/create" },
-  ];
+  const steps = firstWebServerSteps(project, topo);
   const doneCount = steps.filter((s) => s.done).length;
+  const nextHidden = useGuidePrefs((s) => !!s.nextStepHidden[projectId]);
 
   return (
     <SpaceBetween>
@@ -49,22 +42,22 @@ export function ConsoleHomePage() {
         <div className="flex flex-col gap-3 rounded-2xl border-2 border-aws-link/40 bg-aws-info-bg p-5" data-tour="home-tutorial">
           <GraduationCap className="size-7 text-aws-link" aria-hidden />
           <div>
-            <h2 className="text-lg font-bold">따라하기 튜토리얼</h2>
-            <p className="mt-1 text-[15px] text-aws-text-2">화면 오른쪽의 안내를 따라 첫 웹 서버를 만들어 봅니다. 처음이라면 여기서 시작하세요.</p>
+            <h2 className="text-lg font-bold">따라하기</h2>
+            <p className="mt-1 text-[15px] text-aws-text-2">화면 오른쪽 안내가 한 단계씩 알려 줍니다. 처음이라면 &apos;첫 웹 서버 만들기&apos;부터 시작하세요.</p>
           </div>
           <div className="mt-auto flex flex-wrap items-center gap-2">
             <StartTutorialButton tutorialId="first-web-server" variant="primary" />
-            <StartTutorialButton tutorialId="console-tour" variant="link" label="콘솔 둘러보기 (1분)" />
+            <StartTutorialButton tutorialId="console-tour" variant="link" label="화면 둘러보기 (1분)" />
           </div>
         </div>
         <div className="flex flex-col gap-3 rounded-2xl border border-aws-border bg-aws-surface p-5">
           <BookOpenCheck className="size-7 text-aws-success" aria-hidden />
           <div>
-            <h2 className="text-lg font-bold">실습 가이드</h2>
-            <p className="mt-1 text-[15px] text-aws-text-2">목표만 주어지는 5가지 실습입니다. 설정이 맞으면 단계가 자동으로 완료됩니다.</p>
+            <h2 className="text-lg font-bold">실습 문제</h2>
+            <p className="mt-1 text-[15px] text-aws-text-2">목표만 주어지고 방법은 스스로 찾는 5가지 연습입니다. 설정이 맞으면 단계가 자동으로 완료됩니다.</p>
           </div>
           <div className="mt-auto">
-            <Button onClick={openLabs}>실습 목록 열기</Button>
+            <Button onClick={openLabs}>실습 문제 목록 열기</Button>
           </div>
         </div>
         <div className="flex flex-col gap-3 rounded-2xl border border-aws-border bg-aws-surface p-5">
@@ -84,16 +77,28 @@ export function ConsoleHomePage() {
       <div className="grid gap-5 @3xl/main:grid-cols-3">
         <Container
           className="@3xl/main:col-span-2"
-          header={<ContainerHeader title={`직접 만들어 보기 (${doneCount}/${steps.length})`} description="앱이 미리 만들어 두는 리소스는 없습니다. 아래 순서대로 하나씩 만들면 인터넷에서 접속되는 웹 서버가 완성됩니다." />}
+          header={
+            <ContainerHeader
+              title={`직접 만들어 보기 (${doneCount}/${steps.length})`}
+              description="앱이 미리 만들어 두는 리소스는 없습니다. 아래 순서대로 하나씩 만들면 인터넷에서 접속되는 웹 서버가 완성됩니다. 다른 화면에서도 위쪽 '다음 할 일' 줄이 이 순서를 알려 줍니다."
+              actions={
+                nextHidden ? (
+                  <Button variant="link" onClick={() => useGuidePrefs.getState().setNextStepHidden(projectId, false)}>
+                    다음 할 일 줄 다시 보이기
+                  </Button>
+                ) : undefined
+              }
+            />
+          }
         >
           <ol className="space-y-1">
             {steps.map((s, i) => (
               <li key={i}>
-                <a href={href(s.path)} className="flex items-start gap-3 rounded-xl px-3 py-2.5 hover:bg-aws-surface-2">
+                <a href={href(s.consolePath)} className="flex items-start gap-3 rounded-xl px-3 py-2.5 hover:bg-aws-surface-2">
                   {s.done ? <CircleCheck className="mt-0.5 size-5 shrink-0 text-aws-success" aria-label="완료" /> : <Circle className="mt-0.5 size-5 shrink-0 text-aws-text-3" aria-label="미완료" />}
                   <span>
                     <span className={cn("block text-[15px] font-bold", s.done ? "text-aws-text-2" : "text-aws-link")}>
-                      {i + 1}. {s.text}
+                      {i + 1}. {s.title}
                     </span>
                     <span className="block text-sm text-aws-text-2">{s.detail}</span>
                   </span>

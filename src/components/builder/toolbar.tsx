@@ -192,14 +192,15 @@ export function BuilderToolbar({
       <div className="hidden sm:block">
         <Brand compact />
       </div>
-      <IconButton label="리소스 팔레트" onClick={onToggleLeft}>
+      <Button variant="ghost" size="sm" onClick={onToggleLeft} aria-label="리소스 팔레트" title="리소스 팔레트 열고 닫기">
         <PanelLeft />
-      </IconButton>
+        <span className="hidden xl:inline">팔레트</span>
+      </Button>
       <div className="flex min-w-24 items-center gap-2">
         <ProjectName projectId={projectId} />
         {lab && (
           <span className="hidden items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-700 md:flex dark:text-emerald-300">
-            <GraduationCap className="size-3" aria-hidden /> Lab {lab.order}
+            <GraduationCap className="size-3" aria-hidden /> 실습 문제 {lab.order}
           </span>
         )}
         <span className="hidden md:inline">
@@ -213,15 +214,15 @@ export function BuilderToolbar({
       <IconButton label="다시 실행" shortcut="Ctrl+Shift+Z" onClick={() => notifyHistory(redo(projectId), "redo")} disabled={!canRedo}>
         <Redo2 />
       </IconButton>
-      <span className="hidden sm:inline-flex">
-        <IconButton label="자동 정렬" onClick={runAutoLayout}>
-          <LayoutGrid />
-        </IconButton>
-      </span>
+      <Button variant="ghost" size="sm" onClick={runAutoLayout} aria-label="자동 정렬" title="가용 영역과 서브넷 종류에 맞춰 리소스를 정렬합니다" className="hidden sm:inline-flex">
+        <LayoutGrid />
+        <span className="hidden xl:inline">자동 정렬</span>
+      </Button>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon-sm" aria-label="보기 옵션" className="hidden sm:inline-flex">
+          <Button variant="ghost" size="sm" aria-label="보기 옵션" title="캔버스에 보일 것 고르기" className="hidden sm:inline-flex">
             <Eye />
+            <span className="hidden 2xl:inline">보기</span>
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start">
@@ -239,7 +240,7 @@ export function BuilderToolbar({
         <IdentityBadge projectId={projectId} />
         <Button variant="ghost" size="sm" onClick={() => void import("./builder-tour").then((m) => m.startBuilderTour())} data-testid="builder-tour">
           <GraduationCap />
-          <span className="hidden md:inline">둘러보기</span>
+          <span className="hidden md:inline">화면 둘러보기</span>
         </Button>
         <Button asChild variant="outline" size="sm" data-testid="open-console-mode">
           <Link href={`/console/${projectId}#/`} title="같은 샌드박스를 AWS 콘솔처럼 직접 설정하는 심화 모드로 전환">
@@ -291,9 +292,10 @@ export function BuilderToolbar({
         <span className="hidden sm:inline-flex">
           <ThemeToggle />
         </span>
-        <IconButton label="설정 패널" onClick={onToggleRight}>
+        <Button variant="ghost" size="sm" onClick={onToggleRight} aria-label="설정 패널" title="설명·설정 패널 열고 닫기">
           <PanelRight />
-        </IconButton>
+          <span className="hidden 2xl:inline">설정 패널</span>
+        </Button>
       </div>
     </header>
   );

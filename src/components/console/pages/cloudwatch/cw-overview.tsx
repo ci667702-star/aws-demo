@@ -54,7 +54,7 @@ export function CloudWatchOverviewPage() {
         description="CloudWatch는 리소스의 상태를 숫자(지표)로 모으고, 이상하면 경보로 알려 주는 모니터링 서비스입니다. 이 샌드박스의 지표는 실제 수집값이 아니라 설정과 가상 부하로 계산한 값입니다."
         actions={
           <>
-            <StartTutorialButton tutorialId="cloudwatch-alarm" label="따라하기 튜토리얼" />
+            <StartTutorialButton tutorialId="cloudwatch-alarm" label="따라하기" />
             <ButtonLink variant="primary" href={href("/cloudwatch/alarms/create")}>
               경보 생성
             </ButtonLink>

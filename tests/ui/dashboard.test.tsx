@@ -20,17 +20,19 @@ describe("샌드박스 목록 (첫 화면)", () => {
     resetProjectStore();
     useProjectStore.getState().hydrate(window.localStorage);
     renderWithProviders(<Dashboard />);
-    expect(await screen.findByText("샌드박스 없음")).toBeInTheDocument();
+    expect(await screen.findByTestId("no-sandbox")).toHaveTextContent("아직 샌드박스가 없습니다");
     expect(projects()).toEqual([]);
     expect(window.localStorage.getItem("aws-playground:projects:v1")).toBeNull();
   });
 
-  it("샌드박스를 만들면 리소스가 하나도 없는 콘솔로 이동한다", async () => {
+  it("빈 샌드박스는 쉬운 모드가 기본이고, 심화 모드를 고르면 리소스가 하나도 없는 콘솔로 이동한다", async () => {
     seedStore([]);
     const user = userEvent.setup({ pointerEventsCheck: 0 });
     renderWithProviders(<Dashboard />);
-    await user.click(screen.getAllByRole("button", { name: "샌드박스 생성" })[0]);
+    await user.click(screen.getAllByRole("button", { name: "빈 샌드박스 만들기" })[0]);
     const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByRole("radio", { name: /쉬운 모드/ })).toBeChecked();
+    await user.click(within(dialog).getByRole("radio", { name: /심화 모드/ }));
     await user.type(within(dialog).getByLabelText("이름"), "내 VPC 실습");
     await user.click(within(dialog).getByRole("button", { name: "생성 후 열기" }));
     await waitFor(() => expect(projects().map((p) => p.name)).toEqual(["내 VPC 실습"]));
@@ -42,7 +44,7 @@ describe("샌드박스 목록 (첫 화면)", () => {
     seedStore([]);
     const user = userEvent.setup({ pointerEventsCheck: 0 });
     renderWithProviders(<Dashboard />);
-    await user.click(screen.getAllByRole("button", { name: "샌드박스 생성" })[0]);
+    await user.click(screen.getAllByRole("button", { name: "빈 샌드박스 만들기" })[0]);
     const dialog = await screen.findByRole("dialog");
     await user.click(within(dialog).getByRole("radio", { name: /쉬운 모드/ }));
     await user.click(within(dialog).getByRole("button", { name: "생성 후 열기" }));
@@ -102,7 +104,7 @@ describe("샌드박스 목록 (첫 화면)", () => {
     const user = userEvent.setup({ pointerEventsCheck: 0 });
     renderWithProviders(<Dashboard />);
     expect(screen.queryByRole("button", { name: "예시 열기" })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /완성된 예시 아키텍처 살펴보기/ }));
+    await user.click(screen.getByRole("button", { name: /예시 구경하기/ }));
     await user.click(screen.getAllByRole("button", { name: "예시 열기" })[0]);
     await waitFor(() => expect(projects()).toHaveLength(1));
     expect(projects()[0].resources.length).toBeGreaterThan(0);

@@ -12,13 +12,15 @@ import { resolveRoute, type Crumb } from "../routes";
 import { serviceItemName } from "../service-names";
 import { AlarmWatcher } from "../pages/cloudwatch/alarm-watcher";
 import { TutorialHost } from "../tutorial/tutorial-host";
-import { openTutorialPanel } from "../tutorial/tutorial-menu";
+import { openTutorialPanel, startTutorial } from "../tutorial/tutorial-menu";
 import { TutorialChip, TutorialPanel } from "../tutorial/tutorial-panel";
 import { useTutorialStore } from "../tutorial/tutorial-store";
+import { isTutorialTopicId } from "../tutorial/tutorial-topics";
 import { useActiveTutorial } from "../tutorial/use-tutorial";
 import { SideNav } from "./side-nav";
 import { docTargetForPath } from "./doc-target";
 import { IdentityBanner } from "./identity-menu";
+import { NextStepBar } from "./next-step-bar";
 import { TopNav } from "./top-nav";
 
 // 도움말·실습·리소스 설명 패널은 열 때 불러온다 (설명 데이터가 커서 첫 화면에서 빼 둔다)
@@ -80,6 +82,14 @@ export function ConsoleShell() {
     navigate(location.path, { replace: true });
   }, [toolsParam, location.path]);
 
+  // 첫 화면의 '따라하기 시작'으로 열면 그 따라하기를 첫 단계부터 연다 (#/?tutorial=first-web-server)
+  const tutorialParam = location.query.get("tutorial");
+  useEffect(() => {
+    if (!tutorialParam) return;
+    if (isTutorialTopicId(tutorialParam)) startTutorial(tutorialParam, 0);
+    navigate(location.path, { replace: true });
+  }, [tutorialParam, location.path]);
+
   // 페이지가 바뀌면 맨 위로
   useEffect(() => {
     window.scrollTo({ top: 0 });
@@ -125,6 +135,7 @@ export function ConsoleShell() {
                 </button>
               )}
             </div>
+            <NextStepBar path={location.path} />
             {/* 본문 너비 기준 배치(@container/main): 오른쪽 패널이 열려 본문이 좁아지면 여러 열이 한 열로 접힌다 */}
             <div className="@container/main flex-1" key={location.path} data-tour="page-content">
               <LazyBoundary resetKey={location.path} fallback={(retry) => <PageLoadFailed onRetry={retry} />}>
@@ -156,7 +167,7 @@ export function ConsoleShell() {
                 >
                   <span className="flex min-w-0 items-center gap-1.5">
                     <GraduationCap className="size-4 shrink-0" aria-hidden />
-                    <span className="truncate">튜토리얼 진행 중 · 안내로 돌아가기</span>
+                    <span className="truncate">따라하기 진행 중 · 안내로 돌아가기</span>
                   </span>
                   <ArrowRight className="size-4 shrink-0" aria-hidden />
                 </button>

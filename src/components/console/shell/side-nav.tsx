@@ -1,21 +1,34 @@
 "use client";
 
-import { ChevronDown, ChevronRight, Home, Shapes, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Home, Minus, Plus, Shapes, X } from "lucide-react";
 import Link from "next/link";
 import { cn } from "cn";
 import { useState } from "react";
+import { glossaryMeaning } from "@/lib/docs/glossary";
+import { useGuidePrefs } from "@/lib/store/guide-prefs";
 import { useAnalysis } from "../analysis-context";
 import { useConsoleProjectId } from "../console-context";
 import { href } from "../router";
-import { activeNavItem, NAV_GROUPS } from "./navigation";
+import { useActiveTutorial } from "../tutorial/use-tutorial";
+import { activeNavItem, NAV_GROUPS, type NavGroup } from "./navigation";
 
-/** 모든 서비스를 한 번에 보여 주는 사이드바 (현재 위치의 그룹은 자동으로 펼친다) */
+/** "서버리스 (Lambda)" → "Lambda" */
+const serviceName = (g: NavGroup) => /\(([^)]+)\)/.exec(g.label)?.[1] ?? g.label;
+
+/**
+ * 서비스 사이드바. 처음에는 기본 서비스(네트워크·서버·스토리지·권한·분석 도구)만 보이고 나머지는 '서비스 더 보기'로 연다.
+ * 지금 보고 있는 화면의 서비스와 따라하기 중에는 모든 서비스가 보인다 (안내가 가리키는 메뉴가 숨지 않게). 현재 위치의 그룹은 자동으로 펼친다.
+ */
 export function SideNav({ path, onNavigate, onClose }: { path: string; onNavigate?: () => void; onClose: () => void }) {
   const { topology, project } = useAnalysis();
   const projectId = useConsoleProjectId();
   const active = activeNavItem(path);
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const isOpen = (id: string) => open[id] ?? id === active?.group.id;
+  const showAll = useGuidePrefs((s) => s.navShowAll);
+  const tutorialActive = !!useActiveTutorial();
+  const groups = NAV_GROUPS.filter((g) => g.core || showAll || tutorialActive || g.id === active?.group.id);
+  const more = NAV_GROUPS.filter((g) => !groups.includes(g));
 
   return (
     <nav aria-label="서비스 탐색" className="flex h-full flex-col overflow-y-auto" data-tour="side-nav">
@@ -37,7 +50,7 @@ export function SideNav({ path, onNavigate, onClose }: { path: string; onNavigat
         </button>
       </div>
       <div className="flex-1 space-y-1 px-4 pb-4">
-        {NAV_GROUPS.map((group) => {
+        {groups.map((group) => {
           const expanded = isOpen(group.id);
           const Icon = group.icon;
           const groupActive = active?.group.id === group.id;
@@ -47,6 +60,7 @@ export function SideNav({ path, onNavigate, onClose }: { path: string; onNavigat
                 type="button"
                 aria-expanded={expanded}
                 data-nav-group={group.id}
+                title={group.description}
                 onClick={() => setOpen({ ...open, [group.id]: !expanded })}
                 className={cn(
                   "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[15px] font-bold hover:bg-aws-surface-2",
@@ -67,6 +81,7 @@ export function SideNav({ path, onNavigate, onClose }: { path: string; onNavigat
                         <a
                           href={href(item.path)}
                           onClick={onNavigate}
+                          title={glossaryMeaning(item.label) ?? undefined}
                           aria-current={current ? "page" : undefined}
                           className={cn(
                             "flex items-center justify-between gap-2 rounded-lg px-3 py-1.5 text-[15px]",
@@ -88,6 +103,33 @@ export function SideNav({ path, onNavigate, onClose }: { path: string; onNavigat
             </section>
           );
         })}
+        {more.length > 0 ? (
+          <button
+            type="button"
+            onClick={() => useGuidePrefs.getState().setNavShowAll(true)}
+            className="mt-2 flex w-full items-start gap-2.5 rounded-lg border border-dashed border-aws-border px-3 py-2 text-left hover:border-aws-link hover:bg-aws-surface-2"
+            data-testid="nav-show-more"
+          >
+            <Plus className="mt-0.5 size-[18px] shrink-0 text-aws-link" aria-hidden />
+            <span className="min-w-0">
+              <span className="block text-[15px] font-bold text-aws-link">서비스 더 보기 ({more.length})</span>
+              <span className="block text-[13px] leading-snug text-aws-text-2">{more.map(serviceName).join(" · ")}</span>
+            </span>
+          </button>
+        ) : (
+          showAll &&
+          !tutorialActive && (
+            <button
+              type="button"
+              onClick={() => useGuidePrefs.getState().setNavShowAll(false)}
+              className="mt-2 flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[13px] font-bold text-aws-text-2 hover:bg-aws-surface-2 hover:text-aws-link"
+              data-testid="nav-show-less"
+            >
+              <Minus className="size-4 shrink-0" aria-hidden />
+              기본 서비스만 보기
+            </button>
+          )
+        )}
       </div>
       <div className="border-t border-aws-divider p-4">
         <Link
