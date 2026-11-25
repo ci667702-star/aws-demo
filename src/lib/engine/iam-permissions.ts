@@ -1,7 +1,7 @@
 /**
  * 지금 작업하는 자격 증명(가상 로그인)으로 프로젝트 변경을 허용할지 판단한다.
  *
- * - 변경 전후 프로젝트를 비교해 필요한 IAM 작업을 추론한다 (리소스 생성·삭제·설정 변경·연결, IAM·S3·CloudWatch 항목).
+ * - 변경 전후 프로젝트를 비교해 필요한 IAM 작업을 추론한다 (리소스 생성·삭제·설정 변경·연결, IAM·S3·CloudWatch·EventBridge·Secrets Manager·Parameter Store·CloudFront 항목).
  *   콘솔과 그림 빌더가 같은 규칙으로 검사된다. 위치 이동·화면 설정·가상 부하처럼 AWS API가 없는 변경은 검사하지 않는다.
  * - 루트 사용자는 모두 허용한다. IAM 사용자·역할은 연결된 정책으로 평가한다 (명시적 Deny > Allow > 암묵적 거부).
  * - 조회(Describe/List/Get)는 검사하지 않는다. EC2·RDS 등은 리소스 ARN, S3는 버킷·객체 ARN, IAM은 사용자·역할 등의 ARN으로 평가한다.
@@ -10,6 +10,7 @@
 import { bucketArn, evaluateIam, groupArn, objectArn, policyArn, roleArn, SANDBOX_ACCOUNT_ID, userArn, type IamDecision } from "./iam-engine";
 import { actingArn, actingIdentity, actingLabel, actingPrincipal, type ActingIdentity } from "./iam-session";
 import { isRouteRelation, type Connection, type Project, type RelationType, type Resource, type ResourceType } from "./resource-models";
+import { secretArn, secretArnForName } from "./secrets-engine";
 
 const REGION = "ap-northeast-2";
 const ACCOUNT = SANDBOX_ACCOUNT_ID;
@@ -47,11 +48,16 @@ export function resourceArn(type: ResourceType, r?: Pick<Resource, "id" | "name"
   if (type === "alb") return r ? `arn:aws:elasticloadbalancing:${REGION}:${ACCOUNT}:loadbalancer/app/${name}/${id}` : `arn:aws:elasticloadbalancing:${REGION}:${ACCOUNT}:loadbalancer/app/*`;
   if (type === "target-group") return r ? `arn:aws:elasticloadbalancing:${REGION}:${ACCOUNT}:targetgroup/${name}/${id}` : `arn:aws:elasticloadbalancing:${REGION}:${ACCOUNT}:targetgroup/*`;
   if (type === "rds") return `arn:aws:rds:${REGION}:${ACCOUNT}:db:${r ? name : "*"}`;
+  if (type === "lambda") return `arn:aws:lambda:${REGION}:${ACCOUNT}:function:${r ? name : "*"}`;
   return `arn:aws:rds:${REGION}:${ACCOUNT}:subgrp:${r ? name : "*"}`;
 }
 
 const alarmArn = (name: string) => `arn:aws:cloudwatch:${REGION}:${ACCOUNT}:alarm:${name}`;
+const scheduleArnOf = (name: string) => `arn:aws:scheduler:${REGION}:${ACCOUNT}:schedule/default/${name}`;
+const ruleArnOf = (name: string) => `arn:aws:events:${REGION}:${ACCOUNT}:rule/${name}`;
 const dashboardArn = (name: string) => `arn:aws:cloudwatch::${ACCOUNT}:dashboard/${name}`;
+const parameterArnOf = (name: string) => `arn:aws:ssm:${REGION}:${ACCOUNT}:parameter/${name.replace(/^\//, "")}`;
+const distributionArnOf = (id: string) => `arn:aws:cloudfront::${ACCOUNT}:distribution/${id}`;
 const insightsPathArn = (id: string) => `arn:aws:ec2:${REGION}:${ACCOUNT}:network-insights-path/${id}`;
 
 // ---------------------------------------------------------------- 리소스 작업 표
@@ -68,6 +74,7 @@ const CREATE: Record<ResourceType, Op> = {
   "security-group": ["ec2:CreateSecurityGroup", "보안 그룹 만들기"],
   "network-acl": ["ec2:CreateNetworkAcl", "네트워크 ACL 만들기"],
   ec2: ["ec2:RunInstances", "EC2 인스턴스 시작"],
+  lambda: ["lambda:CreateFunction", "Lambda 함수 만들기"],
   alb: ["elasticloadbalancing:CreateLoadBalancer", "로드 밸런서 만들기"],
   "target-group": ["elasticloadbalancing:CreateTargetGroup", "대상 그룹 만들기"],
   "db-subnet-group": ["rds:CreateDBSubnetGroup", "DB 서브넷 그룹 만들기"],
@@ -84,6 +91,7 @@ const DELETE: Record<ResourceType, Op> = {
   "security-group": ["ec2:DeleteSecurityGroup", "보안 그룹 삭제"],
   "network-acl": ["ec2:DeleteNetworkAcl", "네트워크 ACL 삭제"],
   ec2: ["ec2:TerminateInstances", "EC2 인스턴스 종료"],
+  lambda: ["lambda:DeleteFunction", "Lambda 함수 삭제"],
   alb: ["elasticloadbalancing:DeleteLoadBalancer", "로드 밸런서 삭제"],
   "target-group": ["elasticloadbalancing:DeleteTargetGroup", "대상 그룹 삭제"],
   "db-subnet-group": ["rds:DeleteDBSubnetGroup", "DB 서브넷 그룹 삭제"],
@@ -101,6 +109,8 @@ const RENAME: Record<ResourceType, Op> = {
   "security-group": ["ec2:CreateTags", "Name 태그 변경"],
   "network-acl": ["ec2:CreateTags", "Name 태그 변경"],
   ec2: ["ec2:CreateTags", "Name 태그 변경"],
+  // 실제 AWS에서는 함수 이름을 바꿀 수 없다 (쉬운 모드에서만 바꿀 수 있는 시뮬레이터 동작)
+  lambda: ["lambda:UpdateFunctionConfiguration", "함수 설정 변경"],
   alb: ["elasticloadbalancing:AddTags", "로드 밸런서 태그 변경"],
   "target-group": ["elasticloadbalancing:AddTags", "대상 그룹 태그 변경"],
   "db-subnet-group": ["rds:ModifyDBSubnetGroup", "DB 서브넷 그룹 수정"],
@@ -129,6 +139,8 @@ const RELATION: Record<RelationType, { add: Op; remove: Op; subject: "source" | 
   "db-subnet-group-subnet": { add: ["rds:ModifyDBSubnetGroup", "DB 서브넷 그룹 서브넷 변경"], remove: ["rds:ModifyDBSubnetGroup", "DB 서브넷 그룹 서브넷 변경"], subject: "source" },
   "rds-db-subnet-group": { add: ["rds:ModifyDBInstance", "DB 서브넷 그룹 변경"], remove: ["rds:ModifyDBInstance", "DB 서브넷 그룹 변경"], subject: "source" },
   "rds-security-group": { add: ["rds:ModifyDBInstance", "DB 보안 그룹 변경"], remove: ["rds:ModifyDBInstance", "DB 보안 그룹 변경"], subject: "source" },
+  "lambda-subnet": { add: ["lambda:UpdateFunctionConfiguration", "함수 VPC 서브넷 변경"], remove: ["lambda:UpdateFunctionConfiguration", "함수 VPC 서브넷 변경"], subject: "source" },
+  "lambda-security-group": { add: ["lambda:UpdateFunctionConfiguration", "함수 보안 그룹 변경"], remove: ["lambda:UpdateFunctionConfiguration", "함수 보안 그룹 변경"], subject: "source" },
   "elastic-ip-nat-gateway": { add: ["ec2:AssociateAddress", "탄력적 IP 연결"], remove: ["ec2:DisassociateAddress", "탄력적 IP 연결 해제"], subject: "source" },
   "elastic-ip-ec2": { add: ["ec2:AssociateAddress", "탄력적 IP 연결"], remove: ["ec2:DisassociateAddress", "탄력적 IP 연결 해제"], subject: "source" },
   "vpc-target-group": { add: ["elasticloadbalancing:CreateTargetGroup", "대상 그룹의 VPC 지정"], remove: ["elasticloadbalancing:DeleteTargetGroup", "대상 그룹의 VPC 해제"], subject: "target" },
@@ -226,6 +238,19 @@ function configChanges(before: Resource, after: Resource, label: string): Op[] {
     case "target-group":
       if (changed("protocol") || changed("port") || changed("healthCheck")) ops.push(["elasticloadbalancing:ModifyTargetGroup", "대상 그룹·헬스 체크 수정"]);
       break;
+    case "lambda": {
+      if (["runtime", "handler", "architecture", "memoryMb", "timeoutSeconds", "roleId", "environment"].some(changed)) ops.push(["lambda:UpdateFunctionConfiguration", "함수 설정 변경"]);
+      // 코드 템플릿과 가상 실행 값은 이 시뮬레이터의 "코드"라서 코드 배포로 본다
+      if (["codeTemplate", "templateTarget", "virtualDurationMs", "errorRatePercent"].some(changed)) ops.push(["lambda:UpdateFunctionCode", "함수 코드 변경"]);
+      if (changed("reservedConcurrency")) ops.push(a.reservedConcurrency === null ? ["lambda:DeleteFunctionConcurrency", "예약 동시성 해제"] : ["lambda:PutFunctionConcurrency", "예약 동시성 설정"]);
+      const perms = diffById(
+        (b.permissions as { sid: string }[]).map((p) => ({ ...p, id: p.sid })),
+        (a.permissions as { sid: string }[]).map((p) => ({ ...p, id: p.sid })),
+      );
+      if (perms.added.length || perms.changed.length) ops.push(["lambda:AddPermission", "함수 호출 권한(리소스 기반 정책) 추가"]);
+      if (perms.removed.length) ops.push(["lambda:RemovePermission", "함수 호출 권한 삭제"]);
+      break;
+    }
     case "db-subnet-group":
       if (changed("description")) ops.push(["rds:ModifyDBSubnetGroup", "DB 서브넷 그룹 수정"]);
       break;
@@ -291,6 +316,11 @@ export function requiredActions(before: Project, after: Project, label = ""): Re
       const role = roleId ? after.services.iam.roles.find((x) => x.id === roleId) : undefined;
       if (role) add("iam:PassRole", roleArn(role.name), `인스턴스에 역할 ${role.name} 넘기기`);
     }
+    if (r.type === "lambda") {
+      const roleId = (r.config as { roleId?: string | null }).roleId;
+      const role = roleId ? after.services.iam.roles.find((x) => x.id === roleId) : undefined;
+      if (role) add("iam:PassRole", roleArn(role.name), `함수에 실행 역할 ${role.name} 넘기기`);
+    }
     if (r.type === "security-group") {
       const c = r.config as { inboundRules: unknown[] };
       if (c.inboundRules.length) add("ec2:AuthorizeSecurityGroupIngress", resourceArn("security-group"), "인바운드 규칙 추가");
@@ -311,6 +341,13 @@ export function requiredActions(before: Project, after: Project, label = ""): Re
       if (roleId && roleId !== (rb.config as { iamRoleId?: string | null }).iamRoleId) {
         const role = after.services.iam.roles.find((x) => x.id === roleId);
         if (role) add("iam:PassRole", roleArn(role.name), `인스턴스에 역할 ${role.name} 넘기기`);
+      }
+    }
+    if (ra.type === "lambda") {
+      const roleId = (ra.config as { roleId?: string | null }).roleId;
+      if (roleId && roleId !== (rb.config as { roleId?: string | null }).roleId) {
+        const role = after.services.iam.roles.find((x) => x.id === roleId);
+        if (role) add("iam:PassRole", roleArn(role.name), `함수에 실행 역할 ${role.name} 넘기기`);
       }
     }
   }
@@ -434,6 +471,65 @@ export function requiredActions(before: Project, after: Project, label = ""): Re
   const dashboards = diffById(cw.dashboards, cwA.dashboards);
   for (const d of [...dashboards.added, ...dashboards.changed.map((x) => x.after)]) add("cloudwatch:PutDashboard", dashboardArn(d.name), `대시보드 ${d.name} 만들기·수정`);
   for (const d of dashboards.removed) add("cloudwatch:DeleteDashboards", dashboardArn(d.name), `대시보드 ${d.name} 삭제`);
+
+  // ---- EventBridge (Scheduler 일정, 규칙)
+  const eb = before.services.eventbridge;
+  const ebA = after.services.eventbridge;
+  const schedules = diffById(eb.schedules, ebA.schedules);
+  const passScheduleRole = (roleId: string | null) => {
+    const role = roleId ? after.services.iam.roles.find((x) => x.id === roleId) : undefined;
+    if (role) add("iam:PassRole", roleArn(role.name), `일정에 실행 역할 ${role.name} 넘기기`);
+  };
+  for (const s of schedules.added) {
+    add("scheduler:CreateSchedule", scheduleArnOf(s.name), `일정 ${s.name} 만들기`);
+    passScheduleRole(s.roleId);
+  }
+  for (const { before: sb, after: sa } of schedules.changed) {
+    add("scheduler:UpdateSchedule", scheduleArnOf(sa.name), `일정 ${sa.name} 수정`);
+    if (sa.roleId !== sb.roleId) passScheduleRole(sa.roleId);
+  }
+  for (const s of schedules.removed) add("scheduler:DeleteSchedule", scheduleArnOf(s.name), `일정 ${s.name} 삭제`);
+  const rules = diffById(eb.rules, ebA.rules);
+  for (const r of rules.added) {
+    add("events:PutRule", ruleArnOf(r.name), `규칙 ${r.name} 만들기`);
+    if (r.targetLambdaIds.length) add("events:PutTargets", ruleArnOf(r.name), `규칙 ${r.name}에 대상 추가`);
+  }
+  for (const { before: rb, after: ra } of rules.changed) {
+    if (rb.eventPattern !== ra.eventPattern || rb.description !== ra.description) add("events:PutRule", ruleArnOf(ra.name), `규칙 ${ra.name} 수정`);
+    if (rb.state !== ra.state) add(ra.state === "ENABLED" ? "events:EnableRule" : "events:DisableRule", ruleArnOf(ra.name), ra.state === "ENABLED" ? `규칙 ${ra.name} 활성화` : `규칙 ${ra.name} 비활성화`);
+    if (ra.targetLambdaIds.some((id) => !rb.targetLambdaIds.includes(id))) add("events:PutTargets", ruleArnOf(ra.name), `규칙 ${ra.name}에 대상 추가`);
+    if (rb.targetLambdaIds.some((id) => !ra.targetLambdaIds.includes(id))) add("events:RemoveTargets", ruleArnOf(ra.name), `규칙 ${ra.name}의 대상 삭제`);
+  }
+  for (const r of rules.removed) add("events:DeleteRule", ruleArnOf(r.name), `규칙 ${r.name} 삭제`);
+
+  // ---- Secrets Manager
+  const secrets = diffById(before.services.secretsmanager.secrets, after.services.secretsmanager.secrets);
+  for (const s of secrets.added) add("secretsmanager:CreateSecret", secretArnForName(s.name), `보안 암호 ${s.name} 만들기`);
+  for (const s of secrets.removed) add("secretsmanager:DeleteSecret", secretArn(s), `보안 암호 ${s.name} 삭제`);
+  for (const { before: sb, after: sa } of secrets.changed) {
+    const arn = secretArn(sa);
+    if (!sb.deletion && sa.deletion) add("secretsmanager:DeleteSecret", arn, `보안 암호 ${sa.name} 삭제 예약`);
+    if (sb.deletion && !sa.deletion) add("secretsmanager:RestoreSecret", arn, `보안 암호 ${sa.name} 삭제 취소`);
+    if (!same(sb.rotation, sa.rotation)) add(sa.rotation.enabled ? "secretsmanager:RotateSecret" : "secretsmanager:CancelRotateSecret", arn, "보안 암호 교체 구성");
+    if (sb.versions[0]?.versionId !== sa.versions[0]?.versionId) add(sb.lastRotatedAt !== sa.lastRotatedAt ? "secretsmanager:RotateSecret" : "secretsmanager:PutSecretValue", arn, sb.lastRotatedAt !== sa.lastRotatedAt ? "보안 암호 교체" : "보안 암호의 새 버전 저장");
+    if (sb.description !== sa.description) add("secretsmanager:UpdateSecret", arn, "보안 암호 설명 변경");
+  }
+
+  // ---- Systems Manager Parameter Store
+  const params = diffById(before.services.ssm.parameters, after.services.ssm.parameters);
+  for (const p of [...params.added, ...params.changed.map((x) => x.after)]) add("ssm:PutParameter", parameterArnOf(p.name), `파라미터 ${p.name} 만들기·수정`);
+  for (const p of params.removed) add("ssm:DeleteParameter", parameterArnOf(p.name), `파라미터 ${p.name} 삭제`);
+
+  // ---- CloudFront (엣지 캐시와 배포 상태는 시뮬레이터의 가상 상태라 검사하지 않는다)
+  const settings = (d: Project["services"]["cloudfront"]["distributions"][number]) => ({ ...d, cache: null, state: null, invalidations: null, updatedAt: null });
+  const dists = diffById(before.services.cloudfront.distributions, after.services.cloudfront.distributions);
+  // 새 배포의 ID는 만들어진 뒤에 정해지므로 리소스는 distribution/*
+  if (dists.added.length) add("cloudfront:CreateDistribution", distributionArnOf("*"), "CloudFront 배포 만들기");
+  for (const d of dists.removed) add("cloudfront:DeleteDistribution", distributionArnOf(d.id), `배포 ${d.id} 삭제`);
+  for (const { before: db, after: da } of dists.changed) {
+    if (!same(settings(db), settings(da))) add("cloudfront:UpdateDistribution", distributionArnOf(da.id), `배포 ${da.id} 설정 변경`);
+    if (da.invalidations.length && da.invalidations[0]?.id !== db.invalidations[0]?.id) add("cloudfront:CreateInvalidation", distributionArnOf(da.id), `배포 ${da.id} 캐시 무효화`);
+  }
 
   // ---- Reachability Analyzer 경로
   const paths = diffById(before.networkPaths, after.networkPaths);

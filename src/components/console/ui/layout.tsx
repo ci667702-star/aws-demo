@@ -102,19 +102,22 @@ export interface KeyValueItem {
 
 /** 세부 정보 (레이블 / 값) 격자 */
 export function KeyValueGrid({ items, columns = 3 }: { items: KeyValueItem[]; columns?: 1 | 2 | 3 | 4 }) {
-  const cols = { 1: "", 2: "sm:grid-cols-2", 3: "sm:grid-cols-2 lg:grid-cols-3", 4: "sm:grid-cols-2 lg:grid-cols-4" }[columns];
+  // 창 너비가 아니라 이 격자가 놓인 자리의 너비에 맞춰 열 수를 정한다
+  const cols = { 1: "", 2: "@md:grid-cols-2", 3: "@md:grid-cols-2 @2xl:grid-cols-3", 4: "@md:grid-cols-2 @3xl:grid-cols-4" }[columns];
   return (
-    <dl className={cn("grid grid-cols-1 gap-x-10 gap-y-5", cols)}>
-      {items.map((item, i) => (
-        <div key={i} className="min-w-0 space-y-0.5">
-          <dt className="flex items-center gap-1.5 text-sm font-bold text-aws-text-2">
-            {item.label}
-            {item.info}
-          </dt>
-          <dd className="text-[15px] break-words text-aws-text">{item.value === "" || item.value == null ? "-" : item.value}</dd>
-        </div>
-      ))}
-    </dl>
+    <div className="@container">
+      <dl className={cn("grid grid-cols-1 gap-x-10 gap-y-5", cols)}>
+        {items.map((item, i) => (
+          <div key={i} className="min-w-0 space-y-0.5">
+            <dt className="flex items-center gap-1.5 text-sm font-bold text-aws-text-2">
+              {item.label}
+              {item.info}
+            </dt>
+            <dd className="text-[15px] break-words text-aws-text">{item.value === "" || item.value == null ? "-" : item.value}</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
   );
 }
 

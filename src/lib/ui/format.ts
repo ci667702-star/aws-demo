@@ -26,6 +26,7 @@ export function formatTime(iso: string): string {
 
 /** 단가 표시: $0.005처럼 1센트보다 작은 값도 그대로 보여 준다 (곱셈이 맞아 보이도록) */
 export function formatRate(rate: number): string {
+  if (rate > 0 && rate < 0.0001) return `$${rate.toLocaleString("en-US", { maximumSignificantDigits: 3 })}`;
   return `$${rate.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`;
 }
 

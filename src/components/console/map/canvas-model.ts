@@ -156,6 +156,17 @@ export function describeResource(
         badges: [{ label: r.config.state, tone: stateTone[r.config.state] }],
       };
     }
+    case "lambda": {
+      const subnets = topo.lambdaSubnets(r.id).length;
+      const schedules = topo.project.services.eventbridge.schedules.filter((s) => s.targetLambdaId === r.id && s.state === "ENABLED");
+      const badges: NodeBadge[] = [
+        subnets
+          ? { label: "VPC", tone: "info", title: `서브넷 ${subnets}개에 연결 (퍼블릭 IP 없음)` }
+          : { label: "VPC 밖", tone: "muted", title: "AWS가 관리하는 네트워크에서 실행" },
+      ];
+      if (schedules.length) badges.push({ label: `일정 ${schedules.length}`, tone: "accent", title: schedules.map((s) => `${s.name}: ${s.expression}`).join("\n") });
+      return { subtitle: `${r.config.runtime} · ${r.config.memoryMb}MB · ${r.config.timeoutSeconds}초`, badges };
+    }
     case "alb":
       return {
         subtitle: r.config.scheme,

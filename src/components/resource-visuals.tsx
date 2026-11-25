@@ -1,4 +1,5 @@
 import {
+  Lambda,
   ArrowLeftRight,
   Boxes,
   Database,
@@ -27,6 +28,7 @@ export const RESOURCE_ICONS: Record<ResourceType, LucideIcon> = {
   "security-group": ShieldCheck,
   "network-acl": ListChecks,
   ec2: Server,
+  lambda: Lambda,
   alb: Split,
   "target-group": Target,
   "db-subnet-group": Layers,

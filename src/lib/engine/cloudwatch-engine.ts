@@ -5,12 +5,13 @@
  */
 import type { TargetHealth } from "./alb-engine";
 import { computeAllTargetHealth, simulateWithTopology } from "./connectivity-engine";
+import { analyzeInvocation, deliverableSchedules, scheduledInvocationsInMinute, type InvokeAnalysis, type ScheduleRun } from "./lambda-engine";
 import type { Alarm, ConfigOf, LoadTest, MetricRef, Project, Resource } from "./resource-models";
 import { buildTopology, displayName, type Topology } from "./topology-engine";
 
 export const MINUTE = 60_000;
 
-export type MetricResourceType = "ec2" | "alb" | "rds" | "nat-gateway";
+export type MetricResourceType = "ec2" | "alb" | "rds" | "nat-gateway" | "lambda";
 
 export interface MetricDefinition {
   namespace: MetricRef["namespace"];
@@ -39,6 +40,10 @@ export const METRIC_CATALOG: MetricDefinition[] = [
   { namespace: "AWS/RDS", metricName: "FreeStorageSpace", label: "남은 저장 공간", unit: "Bytes", description: "사용할 수 있는 저장 공간", resourceType: "rds", defaultStat: "Minimum" },
   { namespace: "AWS/NATGateway", metricName: "BytesOutToDestination", label: "인터넷으로 보낸 데이터", unit: "Bytes", description: "NAT 게이트웨이를 거쳐 나간 데이터 양", resourceType: "nat-gateway", defaultStat: "Sum" },
   { namespace: "AWS/NATGateway", metricName: "ActiveConnectionCount", label: "활성 연결 수", unit: "Count", description: "NAT 게이트웨이를 통한 동시 연결 수", resourceType: "nat-gateway", defaultStat: "Maximum" },
+  { namespace: "AWS/Lambda", metricName: "Invocations", label: "호출 수", unit: "Count", description: "함수가 실행된 횟수 (제한된 호출은 빠짐). 이 시뮬레이터에서는 EventBridge 일정이 호출한 횟수", resourceType: "lambda", defaultStat: "Sum" },
+  { namespace: "AWS/Lambda", metricName: "Errors", label: "오류 수", unit: "Count", description: "오류로 끝난 실행 수 (시간 초과 포함)", resourceType: "lambda", defaultStat: "Sum" },
+  { namespace: "AWS/Lambda", metricName: "Duration", label: "실행 시간", unit: "Seconds", description: "한 번 실행하는 데 걸린 시간", resourceType: "lambda", defaultStat: "Average" },
+  { namespace: "AWS/Lambda", metricName: "Throttles", label: "제한된 호출", unit: "Count", description: "동시성 한도 때문에 실행되지 못한 호출 수", resourceType: "lambda", defaultStat: "Sum" },
 ];
 
 export const NAMESPACE_RESOURCE: Record<MetricRef["namespace"], MetricResourceType> = {
@@ -46,6 +51,7 @@ export const NAMESPACE_RESOURCE: Record<MetricRef["namespace"], MetricResourceTy
   "AWS/ApplicationELB": "alb",
   "AWS/RDS": "rds",
   "AWS/NATGateway": "nat-gateway",
+  "AWS/Lambda": "lambda",
 };
 
 export function metricDefinition(ref: Pick<MetricRef, "namespace" | "metricName">): MetricDefinition | undefined {
@@ -100,6 +106,8 @@ export interface MetricModel {
   /** ALB → 정상 대상 인스턴스 */
   albHealthy: Map<string, ResourceOfEc2[]>;
   albUnhealthy: Map<string, number>;
+  /** Lambda → 호출하는 일정과 한 번 실행했을 때의 결과 */
+  lambdas: Map<string, { runs: ScheduleRun[]; analysis: InvokeAnalysis }>;
 }
 
 type ResourceOfEc2 = Extract<Resource, { type: "ec2" }>;
@@ -134,7 +142,9 @@ export function buildMetricModel(project: Project, topology: Topology = buildTop
     albUnhealthy.set(alb.id, unhealthy);
   }
   const loads = project.services.cloudwatch.loads.map((l) => checkLoad(topology, l));
-  return { project, topology, health, loads, albHealthy, albUnhealthy };
+  const lambdas = new Map<string, { runs: ScheduleRun[]; analysis: InvokeAnalysis }>();
+  for (const fn of topology.ofType("lambda")) lambdas.set(fn.id, { runs: deliverableSchedules(project, fn), analysis: analyzeInvocation(project, topology, fn) });
+  return { project, topology, health, loads, albHealthy, albUnhealthy, lambdas };
 }
 
 export function loadWindow(load: LoadTest): { start: number; end: number } {
@@ -257,6 +267,31 @@ export function rawValue(model: MetricModel, ref: Pick<MetricRef, "namespace" | 
         return Math.round(smoothNoise(`${r.id}:conn`, minute) * 2 + Math.min(150, appRequests / 100));
       case "FreeStorageSpace":
         return Math.round(r.config.allocatedStorageGb * 1e9 * (0.92 - smoothNoise(`${r.id}:disk`, Math.floor(minute / 60)) * 0.02));
+      default:
+        return null;
+    }
+  }
+  if (ref.namespace === "AWS/Lambda" && r.type === "lambda") {
+    const info = model.lambdas.get(r.id);
+    const attempts = info ? scheduledInvocationsInMinute(info.runs, minute) : 0;
+    // Lambda는 호출이 있을 때만 지표를 보낸다 (호출이 없으면 데이터 없음)
+    if (!info || !attempts) return null;
+    const a = info.analysis;
+    const throttled = a.outcome === "throttled";
+    const invocations = throttled ? 0 : attempts;
+    switch (ref.metricName) {
+      case "Invocations":
+        return invocations;
+      case "Throttles":
+        return throttled ? attempts : 0;
+      case "Errors": {
+        if (a.outcome !== "success") return invocations;
+        let n = 0;
+        for (let k = 0; k < invocations; k++) if (hash01(`${r.id}:err`, minute * 1000 + k) * 100 < r.config.errorRatePercent) n++;
+        return n;
+      }
+      case "Duration":
+        return invocations ? Math.round(a.durationMs * (0.9 + smoothNoise(`${r.id}:dur`, minute) * 0.2)) / 1000 : null;
       default:
         return null;
     }

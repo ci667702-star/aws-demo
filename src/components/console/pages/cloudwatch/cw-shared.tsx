@@ -2,8 +2,8 @@
 
 import { cn } from "cn";
 import { useMemo, useSyncExternalStore } from "react";
-import { buildMetricModel, metricDefinition, metricSeries, type AlarmState, type MetricModel } from "@/lib/engine/cloudwatch-engine";
-import type { MetricRef, Project } from "@/lib/engine/resource-models";
+import { buildMetricModel, COMPARISON_SYMBOL, metricDefinition, metricSeries, type AlarmState, type MetricModel } from "@/lib/engine/cloudwatch-engine";
+import type { Alarm, MetricRef, Project } from "@/lib/engine/resource-models";
 import { displayName } from "@/lib/engine/topology-engine";
 import { useAnalysis } from "../../analysis-context";
 import { StatusIndicator } from "../../ui/status";
@@ -42,6 +42,12 @@ export function useMetricModel(): MetricModel {
 }
 
 // ---------------------------------------------------------------- 표시
+
+/** 경보 조건을 한 줄로 (예: CPU 사용률 > 70% · 5분 기간 3개 중 2개) */
+export function conditionText(alarm: Pick<Alarm, "metric" | "comparison" | "threshold" | "period" | "evaluationPeriods" | "datapointsToAlarm">): string {
+  const def = metricDefinition(alarm.metric);
+  return `${def?.label ?? alarm.metric.metricName} ${COMPARISON_SYMBOL[alarm.comparison]} ${alarm.threshold}${def?.unit === "Percent" ? "%" : ""} · ${alarm.period / 60}분 기간 ${alarm.evaluationPeriods}개 중 ${alarm.datapointsToAlarm}개`;
+}
 
 export function AlarmStateBadge({ state }: { state: AlarmState }) {
   if (state === "ALARM") return <StatusIndicator type="error">경보 상태 (ALARM)</StatusIndicator>;

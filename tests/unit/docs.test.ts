@@ -7,6 +7,7 @@ import { docTargetForPath } from "@/components/console/shell/resource-doc-tab";
 import { serviceConsolePath } from "@/lib/docs/service-analysis";
 import * as iam from "@/lib/project/iam-actions";
 import { createThreeTierSample } from "@/lib/project/samples";
+import { scheduledLambdaProject } from "../helpers";
 
 const PARTS: (keyof FieldHelp)[] = ["title", "meaning", "purpose", "values", "realAws", "simulator", "example"];
 
@@ -102,6 +103,20 @@ describe("콘솔 화면 ↔ 설명 대상", () => {
     expect(docTargetForPath(p, ["cloudwatch"])).toEqual({ kind: "service", key: "cloudwatch", itemId: null });
     expect(docTargetForPath(p, [])).toBeNull();
     expect(docTargetForPath(p, ["map"])).toBeNull();
+  });
+
+  it("Lambda 화면은 함수(리소스), EventBridge 화면은 서비스 항목을 가리킨다", () => {
+    const p = scheduledLambdaProject({ rule: "with-permission" });
+    const fn = p.resources.find((r) => r.type === "lambda")!;
+    const s = p.services.eventbridge.schedules[0];
+    const rule = p.services.eventbridge.rules[0];
+    expect(docTargetForPath(p, ["lambda", "functions"])).toEqual({ kind: "type", type: "lambda" });
+    expect(docTargetForPath(p, ["lambda", "functions", fn.id])).toEqual({ kind: "resource", id: fn.id });
+    expect(docTargetForPath(p, ["eventbridge", "schedules", s.id])).toEqual({ kind: "service", key: "eventbridge", itemId: s.id });
+    expect(docTargetForPath(p, ["eventbridge"])).toEqual({ kind: "service", key: "eventbridge", itemId: null });
+    expect(serviceConsolePath(p, "eventbridge", s.id)).toBe(`/eventbridge/schedules/${s.id}`);
+    expect(serviceConsolePath(p, "eventbridge", rule.id)).toBe(`/eventbridge/rules/${rule.id}`);
+    expect(serviceConsolePath(p, "eventbridge", "missing")).toBe("/eventbridge");
   });
 
   it("서비스 항목의 콘솔 경로는 실제로 있는 항목만 가리킨다", () => {

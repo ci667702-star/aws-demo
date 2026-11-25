@@ -49,7 +49,7 @@ export function awsFail(code: string, message: string, hint?: string): ActionRes
 
 // ---------------------------------------------------------------- 공통 도우미
 
-function link(relationType: RelationType, source: string, target: string, metadata: Record<string, string> = {}): Connection {
+export function link(relationType: RelationType, source: string, target: string, metadata: Record<string, string> = {}): Connection {
   return { id: createId("conn"), sourceResourceId: source, targetResourceId: target, relationType, metadata } as Connection;
 }
 
@@ -62,8 +62,8 @@ function placeNear(project: Project, anchorId: string | null | undefined): { x: 
   return findFreePosition(start, occupied);
 }
 
-/** 리소스를 추가한다 (위치는 관련 리소스 근처의 빈 자리). */
-function addResource<T extends ResourceType>(
+/** 리소스를 추가한다 (위치는 관련 리소스 근처의 빈 자리). Lambda 작업에서도 쓴다 */
+export function addResource<T extends ResourceType>(
   project: Project,
   type: T,
   name: string,
@@ -80,18 +80,18 @@ function addResource<T extends ResourceType>(
   return { project: { ...project, resources: [...project.resources, resource as Resource] }, resource };
 }
 
-function addConnections(project: Project, connections: Connection[]): Project {
+export function addConnections(project: Project, connections: Connection[]): Project {
   return { ...project, connections: [...project.connections, ...connections] };
 }
 
-function updateConfig<T extends ResourceType>(project: Project, id: string, patch: Partial<ConfigOf<T>>): Project {
+export function updateConfig<T extends ResourceType>(project: Project, id: string, patch: Partial<ConfigOf<T>>): Project {
   return {
     ...project,
     resources: project.resources.map((r) => (r.id === id ? ({ ...r, config: { ...r.config, ...patch } } as Resource) : r)),
   };
 }
 
-function removeConnections(project: Project, predicate: (c: Connection) => boolean): Project {
+export function removeConnections(project: Project, predicate: (c: Connection) => boolean): Project {
   return { ...project, connections: project.connections.filter((c) => !predicate(c)) };
 }
 
@@ -261,13 +261,14 @@ export function deleteVpc(project: Project, vpcId: string): ActionResult {
   const blocking = project.resources.filter(
     (r) =>
       (r.type === "ec2" && r.config.state !== "terminated" && topo.vpcOf(r.id) === vpcId) ||
-      ((r.type === "nat-gateway" || r.type === "alb" || r.type === "rds") && topo.vpcsOf(r.id).includes(vpcId)),
+      ((r.type === "nat-gateway" || r.type === "alb" || r.type === "rds") && topo.vpcsOf(r.id).includes(vpcId)) ||
+      (r.type === "lambda" && topo.lambdaSubnets(r.id).some((s) => topo.vpcOfSubnet(s.id) === vpcId)),
   );
   if (blocking.length) {
     return awsFail(
       "DependencyViolation",
       `VPC ${vpcId}에 아직 리소스가 있습니다: ${blocking.slice(0, 5).map((r) => topo.label(r.id)).join(", ")}`,
-      "인스턴스를 종료하고 NAT 게이트웨이, 로드 밸런서, DB 인스턴스를 먼저 삭제하세요.",
+      "인스턴스를 종료하고 NAT 게이트웨이, 로드 밸런서, DB 인스턴스를 먼저 삭제하세요. VPC에 연결한 Lambda 함수는 VPC 연결을 해제하세요.",
     );
   }
   const scoped = project.resources
@@ -361,12 +362,13 @@ export function deleteSubnet(project: Project, subnetId: string): ActionResult {
   );
   const albs = topo.ofType("alb").filter((a) => topo.albSubnets(a.id).some((s) => s.id === subnetId));
   const dbsgs = topo.ofType("db-subnet-group").filter((g) => topo.dbSubnetGroupSubnets(g.id).some((s) => s.id === subnetId));
-  const deps = [...users, ...albs, ...dbsgs];
+  const lambdas = topo.ofType("lambda").filter((f) => topo.lambdaSubnets(f.id).some((s) => s.id === subnetId));
+  const deps = [...users, ...albs, ...dbsgs, ...lambdas];
   if (deps.length) {
     return awsFail(
       "DependencyViolation",
       `서브넷 ${subnetId}을(를) 사용하는 리소스가 있습니다: ${deps.slice(0, 5).map((r) => topo.label(r.id)).join(", ")}`,
-      "인스턴스를 종료하고 NAT 게이트웨이를 삭제하며, 로드 밸런서/DB 서브넷 그룹에서 이 서브넷을 제외하세요.",
+      "인스턴스를 종료하고 NAT 게이트웨이를 삭제하며, 로드 밸런서/DB 서브넷 그룹/Lambda 함수의 VPC 설정에서 이 서브넷을 제외하세요.",
     );
   }
   const terminated = project.resources.filter((r) => r.type === "ec2" && r.config.state === "terminated" && topo.subnetOf(r.id) === subnetId).map((r) => r.id);
@@ -1527,11 +1529,24 @@ export function deleteDatabase(project: Project, rdsId: string): ActionResult {
 
 // ---------------------------------------------------------------- 공통 삭제 / 이름
 
+/** Lambda 함수 삭제. 이 함수를 대상으로 하던 일정·규칙은 남지만(AWS와 같음) 호출이 실패한다 */
+export function deleteFunction(project: Project, functionId: string): ActionResult {
+  const fn = find(project, functionId, "lambda");
+  if (!fn) return notFound("lambda", functionId);
+  const eb = project.services.eventbridge;
+  const schedules = eb.schedules.filter((s) => s.targetLambdaId === fn.id).length;
+  const rules = eb.rules.filter((r) => r.targetLambdaIds.includes(fn.id)).length;
+  const notes = schedules || rules ? [`이 함수를 대상으로 하는 일정 ${schedules}개·규칙 ${rules}개는 남아 있으며, 이제 호출이 실패합니다. (AWS도 자동으로 지우지 않습니다)`] : [];
+  return ok(touch(removeResources(project, [fn.id])), notes);
+}
+
 /** 리소스 유형에 맞는 AWS 방식 삭제 (의존성 검사 포함) */
 export function deleteResourceAws(project: Project, resourceId: string): ActionResult {
   const r = project.resources.find((x) => x.id === resourceId);
   if (!r) return awsFail("NotFound", `리소스 ${resourceId}을(를) 찾을 수 없습니다.`);
   switch (r.type) {
+    case "lambda":
+      return deleteFunction(project, r.id);
     case "vpc":
       return deleteVpc(project, r.id);
     case "subnet":

@@ -12,6 +12,8 @@ import type { Project, Resource, ResourceOfType, ResourceType } from "@/lib/engi
 import { describeSgRule } from "@/lib/engine/security-group-engine";
 import { displayName, type Topology } from "@/lib/engine/topology-engine";
 import { checkNatInstance, natInstanceUsages } from "@/lib/engine/nat-instance";
+import { analyzeInvocation, LAMBDA_TEMPLATE_INFO, lambdaArn, ruleCanInvoke, scheduleCanInvoke, type InvokeOutcome } from "@/lib/engine/lambda-engine";
+import { describeSchedule, parseScheduleExpression } from "@/lib/engine/schedule-expression";
 import type { ValidationFinding } from "@/lib/engine/validation-engine";
 import type { ServiceDocKey } from "./types";
 
@@ -719,6 +721,107 @@ function analyzeRds(input: AnalysisInput, rds: ResourceOfType<"rds">, options: A
   };
 }
 
+const INVOKE_TONE = { pass: "ok", fail: "error", warn: "warn", info: "info" } as const;
+const OUTCOME_TEXT: Record<InvokeOutcome, string> = {
+  success: "호출하면 성공",
+  error: "호출하면 오류",
+  timeout: "호출하면 시간 초과",
+  throttled: "호출이 제한됨",
+  invalid: "실행할 수 없음",
+};
+
+function analyzeLambda(input: AnalysisInput, fn: ResourceOfType<"lambda">, options: AnalysisOptions): Omit<ResourceAnalysis, "findings"> {
+  const { topology: topo, project } = input;
+  const c = fn.config;
+  const run = analyzeInvocation(project, topo, fn);
+  const subnets = topo.lambdaSubnets(fn.id);
+  const sgs = topo.securityGroupsOf(fn.id);
+  const vpc = subnets.length ? topo.getOfType(topo.vpcOf(fn.id), "vpc") : undefined;
+  const { schedules, rules } = project.services.eventbridge;
+  const mySchedules = schedules.filter((s) => s.targetLambdaId === fn.id);
+  const myRules = rules.filter((r) => r.targetLambdaIds.includes(fn.id));
+  const checks: AnalysisCheck[] = run.checks.map((ch) => ({ tone: INVOKE_TONE[ch.status], title: ch.title, detail: ch.detail, field: ch.field }));
+  for (const s of mySchedules) {
+    const parsed = parseScheduleExpression(s.expression);
+    if (s.state === "DISABLED") checks.push({ tone: "info", title: `일정 ${s.name}: 비활성`, detail: "비활성 상태라 이 함수를 호출하지 않습니다.", field: "triggers" });
+    else if (!parsed.ok) checks.push({ tone: "error", title: `일정 ${s.name}: 표현식 오류`, detail: parsed.error, field: "triggers" });
+    else {
+      const can = scheduleCanInvoke(project, s, fn);
+      checks.push({ tone: can.ok ? "ok" : "error", title: `일정 ${s.name} (${describeSchedule(parsed.value)})`, detail: can.reason, field: "triggers" });
+    }
+  }
+  for (const r of myRules) {
+    const can = ruleCanInvoke(r, fn);
+    checks.push(
+      r.state === "DISABLED"
+        ? { tone: "info", title: `규칙 ${r.name}: 비활성`, detail: "비활성 상태라 이벤트가 와도 이 함수를 호출하지 않습니다.", field: "triggers" }
+        : { tone: can.ok ? "ok" : "error", title: `규칙 ${r.name}`, detail: can.reason, field: "permissions" },
+    );
+  }
+  const azs = new Set(subnets.map((s) => s.config.availabilityZone));
+  const openPermissions = c.permissions.filter((p) => !p.sourceArn);
+  const role = run.role;
+  return {
+    headline: {
+      tone: run.outcome === "success" ? "ok" : run.outcome === "throttled" ? "warn" : "error",
+      text: `${c.runtime} · ${c.memoryMb}MB · ${subnets.length ? "VPC 연결" : "VPC 밖"} · ${OUTCOME_TEXT[run.outcome]}`,
+    },
+    facts: [
+      { label: "런타임 / 아키텍처", value: `${c.runtime} / ${c.architecture}`, field: "runtime" },
+      { label: "핸들러", value: c.handler, field: "handler" },
+      { label: "메모리 / 제한 시간", value: `${c.memoryMb}MB / ${c.timeoutSeconds}초`, field: "timeoutSeconds" },
+      { label: "코드 (가상 템플릿)", value: `${LAMBDA_TEMPLATE_INFO[c.codeTemplate].label}${c.templateTarget ? ` · ${topo.getOfType(c.templateTarget, "rds") ? topo.name(c.templateTarget) : c.templateTarget}` : ""}`, field: "codeTemplate" },
+      { label: "가상 실행 시간", value: `${c.virtualDurationMs}ms`, field: "virtualDurationMs" },
+      { label: "예약 동시성", value: c.reservedConcurrency === null ? "없음 (계정 공용 풀)" : String(c.reservedConcurrency), field: "reservedConcurrency" },
+      { label: "환경 변수", value: `${c.environment.length}개`, field: "environment" },
+      { label: "함수 ARN (가상)", value: lambdaArn(fn.name || fn.id) },
+    ],
+    relations: [
+      {
+        label: "실행 역할",
+        explanation: "함수가 실행될 때 맡는 IAM 역할입니다. 코드가 할 수 있는 일이 이 역할의 권한으로 정해집니다.",
+        items: role ? [{ service: { key: "iam", itemId: role.id, consolePath: `/iam/roles/${role.id}` }, name: role.name, detail: `신뢰: ${role.trustedEntity} · 권한 정책 ${role.policyIds.length}개`, tone: role.trustedEntity === "lambda.amazonaws.com" ? undefined : "error" }] : [],
+        missing: role ? undefined : "실행 역할이 없어 함수를 실행할 수 없습니다 (LAM-001).",
+        field: "roleId",
+      },
+      { label: "소속 VPC", explanation: "VPC에 연결하면 그 VPC 안의 프라이빗 리소스에 닿습니다.", items: item(topo, vpc), empty: "VPC에 연결하지 않았습니다 (AWS가 관리하는 네트워크에서 실행).", field: "subnets" },
+      { label: "VPC 서브넷", explanation: "함수의 네트워크 인터페이스가 놓이는 서브넷입니다. 인터넷에 나가려면 NAT 경로가 필요합니다.", items: subnets.flatMap((s) => subnetItem(topo, s.id)), empty: "없습니다.", field: "subnets" },
+      {
+        label: "보안 그룹",
+        explanation: "VPC에 연결한 함수의 아웃바운드와, 대상(RDS)이 받아 줄 소스를 정합니다.",
+        items: sgs.flatMap((g) => item(topo, g, `아웃바운드 ${g.config.outboundRules.length}개`)),
+        missing: subnets.length && !sgs.length ? "VPC에 연결했지만 보안 그룹이 없습니다 (LAM-002)." : undefined,
+        empty: "VPC에 연결하지 않아 보안 그룹을 쓰지 않습니다.",
+        field: "securityGroups",
+      },
+      {
+        label: "트리거 (EventBridge)",
+        explanation: "이 함수를 자동으로 호출하는 일정과 규칙입니다.",
+        items: [
+          ...mySchedules.map((s) => ({ service: { key: "eventbridge" as const, itemId: s.id, consolePath: `/eventbridge/schedules/${s.id}` }, name: `일정 ${s.name}`, detail: `${s.expression} · ${s.state}` })),
+          ...myRules.map((r) => ({ service: { key: "eventbridge" as const, itemId: r.id, consolePath: `/eventbridge/rules/${r.id}` }, name: `규칙 ${r.name}`, detail: r.state })),
+        ],
+        empty: "이 함수를 호출하는 일정·규칙이 없습니다. 콘솔에서 테스트 호출로만 실행됩니다.",
+        field: "triggers",
+      },
+      {
+        label: "리소스 기반 정책",
+        explanation: "역할 없이 함수를 직접 호출하는 서비스(EventBridge 규칙 등)에 호출을 허용합니다.",
+        items: c.permissions.map((p) => ({ name: p.sid, detail: `${p.principal} · ${p.sourceArn || "모든 소스 (주의)"}`, tone: p.sourceArn ? undefined : ("warn" as const) })),
+        empty: "없습니다. EventBridge 규칙의 대상으로 추가하면 자동으로 들어갑니다.",
+        field: "permissions",
+      },
+      alarmRelation(project, fn.id, options, input, "함수"),
+    ],
+    checks,
+    recommendations: [
+      ...(role && !run.canWriteLogs ? ["실행 역할에 AWSLambdaBasicExecutionRole을 연결해 실행 로그를 남기세요."] : []),
+      ...(subnets.length && azs.size < 2 ? ["VPC에 연결할 때는 가용 영역이 다른 서브넷을 두 개 이상 고르는 것이 권장됩니다."] : []),
+      ...(openPermissions.length ? ["리소스 기반 정책에 소스 ARN을 지정해 특정 규칙만 이 함수를 호출하게 하세요."] : []),
+    ],
+  };
+}
+
 /** 리소스 하나의 현재 구성 분석. 리소스가 없으면 null */
 export function analyzeResource(input: AnalysisInput, resourceId: string, options: AnalysisOptions = {}): ResourceAnalysis | null {
   const r = input.topology.get(resourceId);
@@ -763,6 +866,9 @@ export function analyzeResource(input: AnalysisInput, resourceId: string, option
       break;
     case "rds":
       base = analyzeRds(input, r, options);
+      break;
+    case "lambda":
+      base = analyzeLambda(input, r, options);
       break;
   }
   return { ...base, findings: input.findingsByResource.get(r.id) ?? [] };

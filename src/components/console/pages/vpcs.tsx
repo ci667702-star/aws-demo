@@ -238,7 +238,7 @@ export function VpcDetailPage({ id }: { id: string }) {
             label: "리소스 맵",
             content: (
               <Container header={<ContainerHeader title="리소스 맵" description="이 VPC에 속한 서브넷, 라우팅 테이블, 네트워크 연결입니다." />}>
-                <div className="grid gap-4 md:grid-cols-3">
+                <div className="grid gap-4 @2xl/main:grid-cols-3">
                   <MapColumn title={`서브넷 (${subnets.length})`} empty="서브넷 없음 — 서브넷을 만들어 VPC 범위를 나누세요.">
                     {subnets.map((s) => (
                       <li key={s.id} className="space-y-0.5">

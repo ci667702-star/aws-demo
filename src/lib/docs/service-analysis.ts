@@ -1,14 +1,18 @@
 /**
- * VPC 밖 가상 서비스(S3, IAM, CloudWatch)의 현재 구성 분석.
+ * VPC 밖 가상 서비스(S3, IAM, CloudWatch, EventBridge)의 현재 구성 분석. Secrets Manager·Systems Manager·CloudFront는 platform-analysis.ts에 있다.
  * 기존 평가 엔진(evaluateS3Access, evaluateIam, alarmHistory)을 그대로 써서, 구현된 범위 안에서만 판단한다.
  */
 import { alarmHistory, buildMetricModel, COMPARISON_SYMBOL, formatMetricValue, loadStatus, metricDefinition, metricSeries, type AlarmState, type MetricModel } from "@/lib/engine/cloudwatch-engine";
 import { checkPolicyDocument, effectivePolicyIds, evaluateIam, objectArn, policyAttachments, trustPolicyDocument, allPolicies } from "@/lib/engine/iam-engine";
 import { iamRecommendations } from "@/lib/engine/iam-recommendations";
-import { instancesUsingRole } from "@/lib/project/iam-actions";
+import { instancesUsingRole, serverlessUsingRole } from "@/lib/project/iam-actions";
 import { bucketAccess, bucketPolicyStatements, evaluateS3Access, findObject, visibleObjects, websiteRequest } from "@/lib/engine/s3-engine";
+import { parseEventPattern } from "@/lib/engine/event-pattern";
+import { analyzeInvocation, ruleArn, ruleCanInvoke, scheduleArn, scheduleCanInvoke, type InvokeAnalysis } from "@/lib/engine/lambda-engine";
+import { describeSchedule, formatInTimezone, nextRunTimes, parseScheduleExpression } from "@/lib/engine/schedule-expression";
 import type { Project, S3Bucket } from "@/lib/engine/resource-models";
 import { displayName } from "@/lib/engine/topology-engine";
+import { analyzeCloudFront, analyzeSecrets, analyzeSsm, platformConsolePath } from "./platform-analysis";
 import type { AnalysisCheck, AnalysisInput, AnalysisTone, Fact, LinkedItem, RelationGroup } from "./resource-analysis";
 import type { ServiceDocKey } from "./types";
 
@@ -183,6 +187,20 @@ function analyzeIam(input: AnalysisInput, options: ServiceAnalysisOptions): Serv
       ],
       relations: [
         { label: "이 역할을 쓰는 EC2 인스턴스", explanation: "인스턴스 프로파일로 연결되어 있습니다.", items: used.flatMap((e) => resourceItem(project, e.id, e.config.state)), empty: role.trustedEntity === "ec2.amazonaws.com" ? "연결된 인스턴스가 없습니다." : "EC2를 신뢰하지 않는 역할이라 인스턴스에 연결할 수 없습니다.", field: "instanceProfile" },
+        ...(role.trustedEntity === "lambda.amazonaws.com" || role.trustedEntity === "scheduler.amazonaws.com"
+          ? [
+              {
+                label: role.trustedEntity === "lambda.amazonaws.com" ? "이 역할을 쓰는 Lambda 함수" : "이 역할을 쓰는 Scheduler 일정",
+                explanation: role.trustedEntity === "lambda.amazonaws.com" ? "함수가 실행될 때 이 역할을 맡습니다." : "일정이 대상을 호출할 때 이 역할을 맡습니다.",
+                items:
+                  role.trustedEntity === "lambda.amazonaws.com"
+                    ? serverlessUsingRole(project, role.id).functions.flatMap((f) => resourceItem(project, f.id))
+                    : serverlessUsingRole(project, role.id).schedules.map((s) => ({ service: { key: "eventbridge" as const, itemId: s.id, consolePath: `/eventbridge/schedules/${s.id}` }, name: s.name, detail: s.expression })),
+                empty: "아직 이 역할을 쓰는 곳이 없습니다.",
+                field: "role",
+              },
+            ]
+          : []),
         { label: "권한 정책", explanation: "역할을 넘겨받은 쪽이 할 수 있는 일입니다.", items: role.policyIds.map((pid) => ({ service: { key: "iam" as const, itemId: pid, consolePath: `/iam/policies/${encodeURIComponent(pid)}` }, name: policyName(pid) })), empty: "정책이 없어 역할을 넘겨받아도 아무것도 할 수 없습니다.", field: "policyDocument" },
       ],
       checks: role.policyIds.length ? [] : [{ tone: "warn", title: "권한 정책 없음", detail: "역할이 아무 작업도 허용하지 않습니다.", field: "policyDocument" }],
@@ -310,10 +328,181 @@ function analyzeCloudWatch(input: AnalysisInput, options: ServiceAnalysisOptions
   };
 }
 
+// ---------------------------------------------------------------- EventBridge
+
+const RUN_TONE = { success: "ok", error: "error", timeout: "error", throttled: "warn", invalid: "error" } as const;
+
+function runDetail(run: InvokeAnalysis): string {
+  if (run.outcome === "success") return `함수가 성공합니다 (${run.durationMs}ms).`;
+  const why = run.checks.find((c) => c.status === "fail")?.detail;
+  return `${run.errorType ?? run.outcome}: ${why ?? run.errorMessage ?? ""}`;
+}
+
+function analyzeEventBridge(input: AnalysisInput, options: ServiceAnalysisOptions): ServiceAnalysis {
+  const { project, topology: topo } = input;
+  const { rules, schedules } = project.services.eventbridge;
+  const now = options.now ?? Date.now();
+  const fnOf = (id: string) => topo.getOfType(id, "lambda") ?? undefined;
+  const items = [
+    ...schedules.map((s) => ({ id: s.id, label: `일정 ${s.name}`, detail: s.expression })),
+    ...rules.map((r) => ({ id: r.id, label: `규칙 ${r.name}`, detail: r.state })),
+  ];
+
+  const schedule = schedules.find((s) => s.id === options.itemId);
+  if (schedule) {
+    const parsed = parseScheduleExpression(schedule.expression);
+    const fn = fnOf(schedule.targetLambdaId);
+    const can = scheduleCanInvoke(project, schedule, fn);
+    const role = project.services.iam.roles.find((r) => r.id === schedule.roleId);
+    const enabled = schedule.state === "ENABLED";
+    const next = parsed.ok && enabled ? nextRunTimes(parsed.value, schedule.timezone, Date.parse(schedule.createdAt), now, 3) : [];
+    const run = fn ? analyzeInvocation(project, topo, fn) : null;
+    const checks: AnalysisCheck[] = [
+      parsed.ok
+        ? { tone: "ok", title: "일정 표현식", detail: `${describeSchedule(parsed.value)} (${schedule.timezone})`, field: "scheduleExpression" }
+        : { tone: "error", title: "일정 표현식 오류", detail: parsed.error, field: "scheduleExpression" },
+      { tone: can.ok ? "ok" : "error", title: "대상 호출 권한", detail: can.reason, field: "schedulerRole" },
+    ];
+    if (run && can.ok) checks.push({ tone: RUN_TONE[run.outcome], title: `호출하면: ${fn ? displayName(fn) : ""}`, detail: runDetail(run), field: "scheduleTarget" });
+    if (!enabled) checks.push({ tone: "info", title: "비활성 일정", detail: "비활성 상태라 실행 시각이 와도 함수를 호출하지 않습니다.", field: "scheduleState" });
+    return {
+      headline: {
+        tone: !parsed.ok || !can.ok ? "error" : !enabled ? "info" : run && run.outcome !== "success" ? "warn" : "ok",
+        text: `${schedule.state} · ${parsed.ok ? describeSchedule(parsed.value) : "표현식 오류"} · ${schedule.timezone}`,
+      },
+      facts: [
+        { label: "일정 표현식", value: schedule.expression, field: "scheduleExpression" },
+        { label: "시간대", value: schedule.timezone, field: "timezone" },
+        { label: "다음 실행 (가상)", value: next.length ? next.map((t) => formatInTimezone(t, schedule.timezone)).join(", ") : "없음", field: "scheduleExpression" },
+        { label: "유연한 시간 창", value: schedule.flexibleWindowMinutes ? `${schedule.flexibleWindowMinutes}분` : "끔", field: "flexibleTimeWindow" },
+        { label: "재시도", value: `최대 ${schedule.retryAttempts}회`, field: "retryPolicy" },
+        { label: "입력", value: schedule.input, field: "scheduleInput" },
+        { label: "일정 ARN (가상)", value: scheduleArn(schedule.name) },
+      ],
+      relations: [
+        { label: "대상 함수", explanation: "실행 시각마다 호출할 Lambda 함수입니다.", items: resourceItem(project, schedule.targetLambdaId, run ? runDetail(run) : undefined, run ? RUN_TONE[run.outcome] : undefined), field: "scheduleTarget" },
+        {
+          label: "실행 역할",
+          explanation: "Scheduler가 대상을 호출할 때 맡는 역할입니다 (scheduler.amazonaws.com 신뢰 + lambda:InvokeFunction).",
+          items: role ? [{ service: { key: "iam", itemId: role.id, consolePath: `/iam/roles/${role.id}` }, name: role.name, detail: `신뢰: ${role.trustedEntity}`, tone: role.trustedEntity === "scheduler.amazonaws.com" ? undefined : "error" }] : [],
+          missing: role ? undefined : "실행 역할이 없어 함수를 호출할 수 없습니다.",
+          field: "schedulerRole",
+        },
+      ],
+      checks,
+      recommendations: schedule.flexibleWindowMinutes ? ["정확한 시각에 시작해야 하는 작업이라면 유연한 시간 창을 끄세요."] : [],
+      items,
+      selectedLabel: `일정 ${schedule.name}`,
+    };
+  }
+
+  const rule = rules.find((r) => r.id === options.itemId);
+  if (rule) {
+    const parsed = parseEventPattern(rule.eventPattern);
+    const targets = rule.targetLambdaIds.map((id) => ({ id, fn: fnOf(id) }));
+    const enabled = rule.state === "ENABLED";
+    const checks: AnalysisCheck[] = [
+      parsed.ok ? { tone: "ok", title: "이벤트 패턴", detail: "올바른 형식입니다.", field: "eventPattern" } : { tone: "error", title: "이벤트 패턴 오류", detail: parsed.error, field: "eventPattern" },
+    ];
+    for (const t of targets) {
+      const can = ruleCanInvoke(rule, t.fn);
+      checks.push({ tone: can.ok ? "ok" : "error", title: `대상 호출 권한: ${t.fn ? displayName(t.fn) : t.id}`, detail: can.reason, field: "ruleTargets" });
+      if (t.fn && can.ok) {
+        const run = analyzeInvocation(project, topo, t.fn);
+        checks.push({ tone: RUN_TONE[run.outcome], title: `호출하면: ${displayName(t.fn)}`, detail: runDetail(run), field: "ruleTargets" });
+      }
+    }
+    if (!enabled) checks.push({ tone: "info", title: "비활성 규칙", detail: "비활성 상태라 일치하는 이벤트가 와도 대상을 호출하지 않습니다.", field: "ruleState" });
+    checks.push({ tone: "info", title: "이벤트는 테스트로만", detail: "샌드박스 리소스는 이벤트를 만들지 않습니다. 규칙 화면의 '테스트 이벤트 보내기'로 일치 여부를 확인하세요.", field: "testEvent" });
+    const broken = !parsed.ok || targets.some((t) => !ruleCanInvoke(rule, t.fn).ok);
+    return {
+      headline: { tone: broken ? "error" : enabled ? "ok" : "info", text: `${rule.state} · 대상 ${targets.length}개 · 기본 이벤트 버스` },
+      facts: [
+        { label: "상태", value: rule.state, field: "ruleState" },
+        { label: "이벤트 버스", value: "default", field: "eventBus" },
+        { label: "이벤트 패턴", value: parsed.ok ? JSON.stringify(parsed.pattern) : rule.eventPattern, field: "eventPattern" },
+        { label: "규칙 ARN (가상)", value: ruleArn(rule.name) },
+      ],
+      relations: [
+        {
+          label: "대상 함수",
+          explanation: "패턴과 일치한 이벤트를 받을 Lambda 함수입니다. 함수의 리소스 기반 정책이 이 규칙을 허용해야 합니다.",
+          items: targets.flatMap((t) => {
+            const can = ruleCanInvoke(rule, t.fn);
+            return resourceItem(project, t.id, can.reason, can.ok ? "ok" : "error");
+          }),
+          missing: targets.length ? undefined : "대상이 없어 일치한 이벤트가 어디에도 전달되지 않습니다.",
+          field: "ruleTargets",
+        },
+      ],
+      checks,
+      recommendations: [],
+      items,
+      selectedLabel: `규칙 ${rule.name}`,
+    };
+  }
+
+  const scheduleChecks: AnalysisCheck[] = [];
+  for (const s of schedules) {
+    const parsed = parseScheduleExpression(s.expression);
+    const can = scheduleCanInvoke(project, s, fnOf(s.targetLambdaId));
+    if (!parsed.ok) scheduleChecks.push({ tone: "error", title: `일정 ${s.name}: 표현식 오류`, detail: parsed.error, field: "scheduleExpression" });
+    else if (s.state === "ENABLED" && !can.ok) scheduleChecks.push({ tone: "error", title: `일정 ${s.name}: 호출 실패`, detail: can.reason, field: "schedulerRole" });
+  }
+  for (const r of rules) {
+    const parsed = parseEventPattern(r.eventPattern);
+    if (!parsed.ok) scheduleChecks.push({ tone: "error", title: `규칙 ${r.name}: 패턴 오류`, detail: parsed.error, field: "eventPattern" });
+    for (const id of r.targetLambdaIds) {
+      const can = ruleCanInvoke(r, fnOf(id));
+      if (r.state === "ENABLED" && !can.ok) scheduleChecks.push({ tone: "error", title: `규칙 ${r.name}: 호출 실패`, detail: can.reason, field: "ruleTargets" });
+    }
+  }
+  if (!schedules.length && !rules.length) scheduleChecks.push({ tone: "info", title: "일정·규칙 없음", detail: "예: rate(5 minutes) 일정으로 Lambda 함수를 5분마다 호출해 보세요.", field: "scheduleExpression" });
+  const targetIds = [...new Set([...schedules.map((s) => s.targetLambdaId), ...rules.flatMap((r) => r.targetLambdaIds)])];
+  return {
+    headline: {
+      tone: scheduleChecks.some((c) => c.tone === "error") ? "error" : "ok",
+      text: `일정 ${schedules.length}개 (활성 ${schedules.filter((s) => s.state === "ENABLED").length}) · 규칙 ${rules.length}개`,
+    },
+    facts: [
+      { label: "Scheduler 일정", value: `${schedules.length}개`, field: "scheduleExpression" },
+      { label: "규칙 (기본 이벤트 버스)", value: `${rules.length}개`, field: "eventPattern" },
+    ],
+    relations: [
+      {
+        label: "일정",
+        explanation: "정해진 시각에 함수를 호출합니다.",
+        items: schedules.map((s) => ({ service: { key: "eventbridge" as const, itemId: s.id, consolePath: `/eventbridge/schedules/${s.id}` }, name: s.name, detail: `${s.expression} · ${s.state}` })),
+        empty: "일정이 없습니다.",
+        field: "scheduleExpression",
+      },
+      {
+        label: "규칙",
+        explanation: "패턴과 일치하는 이벤트가 오면 함수를 호출합니다.",
+        items: rules.map((r) => ({ service: { key: "eventbridge" as const, itemId: r.id, consolePath: `/eventbridge/rules/${r.id}` }, name: r.name, detail: `${r.state} · 대상 ${r.targetLambdaIds.length}개` })),
+        empty: "규칙이 없습니다.",
+        field: "eventPattern",
+      },
+      { label: "대상 함수", explanation: "일정·규칙이 호출하는 Lambda 함수입니다.", items: targetIds.flatMap((id) => resourceItem(project, id)), empty: "없습니다.", field: "scheduleTarget" },
+    ],
+    checks: scheduleChecks,
+    recommendations: [],
+    items,
+    selectedLabel: null,
+  };
+}
+
 /** 서비스 항목을 직접 설정하는 심화 모드(콘솔) 경로 */
 export function serviceConsolePath(project: Project, key: ServiceDocKey, itemId: string | null): string {
+  if (key === "secretsmanager" || key === "ssm" || key === "cloudfront") return platformConsolePath(project, key, itemId);
   if (key === "s3") return itemId && project.services.s3.buckets.some((b) => b.id === itemId) ? `/s3/buckets/${itemId}` : "/s3";
   if (key === "cloudwatch") return itemId && project.services.cloudwatch.alarms.some((a) => a.id === itemId) ? `/cloudwatch/alarms/${itemId}` : "/cloudwatch";
+  if (key === "eventbridge") {
+    const eb = project.services.eventbridge;
+    if (itemId && eb.schedules.some((s) => s.id === itemId)) return `/eventbridge/schedules/${itemId}`;
+    if (itemId && eb.rules.some((r) => r.id === itemId)) return `/eventbridge/rules/${itemId}`;
+    return "/eventbridge";
+  }
   if (!itemId) return "/iam";
   const { users, roles, groups } = project.services.iam;
   if (users.some((u) => u.id === itemId)) return `/iam/users/${itemId}`;
@@ -326,5 +515,9 @@ export function serviceConsolePath(project: Project, key: ServiceDocKey, itemId:
 export function analyzeService(input: AnalysisInput, key: ServiceDocKey, options: ServiceAnalysisOptions = {}): ServiceAnalysis {
   if (key === "s3") return analyzeS3(input, options);
   if (key === "iam") return analyzeIam(input, options);
+  if (key === "eventbridge") return analyzeEventBridge(input, options);
+  if (key === "secretsmanager") return analyzeSecrets(input, options);
+  if (key === "ssm") return analyzeSsm(input, options);
+  if (key === "cloudfront") return analyzeCloudFront(input, options);
   return analyzeCloudWatch(input, options);
 }

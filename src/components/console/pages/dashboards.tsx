@@ -18,7 +18,7 @@ export interface Tile {
 
 export function ResourceTiles({ tiles }: { tiles: Tile[] }) {
   return (
-    <div className="grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
+    <div className="grid grid-cols-1 gap-x-8 gap-y-4 @xl/main:grid-cols-2 @3xl/main:grid-cols-3">
       {tiles.map((t) => (
         <a key={t.label} href={href(t.path)} className="group flex items-baseline justify-between gap-3 rounded-lg px-2 py-1.5 hover:bg-aws-surface-2">
           <span>

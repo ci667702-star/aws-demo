@@ -1,7 +1,7 @@
 /**
  * 자동 정렬: AWS 아키텍처 그림처럼 VPC마다 가용 영역을 열로, 서브넷 종류를 행으로 배치한다.
  *  맨 위: Internet Gateway, ALB
- *  서브넷 행: 퍼블릭 → (대상 그룹) → 프라이빗(NAT) → 프라이빗(격리). 서브넷 아래로 NAT Gateway, EC2, 탄력적 IP
+ *  서브넷 행: 퍼블릭 → (대상 그룹) → 프라이빗(NAT) → 프라이빗(격리). 서브넷 아래로 NAT Gateway, EC2, VPC에 연결한 Lambda(첫 서브넷), 탄력적 IP
  *  그 아래: DB Subnet Group, RDS
  *  오른쪽 1열: VPC, 라우팅 테이블, Network ACL (연결된 서브넷과 같은 높이)
  *  오른쪽 2열: Security Group (연결된 리소스와 같은 높이)
@@ -88,6 +88,7 @@ export function computeAutoLayout(project: Project): Record<string, { x: number;
           const members = [
             ...topo.ofType("nat-gateway").filter((n) => topo.subnetOf(n.id) === subnet.id),
             ...topo.ofType("ec2").filter((e) => topo.subnetOf(e.id) === subnet.id),
+            ...topo.ofType("lambda").filter((f) => topo.lambdaSubnets(f.id)[0]?.id === subnet.id),
           ];
           for (const m of members) {
             if (place(m.id, x, cy)) {

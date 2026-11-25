@@ -3,80 +3,60 @@
 /**
  * 콘솔 해시 경로 → 페이지 매핑과 이동 경로(breadcrumb).
  */
-import { AlarmDetailPage, AlarmListPage, CreateAlarmPage, EditAlarmPage } from "./pages/cloudwatch/cw-alarms";
-import { DashboardDetailPage, DashboardListPage } from "./pages/cloudwatch/cw-dashboards";
-import { LoadTestPage } from "./pages/cloudwatch/cw-load";
-import { MetricsPage } from "./pages/cloudwatch/cw-metrics";
-import { CloudWatchOverviewPage } from "./pages/cloudwatch/cw-overview";
-import { Ec2DashboardPage, RdsDashboardPage, VpcDashboardPage } from "./pages/dashboards";
-import {
-  CreateDatabasePage,
-  CreateDbSubnetGroupPage,
-  DatabaseDetailPage,
-  DatabaseListPage,
-  DbSubnetGroupDetailPage,
-  DbSubnetGroupListPage,
-  EditDbSubnetGroupPage,
-  ModifyDatabasePage,
-} from "./pages/databases";
-import {
-  AllocateEipPage,
-  AssociateEipPage,
-  AttachIgwPage,
-  CreateIgwPage,
-  CreateNatPage,
-  EipDetailPage,
-  EipListPage,
-  IgwDetailPage,
-  IgwListPage,
-  NatDetailPage,
-  NatListPage,
-} from "./pages/gateways";
+import { lazyGroup } from "@/components/app/lazy";
 import { ConsoleHomePage } from "./pages/home";
-import { IamDashboardPage } from "./pages/iam/iam-dashboard";
-import { CreateGroupPage, GroupDetailPage, GroupListPage } from "./pages/iam/iam-groups";
-import { CreatePolicyPage, EditPolicyPage, PolicyDetailPage, PolicyListPage } from "./pages/iam/iam-policies";
-import { CreateRolePage, RoleDetailPage, RoleListPage } from "./pages/iam/iam-roles";
-import { CreateAccessKeyPage, CreateUserPage, UserDetailPage, UserListPage } from "./pages/iam/iam-users";
-import { PolicySimulatorPage } from "./pages/iam/iam-simulator";
-import { RoleTemplatesPage } from "./pages/iam/iam-templates";
-import { ModifyInstanceRolePage } from "./pages/iam/instance-role";
-import { ChangeInstanceSgsPage, EditUserDataPage, InstanceDetailPage, InstanceListPage } from "./pages/instances";
-import { LaunchInstancePage } from "./pages/launch-instance";
-import {
-  CreateLoadBalancerPage,
-  EditLbSecurityGroupsPage,
-  EditLbSubnetsPage,
-  LoadBalancerDetailPage,
-  LoadBalancerListPage,
-  SelectLbTypePage,
-} from "./pages/load-balancers";
-import { CreatePathPage, PathDetailPage, PathListPage } from "./pages/reachability";
-import { ResourceMapPage } from "./pages/resource-map";
-import { S3AccessTestPage } from "./pages/s3/s3-access-test";
-import { BucketDetailPage } from "./pages/s3/s3-bucket-detail";
-import { BucketListPage, CreateBucketPage } from "./pages/s3/s3-buckets";
-import { EditBpaPage, EditBucketPolicyPage, EditEncryptionPage, EditVersioningPage, EditWebsitePage, UploadPage } from "./pages/s3/s3-edit";
-import { ObjectDetailPage } from "./pages/s3/s3-object";
-import { CreateRouteTablePage, EditRoutesPage, EditRouteTableAssociationsPage, RouteTableDetailPage, RouteTableListPage } from "./pages/route-tables";
-import {
-  CreateNaclPage,
-  CreateSecurityGroupPage,
-  EditNaclAssociationsPage,
-  EditNaclRulesPage,
-  EditSgRulesPage,
-  NaclDetailPage,
-  NaclListPage,
-  SecurityGroupDetailPage,
-  SecurityGroupListPage,
-} from "./pages/security";
-import { CreateSubnetPage, EditSubnetNaclPage, EditSubnetRouteTablePage, EditSubnetSettingsPage, SubnetDetailPage, SubnetListPage } from "./pages/subnets";
-import { CreateTargetGroupPage, EditHealthCheckPage, TargetGroupDetailPage, TargetGroupListPage } from "./pages/target-groups";
-import { ActivityPage, BillingPage, ChecksPage } from "./pages/tools";
-import { CreateVpcPage, EditVpcSettingsPage, VpcDetailPage, VpcListPage } from "./pages/vpcs";
 import { matchPath } from "./router";
 import { ButtonLink } from "./ui/button";
 import { Container, EmptyState } from "./ui/layout";
+
+// 화면 코드는 파일(서비스)별로 나눠 필요할 때 불러온다 (콘솔 첫 화면이 모든 화면 코드를 기다리지 않게).
+// 콘솔이 열리면 한가할 때 미리 받아 두므로(console-shell) 보통은 기다림 없이 열린다.
+const { AlarmDetailPage, AlarmListPage, CreateAlarmPage, EditAlarmPage } = lazyGroup(() => import("./pages/cloudwatch/cw-alarms"), ["AlarmDetailPage", "AlarmListPage", "CreateAlarmPage", "EditAlarmPage"]);
+const { DashboardDetailPage, DashboardListPage } = lazyGroup(() => import("./pages/cloudwatch/cw-dashboards"), ["DashboardDetailPage", "DashboardListPage"]);
+const { LoadTestPage } = lazyGroup(() => import("./pages/cloudwatch/cw-load"), ["LoadTestPage"]);
+const { MetricsPage } = lazyGroup(() => import("./pages/cloudwatch/cw-metrics"), ["MetricsPage"]);
+const { CloudWatchOverviewPage } = lazyGroup(() => import("./pages/cloudwatch/cw-overview"), ["CloudWatchOverviewPage"]);
+const { Ec2DashboardPage, RdsDashboardPage, VpcDashboardPage } = lazyGroup(() => import("./pages/dashboards"), ["Ec2DashboardPage", "RdsDashboardPage", "VpcDashboardPage"]);
+const { CreateDatabasePage, CreateDbSubnetGroupPage, DatabaseDetailPage, DatabaseListPage, DbSubnetGroupDetailPage, DbSubnetGroupListPage, EditDbSubnetGroupPage, ModifyDatabasePage } = lazyGroup(() => import("./pages/databases"), ["CreateDatabasePage", "CreateDbSubnetGroupPage", "DatabaseDetailPage", "DatabaseListPage", "DbSubnetGroupDetailPage", "DbSubnetGroupListPage", "EditDbSubnetGroupPage", "ModifyDatabasePage"]);
+const { AllocateEipPage, AssociateEipPage, AttachIgwPage, CreateIgwPage, CreateNatPage, EipDetailPage, EipListPage, IgwDetailPage, IgwListPage, NatDetailPage, NatListPage } = lazyGroup(() => import("./pages/gateways"), ["AllocateEipPage", "AssociateEipPage", "AttachIgwPage", "CreateIgwPage", "CreateNatPage", "EipDetailPage", "EipListPage", "IgwDetailPage", "IgwListPage", "NatDetailPage", "NatListPage"]);
+const { IamDashboardPage } = lazyGroup(() => import("./pages/iam/iam-dashboard"), ["IamDashboardPage"]);
+const { CreateGroupPage, GroupDetailPage, GroupListPage } = lazyGroup(() => import("./pages/iam/iam-groups"), ["CreateGroupPage", "GroupDetailPage", "GroupListPage"]);
+const { CreatePolicyPage, EditPolicyPage, PolicyDetailPage, PolicyListPage } = lazyGroup(() => import("./pages/iam/iam-policies"), ["CreatePolicyPage", "EditPolicyPage", "PolicyDetailPage", "PolicyListPage"]);
+const { CreateRolePage, RoleDetailPage, RoleListPage } = lazyGroup(() => import("./pages/iam/iam-roles"), ["CreateRolePage", "RoleDetailPage", "RoleListPage"]);
+const { CreateAccessKeyPage, CreateUserPage, UserDetailPage, UserListPage } = lazyGroup(() => import("./pages/iam/iam-users"), ["CreateAccessKeyPage", "CreateUserPage", "UserDetailPage", "UserListPage"]);
+const { PolicySimulatorPage } = lazyGroup(() => import("./pages/iam/iam-simulator"), ["PolicySimulatorPage"]);
+const { RoleTemplatesPage } = lazyGroup(() => import("./pages/iam/iam-templates"), ["RoleTemplatesPage"]);
+const { ModifyInstanceRolePage } = lazyGroup(() => import("./pages/iam/instance-role"), ["ModifyInstanceRolePage"]);
+const { ChangeInstanceSgsPage, EditUserDataPage, InstanceDetailPage, InstanceListPage } = lazyGroup(() => import("./pages/instances"), ["ChangeInstanceSgsPage", "EditUserDataPage", "InstanceDetailPage", "InstanceListPage"]);
+const { LaunchInstancePage } = lazyGroup(() => import("./pages/launch-instance"), ["LaunchInstancePage"]);
+const { AddFunctionPermissionPage, CreateFunctionPage, EditFunctionVpcPage, FunctionDetailPage, FunctionListPage } = lazyGroup(() => import("./pages/lambda/lambda-functions"), ["AddFunctionPermissionPage", "CreateFunctionPage", "EditFunctionVpcPage", "FunctionDetailPage", "FunctionListPage"]);
+const { CreateRulePage, CreateSchedulePage, EditRulePage, EditSchedulePage, EventBridgeOverviewPage, RuleDetailPage, RuleListPage, ScheduleDetailPage, ScheduleListPage, SendEventPage } = lazyGroup(() => import("./pages/eventbridge/eventbridge-pages"), ["CreateRulePage", "CreateSchedulePage", "EditRulePage", "EditSchedulePage", "EventBridgeOverviewPage", "RuleDetailPage", "RuleListPage", "ScheduleDetailPage", "ScheduleListPage", "SendEventPage"]);
+const { CreateLoadBalancerPage, EditLbSecurityGroupsPage, EditLbSubnetsPage, LoadBalancerDetailPage, LoadBalancerListPage, SelectLbTypePage } = lazyGroup(() => import("./pages/load-balancers"), ["CreateLoadBalancerPage", "EditLbSecurityGroupsPage", "EditLbSubnetsPage", "LoadBalancerDetailPage", "LoadBalancerListPage", "SelectLbTypePage"]);
+const { CreatePathPage, PathDetailPage, PathListPage } = lazyGroup(() => import("./pages/reachability"), ["CreatePathPage", "PathDetailPage", "PathListPage"]);
+const { ResourceMapPage } = lazyGroup(() => import("./pages/resource-map"), ["ResourceMapPage"]);
+const { S3AccessTestPage } = lazyGroup(() => import("./pages/s3/s3-access-test"), ["S3AccessTestPage"]);
+const { BucketDetailPage } = lazyGroup(() => import("./pages/s3/s3-bucket-detail"), ["BucketDetailPage"]);
+const { BucketListPage, CreateBucketPage } = lazyGroup(() => import("./pages/s3/s3-buckets"), ["BucketListPage", "CreateBucketPage"]);
+const { EditBpaPage, EditBucketPolicyPage, EditEncryptionPage, EditVersioningPage, EditWebsitePage, UploadPage } = lazyGroup(() => import("./pages/s3/s3-edit"), ["EditBpaPage", "EditBucketPolicyPage", "EditEncryptionPage", "EditVersioningPage", "EditWebsitePage", "UploadPage"]);
+const { ObjectDetailPage } = lazyGroup(() => import("./pages/s3/s3-object"), ["ObjectDetailPage"]);
+const { CreateRouteTablePage, EditRoutesPage, EditRouteTableAssociationsPage, RouteTableDetailPage, RouteTableListPage } = lazyGroup(() => import("./pages/route-tables"), ["CreateRouteTablePage", "EditRoutesPage", "EditRouteTableAssociationsPage", "RouteTableDetailPage", "RouteTableListPage"]);
+const { CreateNaclPage, CreateSecurityGroupPage, EditNaclAssociationsPage, EditNaclRulesPage, EditSgRulesPage, NaclDetailPage, NaclListPage, SecurityGroupDetailPage, SecurityGroupListPage } = lazyGroup(() => import("./pages/security"), ["CreateNaclPage", "CreateSecurityGroupPage", "EditNaclAssociationsPage", "EditNaclRulesPage", "EditSgRulesPage", "NaclDetailPage", "NaclListPage", "SecurityGroupDetailPage", "SecurityGroupListPage"]);
+const { CreateSubnetPage, EditSubnetNaclPage, EditSubnetRouteTablePage, EditSubnetSettingsPage, SubnetDetailPage, SubnetListPage } = lazyGroup(() => import("./pages/subnets"), ["CreateSubnetPage", "EditSubnetNaclPage", "EditSubnetRouteTablePage", "EditSubnetSettingsPage", "SubnetDetailPage", "SubnetListPage"]);
+const { CreateTargetGroupPage, EditHealthCheckPage, TargetGroupDetailPage, TargetGroupListPage } = lazyGroup(() => import("./pages/target-groups"), ["CreateTargetGroupPage", "EditHealthCheckPage", "TargetGroupDetailPage", "TargetGroupListPage"]);
+const { ActivityPage, BillingPage, ChecksPage } = lazyGroup(() => import("./pages/tools"), ["ActivityPage", "BillingPage", "ChecksPage"]);
+const { CreateVpcPage, EditVpcSettingsPage, VpcDetailPage, VpcListPage } = lazyGroup(() => import("./pages/vpcs"), ["CreateVpcPage", "EditVpcSettingsPage", "VpcDetailPage", "VpcListPage"]);
+const { CreateDistributionPage, DistributionDetailPage, DistributionListPage, EditDistributionPage } = lazyGroup(() => import("./pages/cloudfront/cloudfront-pages"), ["CreateDistributionPage", "DistributionDetailPage", "DistributionListPage", "EditDistributionPage"]);
+const { CreateSecretPage, SecretDetailPage, SecretListPage } = lazyGroup(() => import("./pages/secretsmanager/secrets-pages"), ["CreateSecretPage", "SecretDetailPage", "SecretListPage"]);
+const { CreateParameterPage, EditParameterPage, ManagedNodesPage, ParameterDetailPage, ParameterListPage, SessionManagerPage, SessionPage, SsmOverviewPage } = lazyGroup(() => import("./pages/ssm/ssm-pages"), [
+  "CreateParameterPage",
+  "EditParameterPage",
+  "ManagedNodesPage",
+  "ParameterDetailPage",
+  "ParameterListPage",
+  "SessionManagerPage",
+  "SessionPage",
+  "SsmOverviewPage",
+]);
 
 export interface Crumb {
   text: string;
@@ -105,6 +85,11 @@ const IAM: Crumb = { text: "IAM", path: "/iam" };
 const S3: Crumb = { text: "S3", path: "/s3" };
 const BUCKETS: Crumb = { text: "범용 버킷", path: "/s3" };
 const CW: Crumb = { text: "CloudWatch", path: "/cloudwatch" };
+const LAMBDA: Crumb = { text: "Lambda", path: "/lambda/functions" };
+const EB: Crumb = { text: "EventBridge", path: "/eventbridge" };
+const CF: Crumb = { text: "CloudFront", path: "/cloudfront/distributions" };
+const SM: Crumb = { text: "Secrets Manager", path: "/secretsmanager/secrets" };
+const SSM: Crumb = { text: "Systems Manager", path: "/ssm" };
 const TOOLS: Crumb = { text: "도구" };
 
 interface ResourcePages {
@@ -247,6 +232,34 @@ const ROUTES: RouteDef[] = [
     detail: (id) => <TargetGroupDetailPage id={id} />,
   }),
 
+  // ------------------------------------------------------------ Lambda
+  { pattern: "/lambda", title: "함수", crumbs: () => [LAMBDA, { text: "함수" }], render: () => <FunctionListPage /> },
+  ...resourceRoutes(LAMBDA, "/lambda/functions", "함수", {
+    list: () => <FunctionListPage />,
+    create: [{ segment: "create", label: "함수 생성", render: () => <CreateFunctionPage /> }],
+    actions: [
+      { segment: "edit-vpc", label: "VPC 편집", render: (id) => <EditFunctionVpcPage id={id} /> },
+      { segment: "add-permission", label: "권한 추가", render: (id) => <AddFunctionPermissionPage id={id} /> },
+    ],
+    detail: (id) => <FunctionDetailPage id={id} />,
+  }),
+
+  // ------------------------------------------------------------ EventBridge
+  { pattern: "/eventbridge", title: "EventBridge", crumbs: () => [EB, { text: "개요" }], render: () => <EventBridgeOverviewPage /> },
+  { pattern: "/eventbridge/send-event", title: "테스트 이벤트 보내기", crumbs: () => [EB, { text: "테스트 이벤트 보내기" }], render: () => <SendEventPage /> },
+  ...resourceRoutes(EB, "/eventbridge/schedules", "일정", {
+    list: () => <ScheduleListPage />,
+    create: [{ segment: "create", label: "일정 생성", render: () => <CreateSchedulePage /> }],
+    actions: [{ segment: "edit", label: "일정 편집", render: (id) => <EditSchedulePage id={id} /> }],
+    detail: (id) => <ScheduleDetailPage id={id} />,
+  }),
+  ...resourceRoutes(EB, "/eventbridge/rules", "규칙", {
+    list: () => <RuleListPage />,
+    create: [{ segment: "create", label: "규칙 생성", render: () => <CreateRulePage /> }],
+    actions: [{ segment: "edit", label: "규칙 편집", render: (id) => <EditRulePage id={id} /> }],
+    detail: (id) => <RuleDetailPage id={id} />,
+  }),
+
   // ------------------------------------------------------------ RDS
   { pattern: "/rds", title: "RDS 대시보드", crumbs: () => [RDS, { text: "RDS 대시보드" }], render: () => <RdsDashboardPage /> },
   ...resourceRoutes(RDS, "/rds/databases", "데이터베이스", {
@@ -310,6 +323,38 @@ const ROUTES: RouteDef[] = [
     }),
   ),
   { pattern: "/s3/buckets/:id", title: (p) => p.id, crumbs: (p) => [S3, BUCKETS, { text: p.id }], render: (p) => <BucketDetailPage id={p.id} /> },
+
+  // ------------------------------------------------------------ CloudFront
+  { pattern: "/cloudfront", title: "배포", crumbs: () => [CF, { text: "배포" }], render: () => <DistributionListPage /> },
+  ...resourceRoutes(CF, "/cloudfront/distributions", "배포", {
+    list: () => <DistributionListPage />,
+    create: [{ segment: "create", label: "배포 생성", render: () => <CreateDistributionPage /> }],
+    actions: [{ segment: "edit", label: "배포 편집", render: (id) => <EditDistributionPage id={id} /> }],
+    detail: (id) => <DistributionDetailPage id={id} />,
+  }),
+
+  // ------------------------------------------------------------ Secrets Manager
+  { pattern: "/secretsmanager", title: "보안 암호", crumbs: () => [SM, { text: "보안 암호" }], render: () => <SecretListPage /> },
+  ...resourceRoutes(SM, "/secretsmanager/secrets", "보안 암호", {
+    list: () => <SecretListPage />,
+    create: [{ segment: "create", label: "새 보안 암호 저장", render: () => <CreateSecretPage /> }],
+    detail: (id) => <SecretDetailPage id={id} />,
+  }),
+
+  // ------------------------------------------------------------ Systems Manager
+  { pattern: "/ssm", title: "Systems Manager", crumbs: () => [SSM, { text: "개요" }], render: () => <SsmOverviewPage /> },
+  ...resourceRoutes(SSM, "/ssm/parameters", "Parameter Store", {
+    list: () => <ParameterListPage />,
+    create: [{ segment: "create", label: "파라미터 생성", render: () => <CreateParameterPage /> }],
+    actions: [{ segment: "edit", label: "파라미터 편집", render: (id) => <EditParameterPage id={id} /> }],
+    detail: (id) => <ParameterDetailPage id={id} />,
+  }),
+  { pattern: "/ssm/nodes", title: "관리형 노드", crumbs: () => [SSM, { text: "관리형 노드" }], render: () => <ManagedNodesPage /> },
+  ...resourceRoutes(SSM, "/ssm/sessions", "Session Manager", {
+    list: () => <SessionManagerPage />,
+    // 인스턴스마다 세션 화면(가상 셸) 상태가 따로 있도록 key를 준다
+    detail: (id) => <SessionPage key={id} id={id} />,
+  }),
 
   // ------------------------------------------------------------ CloudWatch
   { pattern: "/cloudwatch", title: "CloudWatch 개요", crumbs: () => [CW, { text: "개요" }], render: () => <CloudWatchOverviewPage /> },

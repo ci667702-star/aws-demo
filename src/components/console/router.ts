@@ -86,6 +86,7 @@ export const RESOURCE_LIST_PATH: Record<ResourceType, string> = {
   "security-group": "/vpc/security-groups",
   "network-acl": "/vpc/network-acls",
   ec2: "/ec2/instances",
+  lambda: "/lambda/functions",
   alb: "/ec2/load-balancers",
   "target-group": "/ec2/target-groups",
   "db-subnet-group": "/rds/subnet-groups",

@@ -17,6 +17,7 @@ export const RESOURCE_TYPES = [
   "security-group",
   "network-acl",
   "ec2",
+  "lambda",
   "alb",
   "target-group",
   "db-subnet-group",
@@ -53,6 +54,16 @@ export type RdsInstanceClass = (typeof RDS_INSTANCE_CLASSES)[number];
 export const RDS_ENGINES = ["mysql", "postgres"] as const;
 export type RdsEngine = (typeof RDS_ENGINES)[number];
 export const RDS_DEFAULT_PORT: Record<RdsEngine, number> = { mysql: 3306, postgres: 5432 };
+
+export const LAMBDA_RUNTIMES = ["nodejs22.x", "python3.13", "java21"] as const;
+export const LAMBDA_ARCHITECTURES = ["x86_64", "arm64"] as const;
+/**
+ * 가상 코드 템플릿. 실제 코드는 실행하지 않고, 템플릿이 하는 일(AWS 호출, 인터넷 접근, DB 연결)로 실행 결과를 계산한다.
+ */
+export const LAMBDA_CODE_TEMPLATES = ["hello", "s3-list", "http-get", "rds-query", "secret-get", "ssm-get", "throw-error"] as const;
+export type LambdaCodeTemplate = (typeof LAMBDA_CODE_TEMPLATES)[number];
+/** 리소스 기반 정책으로 이 함수를 호출할 수 있게 허용하는 서비스 */
+export const LAMBDA_PERMISSION_PRINCIPALS = ["events.amazonaws.com", "s3.amazonaws.com", "secretsmanager.amazonaws.com"] as const;
 
 const id = z.string().min(1).max(64);
 const cidrText = z.string().max(64);
@@ -186,6 +197,35 @@ export const configSchemas = {
     /** 소스/대상 확인. 켜져 있으면(기본값) 자기 주소가 아닌 트래픽을 버린다. NAT 인스턴스는 꺼야 한다 */
     sourceDestCheck: z.boolean().default(true),
   }),
+  lambda: z.object({
+    runtime: z.enum(LAMBDA_RUNTIMES).default("nodejs22.x"),
+    handler: z.string().trim().min(1).max(128).default("index.handler"),
+    architecture: z.enum(LAMBDA_ARCHITECTURES).default("x86_64"),
+    /** 메모리 (MB). CPU도 메모리에 비례해 배정된다 */
+    memoryMb: z.number().int().min(128).max(10240).default(128),
+    /** 제한 시간 (초). 이 시간을 넘기면 실행이 중단된다 */
+    timeoutSeconds: z.number().int().min(1).max(900).default(3),
+    /** 실행 역할: lambda.amazonaws.com을 신뢰하는 IAM 역할 ID */
+    roleId: z.string().max(64).nullable().default(null),
+    codeTemplate: z.enum(LAMBDA_CODE_TEMPLATES).default("hello"),
+    /** 템플릿이 쓰는 대상 (s3-list: 버킷 이름, rds-query: RDS 리소스 ID, http-get: URL, secret-get: 보안 암호 이름, ssm-get: 파라미터 이름) */
+    templateTarget: z.string().max(512).default(""),
+    /** 가상 실행 시간 (밀리초). 제한 시간 초과를 실험할 때 바꾼다 */
+    virtualDurationMs: z.number().int().min(1).max(900_000).default(120),
+    /** 가상 오류 비율 (%). 정상 실행 중 이 비율만큼 오류가 났다고 지표를 계산한다 */
+    errorRatePercent: z.number().min(0).max(100).default(0),
+    environment: z
+      .array(z.object({ key: z.string().min(1).max(128), value: z.string().max(4096) }))
+      .max(50)
+      .default([]),
+    /** 예약 동시성. null이면 계정 공용 풀을 쓰고, 0이면 모든 호출이 제한(throttle)된다 */
+    reservedConcurrency: z.number().int().min(0).max(1000).nullable().default(null),
+    /** 리소스 기반 정책: 이 함수를 호출할 수 있는 서비스 (EventBridge 규칙 대상으로 추가하면 콘솔이 자동으로 넣는다) */
+    permissions: z
+      .array(z.object({ sid: z.string().min(1).max(100), principal: z.enum(LAMBDA_PERMISSION_PRINCIPALS), sourceArn: z.string().max(512).default("") }))
+      .max(50)
+      .default([]),
+  }),
   alb: z.object({
     scheme: z.enum(["internet-facing", "internal"]),
     listeners: z.array(listenerSchema).max(10),
@@ -229,6 +269,7 @@ export const resourceSchema = z.discriminatedUnion("type", [
   z.object({ ...resourceBase, type: z.literal("security-group"), config: configSchemas["security-group"] }),
   z.object({ ...resourceBase, type: z.literal("network-acl"), config: configSchemas["network-acl"] }),
   z.object({ ...resourceBase, type: z.literal("ec2"), config: configSchemas.ec2 }),
+  z.object({ ...resourceBase, type: z.literal("lambda"), config: configSchemas.lambda }),
   z.object({ ...resourceBase, type: z.literal("alb"), config: configSchemas.alb }),
   z.object({ ...resourceBase, type: z.literal("target-group"), config: configSchemas["target-group"] }),
   z.object({ ...resourceBase, type: z.literal("db-subnet-group"), config: configSchemas["db-subnet-group"] }),
@@ -253,6 +294,8 @@ export const RELATION_TYPES = [
   "nat-gateway-subnet",
   "ec2-subnet",
   "ec2-security-group",
+  "lambda-subnet",
+  "lambda-security-group",
   "alb-subnet",
   "alb-security-group",
   "alb-target-group",
@@ -368,13 +411,23 @@ export const costAssumptionsSchema = z.object({
   albPerGb: z.number().min(0),
   publicIpv4Hourly: z.number().min(0),
   dataTransferOutPerGb: z.number().min(0),
+  /** 아래는 나중에 추가한 단가라, 예전에 저장한 가정값에는 없을 수 있다 (없으면 기본값) */
+  lambdaPerMillionRequests: z.number().min(0).optional(),
+  lambdaPerGbSecond: z.number().min(0).optional(),
+  schedulerPerMillion: z.number().min(0).optional(),
+  secretPerMonth: z.number().min(0).optional(),
+  ssmAdvancedParameterPerMonth: z.number().min(0).optional(),
+  cloudfrontDataGb: z.number().min(0).max(1_000_000).optional(),
+  cloudfrontRequestsMillion: z.number().min(0).max(1_000_000).optional(),
+  cloudfrontPerGb: z.number().min(0).optional(),
+  cloudfrontPerMillionRequests: z.number().min(0).optional(),
 });
 export type CostAssumptions = z.infer<typeof costAssumptionsSchema>;
 
 export const PROJECT_SCHEMA_VERSION = 1;
 
 // ---------------------------------------------------------------------------
-// VPC 밖의 서비스 (IAM, S3, CloudWatch). 모두 가상이며 실제 AWS와 연결되지 않는다.
+// VPC 밖의 서비스 (IAM, S3, CloudWatch, EventBridge, Secrets Manager, Systems Manager, CloudFront). 모두 가상이며 실제 AWS와 연결되지 않는다.
 // ---------------------------------------------------------------------------
 
 const timestamp = z.string().min(1).max(40);
@@ -415,7 +468,7 @@ export const iamGroupSchema = z.object({
 });
 export type IamGroup = z.infer<typeof iamGroupSchema>;
 
-export const IAM_TRUSTED_ENTITIES = ["ec2.amazonaws.com", "lambda.amazonaws.com", "account"] as const;
+export const IAM_TRUSTED_ENTITIES = ["ec2.amazonaws.com", "lambda.amazonaws.com", "scheduler.amazonaws.com", "account"] as const;
 
 export const iamRoleSchema = z.object({
   id,
@@ -498,7 +551,7 @@ export const s3BucketSchema = z.object({
 });
 export type S3Bucket = z.infer<typeof s3BucketSchema>;
 
-export const METRIC_NAMESPACES = ["AWS/EC2", "AWS/ApplicationELB", "AWS/RDS", "AWS/NATGateway"] as const;
+export const METRIC_NAMESPACES = ["AWS/EC2", "AWS/ApplicationELB", "AWS/RDS", "AWS/NATGateway", "AWS/Lambda"] as const;
 export const METRIC_STATS = ["Average", "Sum", "Maximum", "Minimum"] as const;
 
 export const metricRefSchema = z.object({
@@ -558,10 +611,198 @@ export const loadTestSchema = z.object({
 });
 export type LoadTest = z.infer<typeof loadTestSchema>;
 
+// ---------------------------------------------------------------- EventBridge
+
+/** 일정 시간대. 일광 절약 시간이 없는 시간대만 지원한다 (다음 실행 시각을 정확히 계산하기 위해) */
+export const SCHEDULE_TIMEZONES = ["Asia/Seoul", "UTC", "Asia/Tokyo", "Asia/Singapore"] as const;
+export type ScheduleTimezone = (typeof SCHEDULE_TIMEZONES)[number];
+
+/** EventBridge Scheduler 일정: 정해진 때에 대상(Lambda)을 호출한다 */
+export const scheduleSchema = z.object({
+  id,
+  name: z.string().trim().min(1).max(64),
+  description: z.string().max(512).default(""),
+  /** rate(5 minutes), cron(0 9 * * ? *), at(2026-12-01T09:00:00) */
+  expression: z.string().trim().min(1).max(256),
+  timezone: z.enum(SCHEDULE_TIMEZONES).default("Asia/Seoul"),
+  /** 유연한 시간 창 (분). 0이면 끔 — 켜면 정해진 시각부터 창 안의 아무 때나 실행된다 */
+  flexibleWindowMinutes: z.number().int().min(0).max(1440).default(0),
+  state: z.enum(["ENABLED", "DISABLED"]).default("ENABLED"),
+  /** 대상 Lambda 함수 (리소스 ID) */
+  targetLambdaId: id,
+  /** 일정이 대상을 호출할 때 쓰는 실행 역할 (scheduler.amazonaws.com을 신뢰) */
+  roleId: z.string().max(64).nullable().default(null),
+  /** 대상에 넘길 입력 (JSON) */
+  input: z.string().max(8192).default("{}"),
+  /** 호출이 실패했을 때 다시 시도하는 횟수 */
+  retryAttempts: z.number().int().min(0).max(185).default(185),
+  createdAt: timestamp,
+});
+export type Schedule = z.infer<typeof scheduleSchema>;
+
+/** EventBridge 규칙 (기본 이벤트 버스): 이벤트 패턴과 일치하는 이벤트가 오면 대상(Lambda)을 호출한다 */
+export const eventRuleSchema = z.object({
+  id,
+  name: z.string().trim().min(1).max(64),
+  description: z.string().max(512).default(""),
+  state: z.enum(["ENABLED", "DISABLED"]).default("ENABLED"),
+  /** 이벤트 패턴 (JSON) */
+  eventPattern: z.string().max(4096),
+  /** 대상 Lambda 함수 (리소스 ID) */
+  targetLambdaIds: z.array(id).max(5).default([]),
+  createdAt: timestamp,
+});
+export type EventRule = z.infer<typeof eventRuleSchema>;
+
+// ---------------------------------------------------------------- Secrets Manager
+
+/** 보안 암호의 버전. 값은 저장하지 않는다 (화면에 보일 때 보안 암호 ID·버전 ID·키로 계산한 연습용 가상 값) */
+export const secretVersionSchema = z.object({
+  versionId: z.string().min(1).max(64),
+  createdAt: timestamp,
+  /** 이 버전에 붙은 스테이징 레이블 (AWSCURRENT: 지금 쓰는 값, AWSPREVIOUS: 바로 전 값) */
+  stages: z.array(z.enum(["AWSCURRENT", "AWSPREVIOUS"])).max(2).default([]),
+});
+export type SecretVersion = z.infer<typeof secretVersionSchema>;
+
+export const secretSchema = z.object({
+  id,
+  /** 보안 암호 이름 (예: prod/app/db). 만든 뒤에는 바꿀 수 없다 */
+  name: z.string().min(1).max(512),
+  /** ARN 끝에 AWS가 붙이는 임의의 6자 */
+  suffix: z.string().length(6),
+  description: z.string().max(2048).default(""),
+  /** rds: RDS 데이터베이스 자격 증명, other: 그 밖의 키/값 */
+  kind: z.enum(["rds", "other"]).default("other"),
+  /** RDS 자격 증명일 때 대상 DB (리소스 ID) */
+  rdsId: z.string().max(64).nullable().default(null),
+  /** RDS 자격 증명의 사용자 이름 (비밀이 아닌 값) */
+  username: z.string().max(64).default(""),
+  /** 비밀 값의 키 이름. 값은 저장하지 않는다 */
+  keys: z.array(z.string().min(1).max(64)).min(1).max(10),
+  /** 최신순 */
+  versions: z.array(secretVersionSchema).min(1).max(20),
+  rotation: z
+    .object({
+      enabled: z.boolean(),
+      /** 교체 주기 (일) */
+      days: z.number().int().min(1).max(365),
+      /** 교체 함수 (Lambda 리소스 ID) */
+      lambdaId: z.string().max(64).nullable(),
+    })
+    .default({ enabled: false, days: 30, lambdaId: null }),
+  lastRotatedAt: timestamp.nullable().default(null),
+  /** 삭제 예약. null이면 정상 (복구 기간이 지나기 전에는 복원할 수 있다) */
+  deletion: z.object({ scheduledAt: timestamp, recoveryDays: z.number().int().min(7).max(30) }).nullable().default(null),
+  createdAt: timestamp,
+  updatedAt: timestamp,
+});
+export type Secret = z.infer<typeof secretSchema>;
+
+// ---------------------------------------------------------------- Systems Manager (Parameter Store)
+
+export const SSM_PARAMETER_TYPES = ["String", "StringList", "SecureString"] as const;
+
+export const ssmParameterSchema = z.object({
+  id,
+  /** 파라미터 이름 (예: /app/prod/db-host). 만든 뒤에는 바꿀 수 없다 */
+  name: z.string().min(1).max(1011),
+  description: z.string().max(1024).default(""),
+  type: z.enum(SSM_PARAMETER_TYPES),
+  tier: z.enum(["Standard", "Advanced"]).default("Standard"),
+  /** String·StringList의 값. SecureString은 저장하지 않는다 (화면에는 이름·버전으로 계산한 가상 값) */
+  value: z.string().max(8192).nullable(),
+  version: z.number().int().min(1),
+  /** 이전 버전 (최신순). SecureString은 값 없이 버전과 시각만 남는다 */
+  history: z
+    .array(z.object({ version: z.number().int().min(1), value: z.string().max(8192).nullable(), modifiedAt: timestamp }))
+    .max(20)
+    .default([]),
+  createdAt: timestamp,
+  updatedAt: timestamp,
+});
+export type SsmParameter = z.infer<typeof ssmParameterSchema>;
+
+// ---------------------------------------------------------------- CloudFront
+
+export const CF_ORIGIN_KINDS = ["s3", "s3-website", "alb"] as const;
+export const CF_VIEWER_PROTOCOL_POLICIES = ["allow-all", "redirect-to-https", "https-only"] as const;
+export const CF_ALLOWED_METHODS = ["GET_HEAD", "GET_HEAD_OPTIONS", "ALL"] as const;
+export const CF_CACHE_POLICIES = ["CachingOptimized", "CachingDisabled"] as const;
+
+export const cfOriginSchema = z.object({
+  /** 원본 이름 (배포 안에서 고유) */
+  id: z.string().min(1).max(128),
+  /** s3: S3 버킷(REST 엔드포인트), s3-website: S3 정적 웹 사이트 엔드포인트, alb: Application Load Balancer */
+  kind: z.enum(CF_ORIGIN_KINDS),
+  /** S3 버킷 ID 또는 ALB 리소스 ID */
+  targetId: id,
+  /** S3(REST) 원본에 접근하는 방법: oac(원본 액세스 제어, 권장) 또는 public(버킷을 공개) */
+  originAccess: z.enum(["oac", "public"]).default("oac"),
+  /** 사용자 지정 원본(ALB)으로 보낼 프로토콜 */
+  protocolPolicy: z.enum(["http-only", "https-only", "match-viewer"]).default("http-only"),
+});
+export type CfOrigin = z.infer<typeof cfOriginSchema>;
+
+export const cfBehaviorSchema = z.object({
+  id,
+  /** 경로 패턴 (예: /api/*). 기본 동작은 "*" */
+  pathPattern: z.string().min(1).max(255),
+  originId: z.string().min(1).max(128),
+  viewerProtocolPolicy: z.enum(CF_VIEWER_PROTOCOL_POLICIES).default("redirect-to-https"),
+  allowedMethods: z.enum(CF_ALLOWED_METHODS).default("GET_HEAD"),
+  cachePolicy: z.enum(CF_CACHE_POLICIES).default("CachingOptimized"),
+});
+export type CfBehavior = z.infer<typeof cfBehaviorSchema>;
+
+/** 엣지 캐시에 남아 있는 응답 (요청 테스트로 채워지고, 무효화하거나 TTL이 지나면 사라진다) */
+export const cfCacheEntrySchema = z.object({
+  /** 캐시 키 (요청 경로) */
+  path: z.string().max(600),
+  status: z.number().int().min(100).max(599),
+  /** 원본이 준 버전 표시 (S3 객체의 ETag 등) */
+  etag: z.string().max(128).default(""),
+  /** 캐시된 본문의 앞부분 (옛 내용이 계속 보이는 것을 확인하기 위한 미리보기) */
+  preview: z.string().max(400).nullable().default(null),
+  cachedAt: timestamp,
+  ttlSeconds: z.number().int().min(0).max(31_536_000),
+});
+export type CfCacheEntry = z.infer<typeof cfCacheEntrySchema>;
+
+export const cfDistributionSchema = z.object({
+  /** 배포 ID (E로 시작하는 14자) */
+  id,
+  /** 가상 도메인 (dxxxxxxxxxxxxx.cloudfront.net). 실제로 접속되는 주소가 아니다 */
+  domainName: z.string().min(1).max(128),
+  comment: z.string().max(128).default(""),
+  enabled: z.boolean().default(true),
+  /** 설정을 바꾸면 InProgress(배포 중)를 거쳐 Deployed가 된다 */
+  state: z.enum(["InProgress", "Deployed"]).default("InProgress"),
+  origins: z.array(cfOriginSchema).min(1).max(5),
+  /** 위에서부터 평가하는 동작. 마지막은 항상 기본 동작(경로 패턴 "*") */
+  behaviors: z.array(cfBehaviorSchema).min(1).max(10),
+  /** 기본 루트 객체 (예: index.html). 루트(/) 요청에만 적용된다 */
+  defaultRootObject: z.string().max(255).default(""),
+  priceClass: z.enum(["PriceClass_All", "PriceClass_200", "PriceClass_100"]).default("PriceClass_All"),
+  cache: z.array(cfCacheEntrySchema).max(60).default([]),
+  /** 최신순 */
+  invalidations: z
+    .array(z.object({ id: z.string().min(1).max(32), paths: z.array(z.string().min(1).max(255)).min(1).max(20), createdAt: timestamp }))
+    .max(20)
+    .default([]),
+  createdAt: timestamp,
+  updatedAt: timestamp,
+});
+export type CfDistribution = z.infer<typeof cfDistributionSchema>;
+
 export const EMPTY_SERVICES = {
   iam: { users: [], groups: [], roles: [], policies: [] },
   s3: { buckets: [] },
   cloudwatch: { alarms: [], dashboards: [], loads: [] },
+  eventbridge: { rules: [], schedules: [] },
+  secretsmanager: { secrets: [] },
+  ssm: { parameters: [] },
+  cloudfront: { distributions: [] },
 };
 
 export const servicesSchema = z
@@ -583,6 +824,16 @@ export const servicesSchema = z
         loads: z.array(loadTestSchema).max(50).default([]),
       })
       .default({ alarms: [], dashboards: [], loads: [] }),
+    eventbridge: z
+      .object({
+        rules: z.array(eventRuleSchema).max(100).default([]),
+        schedules: z.array(scheduleSchema).max(100).default([]),
+      })
+      .default({ rules: [], schedules: [] }),
+    // 아래 서비스는 나중에 추가되어, 예전에 저장한 샌드박스에는 없을 수 있다 (없으면 빈 값)
+    secretsmanager: z.object({ secrets: z.array(secretSchema).max(100).default([]) }).default({ secrets: [] }),
+    ssm: z.object({ parameters: z.array(ssmParameterSchema).max(200).default([]) }).default({ parameters: [] }),
+    cloudfront: z.object({ distributions: z.array(cfDistributionSchema).max(20).default([]) }).default({ distributions: [] }),
   })
   .default(EMPTY_SERVICES);
 export type Services = z.infer<typeof servicesSchema>;
@@ -849,6 +1100,24 @@ export const RELATION_SPECS: Record<RelationType, RelationSpec> = {
     category: "security",
     maxPerSource: 5,
   },
+  "lambda-subnet": {
+    type: "lambda-subnet",
+    source: "lambda",
+    target: "subnet",
+    label: "VPC 연결",
+    description: "VPC에 연결한 Lambda는 고른 서브넷에 네트워크 인터페이스를 만들어 VPC 안의 리소스(RDS 등)에 접근합니다. 퍼블릭 IP는 받지 않습니다.",
+    category: "placement",
+    maxPerSource: 16,
+  },
+  "lambda-security-group": {
+    type: "lambda-security-group",
+    source: "lambda",
+    target: "security-group",
+    label: "보안 그룹",
+    description: "VPC에 연결한 Lambda에는 같은 VPC의 보안 그룹을 최대 5개까지 연결합니다.",
+    category: "security",
+    maxPerSource: 5,
+  },
 };
 
 /** 두 리소스 타입 사이의 관계를 (방향과 무관하게) 찾는다. */
@@ -952,6 +1221,14 @@ export const RESOURCE_TYPE_INFO: Record<ResourceType, ResourceTypeInfo> = {
     idPrefix: "i",
     category: "compute",
     description: "가상 서버 인스턴스 (시뮬레이터에서는 실제 OS가 실행되지 않습니다).",
+  },
+  lambda: {
+    type: "lambda",
+    label: "Lambda Function",
+    shortLabel: "Lambda",
+    idPrefix: "fn",
+    category: "compute",
+    description: "서버를 관리하지 않고 요청·일정·이벤트가 올 때만 코드를 실행하는 함수 (시뮬레이터에서는 코드를 실행하지 않습니다).",
   },
   alb: {
     type: "alb",

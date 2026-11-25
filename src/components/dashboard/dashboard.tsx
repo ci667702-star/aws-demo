@@ -14,7 +14,7 @@ import { ClientGate } from "@/components/app/client-gate";
 import { ImportDialog } from "@/components/app/import-dialog";
 import { Alert } from "@/components/console/ui/alert";
 import { Button, ButtonDropdown } from "@/components/console/ui/button";
-import { FormField, TextInput, Tiles } from "@/components/console/ui/form";
+import { BaseFormField as FormField, TextInput, Tiles } from "@/components/console/ui/form-base";
 import { Container, ContainerHeader, EmptyState, ExpandableSection, PageHeader, SpaceBetween } from "@/components/console/ui/layout";
 import { DeleteModal, Modal } from "@/components/console/ui/overlay";
 import { ResourceTable } from "@/components/console/ui/table";

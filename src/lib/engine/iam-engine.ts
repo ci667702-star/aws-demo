@@ -43,6 +43,15 @@ export const KNOWN_SERVICES: Record<string, string> = {
   elasticloadbalancing: "Elastic Load Balancing",
   sts: "STS",
   logs: "CloudWatch Logs",
+  lambda: "AWS Lambda",
+  events: "Amazon EventBridge",
+  scheduler: "EventBridge Scheduler",
+  secretsmanager: "AWS Secrets Manager",
+  ssm: "AWS Systems Manager",
+  ssmmessages: "Systems Manager (세션 채널)",
+  ec2messages: "Systems Manager (에이전트 메시지)",
+  cloudfront: "Amazon CloudFront",
+  kms: "AWS KMS",
 };
 
 /** 정책 시뮬레이터와 편집기 도움말에 쓰는 대표 작업 목록 */
@@ -71,6 +80,24 @@ export const SERVICE_ACTIONS: { service: string; action: string; description: st
   { service: "cloudwatch", action: "GetMetricData", description: "지표 조회", resource: "any" },
   { service: "cloudwatch", action: "PutMetricAlarm", description: "경보 만들기/수정", resource: "any" },
   { service: "elasticloadbalancing", action: "DescribeLoadBalancers", description: "로드 밸런서 목록 보기", resource: "any" },
+  { service: "lambda", action: "CreateFunction", description: "Lambda 함수 만들기", resource: "any" },
+  { service: "lambda", action: "InvokeFunction", description: "Lambda 함수 호출", resource: "any" },
+  { service: "lambda", action: "UpdateFunctionConfiguration", description: "Lambda 함수 설정 변경", resource: "any" },
+  { service: "scheduler", action: "CreateSchedule", description: "EventBridge 일정 만들기", resource: "any" },
+  { service: "events", action: "PutRule", description: "EventBridge 규칙 만들기·수정", resource: "any" },
+  { service: "secretsmanager", action: "GetSecretValue", description: "보안 암호 값 읽기", resource: "any" },
+  { service: "secretsmanager", action: "CreateSecret", description: "보안 암호 만들기", resource: "any" },
+  { service: "secretsmanager", action: "PutSecretValue", description: "보안 암호의 새 버전 저장", resource: "any" },
+  { service: "secretsmanager", action: "RotateSecret", description: "보안 암호 교체", resource: "any" },
+  { service: "secretsmanager", action: "DeleteSecret", description: "보안 암호 삭제 예약", resource: "any" },
+  { service: "ssm", action: "GetParameter", description: "Parameter Store 파라미터 읽기", resource: "any" },
+  { service: "ssm", action: "GetParametersByPath", description: "경로 아래의 파라미터 읽기", resource: "any" },
+  { service: "ssm", action: "PutParameter", description: "파라미터 만들기·수정", resource: "any" },
+  { service: "ssm", action: "DeleteParameter", description: "파라미터 삭제", resource: "any" },
+  { service: "ssm", action: "StartSession", description: "Session Manager 세션 시작", resource: "any" },
+  { service: "cloudfront", action: "CreateDistribution", description: "CloudFront 배포 만들기", resource: "any" },
+  { service: "cloudfront", action: "UpdateDistribution", description: "CloudFront 배포 설정 변경", resource: "any" },
+  { service: "cloudfront", action: "CreateInvalidation", description: "CloudFront 캐시 무효화", resource: "any" },
 ];
 
 export interface ManagedPolicy {
@@ -88,8 +115,12 @@ export const AWS_MANAGED_POLICIES: ManagedPolicy[] = [
   {
     id: "aws:ReadOnlyAccess",
     name: "ReadOnlyAccess",
-    description: "모든 서비스의 조회(Get/List/Describe) 권한",
-    document: doc([{ Effect: "Allow", Action: ["*:Get*", "*:List*", "*:Describe*"], Resource: "*" }]),
+    description: "모든 서비스의 조회(Get/List/Describe) 권한. 실제 정책처럼 보안 암호의 값(secretsmanager:GetSecretValue)은 읽지 못합니다",
+    document: doc([
+      { Effect: "Allow", Action: ["*:List*", "*:Describe*"], Resource: "*" },
+      // 실제 ReadOnlyAccess도 Secrets Manager는 메타데이터 조회만 허용하고 값을 읽는 GetSecretValue는 빠져 있다
+      { Effect: "Allow", Action: [...Object.keys(KNOWN_SERVICES).filter((s) => s !== "secretsmanager").map((s) => `${s}:Get*`), "secretsmanager:GetResourcePolicy"], Resource: "*" },
+    ]),
   },
   { id: "aws:AmazonS3FullAccess", name: "AmazonS3FullAccess", description: "S3 전체 권한", document: doc([{ Effect: "Allow", Action: "s3:*", Resource: "*" }]) },
   { id: "aws:AmazonS3ReadOnlyAccess", name: "AmazonS3ReadOnlyAccess", description: "S3 읽기 전용", document: doc([{ Effect: "Allow", Action: ["s3:Get*", "s3:List*"], Resource: "*" }]) },
@@ -121,6 +152,99 @@ export const AWS_MANAGED_POLICIES: ManagedPolicy[] = [
   { id: "aws:CloudWatchFullAccess", name: "CloudWatchFullAccess", description: "CloudWatch 전체 권한", document: doc([{ Effect: "Allow", Action: ["cloudwatch:*", "logs:*"], Resource: "*" }]) },
   { id: "aws:CloudWatchReadOnlyAccess", name: "CloudWatchReadOnlyAccess", description: "CloudWatch 조회 권한", document: doc([{ Effect: "Allow", Action: ["cloudwatch:Get*", "cloudwatch:List*", "cloudwatch:Describe*"], Resource: "*" }]) },
   { id: "aws:IAMReadOnlyAccess", name: "IAMReadOnlyAccess", description: "IAM 조회 권한", document: doc([{ Effect: "Allow", Action: ["iam:Get*", "iam:List*"], Resource: "*" }]) },
+  {
+    id: "aws:AWSLambdaBasicExecutionRole",
+    name: "AWSLambdaBasicExecutionRole",
+    description: "Lambda 실행 역할 기본 권한: CloudWatch Logs에 로그 쓰기",
+    document: doc([{ Effect: "Allow", Action: ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"], Resource: "*" }]),
+  },
+  {
+    id: "aws:AWSLambdaVPCAccessExecutionRole",
+    name: "AWSLambdaVPCAccessExecutionRole",
+    description: "VPC에 연결한 Lambda 실행 역할: 로그 쓰기 + 네트워크 인터페이스 관리",
+    document: doc([
+      {
+        Effect: "Allow",
+        Action: [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents",
+          "ec2:CreateNetworkInterface",
+          "ec2:DescribeNetworkInterfaces",
+          "ec2:DescribeSubnets",
+          "ec2:DeleteNetworkInterface",
+          "ec2:AssignPrivateIpAddresses",
+          "ec2:UnassignPrivateIpAddresses",
+        ],
+        Resource: "*",
+      },
+    ]),
+  },
+  { id: "aws:AWSLambdaRole", name: "AWSLambdaRole", description: "Lambda 함수 호출 권한 (lambda:InvokeFunction)", document: doc([{ Effect: "Allow", Action: "lambda:InvokeFunction", Resource: "*" }]) },
+  { id: "aws:AWSLambda_FullAccess", name: "AWSLambda_FullAccess", description: "Lambda 전체 권한", document: doc([{ Effect: "Allow", Action: ["lambda:*", "iam:PassRole"], Resource: "*" }]) },
+  { id: "aws:AmazonEventBridgeFullAccess", name: "AmazonEventBridgeFullAccess", description: "EventBridge 규칙 전체 권한", document: doc([{ Effect: "Allow", Action: "events:*", Resource: "*" }]) },
+  {
+    id: "aws:AmazonEventBridgeSchedulerFullAccess",
+    name: "AmazonEventBridgeSchedulerFullAccess",
+    description: "EventBridge Scheduler 전체 권한",
+    document: doc([{ Effect: "Allow", Action: ["scheduler:*", "iam:PassRole"], Resource: "*" }]),
+  },
+  {
+    id: "aws:SecretsManagerReadWrite",
+    name: "SecretsManagerReadWrite",
+    description: "Secrets Manager 전체 권한 (보안 암호 만들기·읽기·교체·삭제)",
+    document: doc([{ Effect: "Allow", Action: ["secretsmanager:*", "kms:Decrypt", "kms:GenerateDataKey"], Resource: "*" }]),
+  },
+  {
+    id: "aws:AmazonSSMManagedInstanceCore",
+    name: "AmazonSSMManagedInstanceCore",
+    description: "EC2 인스턴스가 Systems Manager의 관리형 노드가 되는 데 필요한 권한 (인스턴스 프로파일 역할에 연결)",
+    document: doc([
+      {
+        Effect: "Allow",
+        Action: [
+          "ssm:DescribeAssociation",
+          "ssm:GetDocument",
+          "ssm:GetParameter",
+          "ssm:GetParameters",
+          "ssm:ListAssociations",
+          "ssm:UpdateInstanceInformation",
+          "ssmmessages:CreateControlChannel",
+          "ssmmessages:CreateDataChannel",
+          "ssmmessages:OpenControlChannel",
+          "ssmmessages:OpenDataChannel",
+          "ec2messages:AcknowledgeMessage",
+          "ec2messages:GetMessages",
+          "ec2messages:SendReply",
+        ],
+        Resource: "*",
+      },
+    ]),
+  },
+  {
+    id: "aws:AmazonSSMReadOnlyAccess",
+    name: "AmazonSSMReadOnlyAccess",
+    description: "Systems Manager 조회 권한 (파라미터 읽기 포함)",
+    document: doc([{ Effect: "Allow", Action: ["ssm:Describe*", "ssm:Get*", "ssm:List*"], Resource: "*" }]),
+  },
+  {
+    id: "aws:AmazonSSMFullAccess",
+    name: "AmazonSSMFullAccess",
+    description: "Systems Manager 전체 권한 (파라미터 관리, 세션 시작 포함)",
+    document: doc([{ Effect: "Allow", Action: ["ssm:*", "ssmmessages:*", "ec2messages:*"], Resource: "*" }]),
+  },
+  {
+    id: "aws:CloudFrontFullAccess",
+    name: "CloudFrontFullAccess",
+    description: "CloudFront 전체 권한 (배포 만들기·수정·무효화)",
+    document: doc([{ Effect: "Allow", Action: ["cloudfront:*", "s3:ListAllMyBuckets"], Resource: "*" }]),
+  },
+  {
+    id: "aws:CloudFrontReadOnlyAccess",
+    name: "CloudFrontReadOnlyAccess",
+    description: "CloudFront 조회 권한",
+    document: doc([{ Effect: "Allow", Action: ["cloudfront:Get*", "cloudfront:List*"], Resource: "*" }]),
+  },
 ];
 
 export function managedPolicy(id: string): ManagedPolicy | undefined {
@@ -223,7 +347,11 @@ export function checkPolicyDocument(text: string, kind: PolicyKind): PolicyCheck
       if (s.Principal === undefined) errors.push(`문장 ${i + 1}: ${kind === "trust" ? "신뢰 정책" : "리소스 기반 정책"}에는 Principal이 필요합니다.`);
       principal = parsePrincipal(s.Principal, errors, i);
     }
-    if (s.Condition !== undefined) warnings.push(`문장 ${i + 1}: Condition은 이 시뮬레이터에서 평가하지 않고 무시합니다.`);
+    if (s.Condition !== undefined) {
+      // CloudFront OAC용 문(AWS:SourceArn)은 CloudFront 요청을 계산할 때 실제로 확인한다 (cloudfront-engine)
+      const oac = !!principal?.service.includes("cloudfront.amazonaws.com") && /aws:sourcearn/i.test(JSON.stringify(s.Condition));
+      warnings.push(oac ? `문장 ${i + 1}: AWS:SourceArn 조건은 CloudFront(OAC) 요청을 계산할 때만 확인하고, 그 밖의 평가에서는 무시합니다.` : `문장 ${i + 1}: Condition은 이 시뮬레이터에서 평가하지 않고 무시합니다.`);
+    }
     statements.push({
       sid: typeof s.Sid === "string" ? s.Sid : null,
       effect: s.Effect === "Deny" ? "Deny" : "Allow",

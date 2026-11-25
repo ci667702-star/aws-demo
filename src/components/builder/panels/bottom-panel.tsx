@@ -2,15 +2,19 @@
 
 import { Calculator, ChevronDown, ChevronUp, GraduationCap, History, Maximize2, Minimize2, ShieldAlert, Zap } from "lucide-react";
 import { cn } from "cn";
+import { Suspense } from "react";
+import { lazyGroup } from "@/components/app/lazy";
 import { Button } from "@/components/ui/button";
 import { useEditorStore, type BottomTab } from "@/lib/store/editor-store";
 import { useProjectStore } from "@/lib/store/project-store";
 import { useAnalysis } from "@/components/console/analysis-context";
-import { ActivityLog } from "./activity-log";
-import { CostPanel } from "./cost-panel";
-import { LabPanel } from "./lab-panel";
-import { SimulationConsole } from "./simulation-console";
 import { ValidationCenter } from "./validation-center";
+
+// 처음 보이는 검증 센터만 바로 싣고, 나머지 탭은 열 때 불러온다 (한가할 때 미리 받아 둔다)
+const { ActivityLog } = lazyGroup(() => import("./activity-log"), ["ActivityLog"]);
+const { CostPanel } = lazyGroup(() => import("./cost-panel"), ["CostPanel"]);
+const { LabPanel } = lazyGroup(() => import("./lab-panel"), ["LabPanel"]);
+const { SimulationConsole } = lazyGroup(() => import("./simulation-console"), ["SimulationConsole"]);
 
 export function BottomPanel({
   projectId,
@@ -90,10 +94,12 @@ export function BottomPanel({
       {open && (
         <div className="min-h-0 flex-1" role="tabpanel">
           {tab === "validation" && <ValidationCenter onRevalidate={onRevalidate} />}
-          {tab === "simulation" && <SimulationConsole projectId={projectId} />}
-          {tab === "lab" && <LabPanel projectId={projectId} />}
-          {tab === "cost" && <CostPanel projectId={projectId} />}
-          {tab === "activity" && <ActivityLog projectId={projectId} />}
+          <Suspense fallback={<p className="pg-delayed-fade p-4 text-sm text-muted-foreground" role="status">불러오는 중…</p>}>
+            {tab === "simulation" && <SimulationConsole projectId={projectId} />}
+            {tab === "lab" && <LabPanel projectId={projectId} />}
+            {tab === "cost" && <CostPanel projectId={projectId} />}
+            {tab === "activity" && <ActivityLog projectId={projectId} />}
+          </Suspense>
         </div>
       )}
     </section>

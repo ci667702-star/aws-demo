@@ -6,7 +6,7 @@ import { useState } from "react";
 import { Dialog as DialogPrimitive } from "radix-ui";
 import { ErrorAlert } from "./alert";
 import { Button } from "./button";
-import { FormField, TextInput } from "./form";
+import { BaseFormField as FormField, TextInput } from "./form-base";
 
 export function Modal({
   open,

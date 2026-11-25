@@ -352,7 +352,7 @@ export function SubnetDetailPage({ id }: { id: string }) {
             content: (
               <Container header={<ContainerHeader title={nacl ? `네트워크 ACL: ${nacl.id}` : "네트워크 ACL"} actions={<Button onClick={() => go("edit-network-acl")}>네트워크 ACL 연결 편집</Button>} />}>
                 {nacl ? (
-                  <div className="grid gap-6 xl:grid-cols-2">
+                  <div className="grid gap-6 @4xl/main:grid-cols-2">
                     <NaclRulesTable title="인바운드 규칙" rules={nacl.config.inboundRules} direction="inbound" />
                     <NaclRulesTable title="아웃바운드 규칙" rules={nacl.config.outboundRules} direction="outbound" />
                   </div>
@@ -493,7 +493,7 @@ export function EditSubnetNaclPage({ id }: { id: string }) {
             <SelectInput value={naclId} onChange={setNaclId} placeholder="네트워크 ACL 선택" options={nacls.map((n) => ({ value: n.id, label: `${n.id}${n.name ? ` (${n.name})` : ""}${n.config.isDefault ? " · 기본" : ""}` }))} />
           </FormField>
           {chosen && (
-            <div className="grid gap-6 xl:grid-cols-2">
+            <div className="grid gap-6 @4xl/main:grid-cols-2">
               <NaclRulesTable title="인바운드 규칙" rules={chosen.config.inboundRules} direction="inbound" />
               <NaclRulesTable title="아웃바운드 규칙" rules={chosen.config.outboundRules} direction="outbound" />
             </div>

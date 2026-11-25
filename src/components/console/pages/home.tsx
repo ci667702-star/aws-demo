@@ -45,12 +45,12 @@ export function ConsoleHomePage() {
         description={`샌드박스 "${project.name}" — 여기서 만드는 모든 리소스는 이 브라우저 안에서만 존재하는 가상 리소스입니다.`}
       />
 
-      <section aria-label="무엇을 해 볼까요?" className="grid gap-4 md:grid-cols-3">
+      <section aria-label="무엇을 해 볼까요?" className="grid gap-4 @2xl/main:grid-cols-3">
         <div className="flex flex-col gap-3 rounded-2xl border-2 border-aws-link/40 bg-aws-info-bg p-5" data-tour="home-tutorial">
           <GraduationCap className="size-7 text-aws-link" aria-hidden />
           <div>
             <h2 className="text-lg font-bold">따라하기 튜토리얼</h2>
-            <p className="mt-1 text-[15px] text-aws-text-2">화면 위에 뜨는 안내 팝업을 따라 첫 웹 서버를 만들어 봅니다. 처음이라면 여기서 시작하세요.</p>
+            <p className="mt-1 text-[15px] text-aws-text-2">화면 오른쪽의 안내를 따라 첫 웹 서버를 만들어 봅니다. 처음이라면 여기서 시작하세요.</p>
           </div>
           <div className="mt-auto flex flex-wrap items-center gap-2">
             <StartTutorialButton tutorialId="first-web-server" variant="primary" />
@@ -81,9 +81,9 @@ export function ConsoleHomePage() {
         </div>
       </section>
 
-      <div className="grid gap-5 lg:grid-cols-3">
+      <div className="grid gap-5 @3xl/main:grid-cols-3">
         <Container
-          className="lg:col-span-2"
+          className="@3xl/main:col-span-2"
           header={<ContainerHeader title={`직접 만들어 보기 (${doneCount}/${steps.length})`} description="앱이 미리 만들어 두는 리소스는 없습니다. 아래 순서대로 하나씩 만들면 인터넷에서 접속되는 웹 서버가 완성됩니다." />}
         >
           <ol className="space-y-1">
@@ -132,7 +132,7 @@ export function ConsoleHomePage() {
       </div>
 
       <Container header={<ContainerHeader title="서비스" description="왼쪽 메뉴에서도 모든 서비스를 볼 수 있습니다." />}>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-4 @xl/main:grid-cols-2 @3xl/main:grid-cols-4">
           {NAV_GROUPS.map((g) => {
             const total = g.items.reduce((sum, i) => sum + (i.count?.(topo, project) ?? 0), 0);
             return (

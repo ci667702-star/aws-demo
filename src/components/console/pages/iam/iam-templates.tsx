@@ -154,7 +154,7 @@ export function RoleTemplatesPage() {
           <Checkbox checked={createUsers} onChange={setCreateUsers} description="역할마다 콘솔 액세스가 켜진 예시 사용자를 만들어 바로 로그인해 볼 수 있게 합니다 (암호 없음, 가상).">
             예시 사용자도 만들기
           </Checkbox>
-          <ul className="grid gap-4 lg:grid-cols-2">
+          <ul className="grid gap-4 @3xl/main:grid-cols-2">
             {ROLE_TEMPLATES.map((t) => {
               const checked = selected.includes(t.id);
               const doc = templatePolicyDocument(t);
@@ -164,7 +164,7 @@ export function RoleTemplatesPage() {
                     <span className="font-bold">{t.title}</span> <span className="font-mono text-[13px] text-aws-text-2">{t.groupName}</span>
                   </Checkbox>
                   <p className="text-[14px] text-aws-text">{t.summary}</p>
-                  <div className="grid gap-2 sm:grid-cols-2">
+                  <div className="grid gap-2 @xl/main:grid-cols-2">
                     <div>
                       <p className="text-[13px] font-bold text-aws-success">할 수 있는 일</p>
                       <ul className="list-disc space-y-0.5 pl-5 text-[13px]">

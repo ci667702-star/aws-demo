@@ -46,6 +46,7 @@ export function SideNav({ path, onNavigate, onClose }: { path: string; onNavigat
               <button
                 type="button"
                 aria-expanded={expanded}
+                data-nav-group={group.id}
                 onClick={() => setOpen({ ...open, [group.id]: !expanded })}
                 className={cn(
                   "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[15px] font-bold hover:bg-aws-surface-2",

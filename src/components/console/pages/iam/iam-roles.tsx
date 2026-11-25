@@ -4,7 +4,7 @@ import { useState } from "react";
 import { roleArn, trustPolicyDocument } from "@/lib/engine/iam-engine";
 import type { IamRole } from "@/lib/engine/resource-models";
 import { actingIdentity } from "@/lib/engine/iam-session";
-import { createRole, deleteRole, instancesUsingRole, setRolePolicies, switchToRole } from "@/lib/project/iam-actions";
+import { createRole, deleteRole, instancesUsingRole, roleUsageSummary, setRolePolicies, switchToRole } from "@/lib/project/iam-actions";
 import { formatDateTime } from "@/lib/ui/format";
 import { useProject, useRunAction } from "../../console-context";
 import { withHint } from "../../error-codes";
@@ -26,6 +26,7 @@ import { PolicyDocumentView, PolicyName, PolicyPicker } from "./iam-shared";
 export const TRUSTED_ENTITY_LABEL: Record<IamRole["trustedEntity"], string> = {
   "ec2.amazonaws.com": "AWS 서비스: EC2",
   "lambda.amazonaws.com": "AWS 서비스: Lambda",
+  "scheduler.amazonaws.com": "AWS 서비스: EventBridge Scheduler",
   account: "AWS 계정: 이 계정",
 };
 
@@ -70,7 +71,7 @@ export function RoleListPage() {
           { id: "name", header: "역할 이름", cell: (r) => <a className="font-bold text-aws-link hover:underline" href={href(`/iam/roles/${r.id}`)}>{r.name}</a>, sortValue: (r) => r.name },
           { id: "trusted", header: "신뢰할 수 있는 엔터티", cell: (r) => TRUSTED_ENTITY_LABEL[r.trustedEntity] },
           { id: "policies", header: "권한 정책", cell: (r) => `${r.policyIds.length}개` },
-          { id: "instances", header: "사용 중인 인스턴스", cell: (r) => `${instancesUsingRole(project, r.id).length}대` },
+          { id: "instances", header: "사용 중", cell: (r) => roleUsageSummary(project, r.id) },
           { id: "created", header: "생성일", cell: (r) => formatDateTime(r.createdAt), sortValue: (r) => r.createdAt, optional: true },
         ]}
       />
@@ -96,7 +97,8 @@ export function RoleListPage() {
 
 const ENTITY_TILES: { value: IamRole["trustedEntity"]; label: string; description: string }[] = [
   { value: "ec2.amazonaws.com", label: "AWS 서비스 - EC2", description: "EC2 인스턴스가 이 역할의 권한으로 다른 서비스를 호출합니다. 가장 흔한 사용 사례입니다." },
-  { value: "lambda.amazonaws.com", label: "AWS 서비스 - Lambda", description: "Lambda 함수용 역할입니다. (이 시뮬레이터에서 Lambda 실행은 지원하지 않습니다)" },
+  { value: "lambda.amazonaws.com", label: "AWS 서비스 - Lambda", description: "Lambda 함수의 실행 역할입니다. 함수 코드가 이 역할의 권한으로 다른 서비스를 호출합니다 (가상 실행)." },
+  { value: "scheduler.amazonaws.com", label: "AWS 서비스 - EventBridge Scheduler", description: "일정이 대상(Lambda 등)을 호출할 때 쓰는 역할입니다. lambda:InvokeFunction 권한이 필요합니다." },
   { value: "account", label: "AWS 계정 - 이 계정", description: "같은 계정의 사용자가 역할을 넘겨받아(AssumeRole) 잠시 다른 권한으로 작업합니다." },
 ];
 
@@ -236,7 +238,7 @@ export function RoleDetailPage({ id }: { id: string }) {
               value: role.trustedEntity === "ec2.amazonaws.com" ? <CopyText text={roleArn(role.name).replace(":role/", ":instance-profile/")} /> : "– (EC2용 역할만 생성됨)",
             },
             { label: "최대 세션 지속 시간", value: "1시간 (가상)" },
-            { label: "사용 중인 인스턴스", value: `${instances.length}대` },
+            { label: "사용 중", value: roleUsageSummary(project, role.id) },
           ]}
         />
       </Container>

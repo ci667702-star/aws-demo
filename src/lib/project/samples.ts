@@ -4,7 +4,11 @@
 import { natInstanceScript } from "@/lib/engine/nat-instance";
 import type { Project } from "@/lib/engine/resource-models";
 import { ProjectBuilder } from "./builder";
+import type { ActionResult } from "./console-actions";
+import { createRule, createSchedule } from "./eventbridge-actions";
 import { NACL, SG } from "./factory";
+import { createFunction } from "./lambda-actions";
+import { applyAutoLayout } from "./layout";
 
 export interface SampleDefinition {
   id: string;
@@ -128,6 +132,71 @@ export function createNatInstanceSample(name = "샘플: 프라이빗 서브넷 +
   return b.build();
 }
 
+/**
+ * 서버리스 일정 작업: VPC 안의 RDS를 조회하는 Lambda(평일 09:00), 외부 상태 확인 Lambda(5분마다), EC2 중지 알림 규칙.
+ * 함수·일정·규칙은 콘솔과 같은 작업 함수로 만들어 실행 역할과 호출 권한도 콘솔과 똑같이 생긴다.
+ */
+export function createServerlessSample(name = "샘플: Lambda + EventBridge 일정"): Project {
+  const b = new ProjectBuilder(name, {
+    awsDefaults: true,
+    description:
+      "EventBridge Scheduler 일정이 Lambda 함수를 호출합니다. 출결 집계 함수는 VPC의 프라이빗 서브넷에서 RDS를 조회하고, 상태 확인 함수는 VPC 밖에서 외부 API를 호출합니다. 일정은 하루 전에 만든 것으로 가정해 모니터링 탭에 지난 호출 기록이 보입니다.",
+  });
+  const vpc = b.vpc("app-vpc", "10.40.0.0/16");
+  const pubA = b.subnet("public-a", vpc, "10.40.1.0/24", "ap-northeast-2a");
+  const privA = b.subnet("private-a", vpc, "10.40.11.0/24", "ap-northeast-2a");
+  const privC = b.subnet("private-c", vpc, "10.40.12.0/24", "ap-northeast-2c");
+  const igw = b.igw("app-igw", vpc);
+  const nat = b.nat("nat-a", pubA);
+  b.routeTable("public-rt", vpc, { subnets: [pubA], routes: [{ destination: "0.0.0.0/0", igw }] });
+  b.routeTable("private-rt", vpc, { subnets: [privA, privC], routes: [{ destination: "0.0.0.0/0", nat }] });
+  const lambdaSg = b.securityGroup("lambda-sg", vpc, { description: "Lambda 함수 (인바운드 없음)" });
+  const dbSg = b.securityGroup("db-sg", vpc, { description: "MySQL from Lambda", inbound: [SG.tcp(3306, { sg: lambdaSg }, "MySQL from lambda-sg")] });
+  const group = b.dbSubnetGroup("db-subnets", [privA, privC], "프라이빗 DB 서브넷");
+  const db = b.rds("school-db", { subnetGroup: group, sgs: [dbSg] });
+
+  let p = b.build({ layout: false });
+  const step = (r: ActionResult): string => {
+    if (!r.ok) throw new Error(`샘플을 만들 수 없습니다: ${r.error}`);
+    p = r.project;
+    return r.createdId ?? "";
+  };
+  const report = step(
+    createFunction(p, {
+      name: "attendance-report",
+      runtime: "python3.13",
+      architecture: "arm64",
+      memoryMb: 256,
+      timeoutSeconds: 30,
+      roleId: null,
+      createRole: true,
+      codeTemplate: "rds-query",
+      templateTarget: db,
+      subnetIds: [privA, privC],
+      securityGroupIds: [lambdaSg],
+    }),
+  );
+  const health = step(createFunction(p, { name: "site-health-check", runtime: "nodejs22.x", architecture: "x86_64", roleId: null, createRole: true, codeTemplate: "http-get", templateTarget: "https://school.example.com/health" }));
+  const notify = step(createFunction(p, { name: "ec2-stopped-notify", runtime: "nodejs22.x", architecture: "x86_64", roleId: null, createRole: true, codeTemplate: "hello" }));
+  const schedule = { timezone: "Asia/Seoul" as const, flexibleWindowMinutes: 0, state: "ENABLED" as const, roleId: null, createRole: true, retryAttempts: 185 };
+  step(createSchedule(p, { ...schedule, name: "weekday-attendance-0900", description: "평일 오전 9시 출결 집계", expression: "cron(0 9 ? * MON-FRI *)", targetLambdaId: report, input: JSON.stringify({ report: "attendance" }) }));
+  step(createSchedule(p, { ...schedule, name: "health-every-5-minutes", description: "5분마다 학교 홈페이지 상태 확인", expression: "rate(5 minutes)", targetLambdaId: health, input: "{}" }));
+  step(
+    createRule(p, {
+      name: "ec2-stopped",
+      description: "EC2 인스턴스가 중지되면 알림 함수 호출",
+      eventPattern: JSON.stringify({ source: ["aws.ec2"], "detail-type": ["EC2 Instance State-change Notification"], detail: { state: ["stopped"] } }, null, 2),
+      state: "ENABLED",
+      targetLambdaIds: [notify],
+      addPermissions: true,
+    }),
+  );
+  // 일정은 하루 전에 만든 것으로 가정한다 (지표와 '최근 일정 호출'에 기록이 보이도록)
+  const yesterday = new Date(Date.now() - 86_400_000).toISOString();
+  p = { ...p, services: { ...p.services, eventbridge: { ...p.services.eventbridge, schedules: p.services.eventbridge.schedules.map((s) => ({ ...s, createdAt: yesterday })) } } };
+  return applyAutoLayout(p);
+}
+
 export const SAMPLES: SampleDefinition[] = [
   {
     id: "three-tier",
@@ -152,5 +221,11 @@ export const SAMPLES: SampleDefinition[] = [
     title: "프라이빗 서브넷 + NAT 인스턴스 (비용 절감)",
     description: "NAT 게이트웨이 대신 EC2 한 대가 주소를 변환합니다. 소스/대상 확인과 NAT 설정 스크립트를 확인합니다.",
     create: () => createNatInstanceSample(),
+  },
+  {
+    id: "serverless-schedule",
+    title: "Lambda + EventBridge 일정 (서버리스)",
+    description: "일정이 Lambda를 호출합니다. VPC 안 RDS 조회, 5분마다 상태 확인, EC2 중지 알림 규칙을 확인합니다.",
+    create: () => createServerlessSample(),
   },
 ];

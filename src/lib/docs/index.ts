@@ -3,6 +3,7 @@
  * 설명이 없는 리소스나 설정 키를 요청해도 빈 화면 대신 기본 안내를 돌려준다.
  */
 import { RESOURCE_TYPE_INFO, RESOURCE_TYPES, type ResourceType } from "@/lib/engine/resource-models";
+import { CLOUDFRONT_DOC } from "./content/cloudfront";
 import { CLOUDWATCH_DOC } from "./content/cloudwatch";
 import { ALB_DOC, EC2_DOC, TARGET_GROUP_DOC } from "./content/compute";
 import { DB_SUBNET_GROUP_DOC, RDS_DOC } from "./content/database";
@@ -10,8 +11,10 @@ import { IAM_DOC } from "./content/iam";
 import { RESOURCE_NAME_HELP } from "./content/names";
 import { EIP_DOC, IGW_DOC, NAT_DOC, ROUTE_TABLE_DOC, SUBNET_DOC, VPC_DOC } from "./content/network";
 import { S3_DOC } from "./content/s3";
+import { SECRETS_DOC, SSM_DOC } from "./content/secrets";
+import { EVENTBRIDGE_DOC, LAMBDA_DOC } from "./content/serverless";
 import { NACL_DOC, SECURITY_GROUP_DOC } from "./content/security";
-import { DOC_FIELDS, NAME_TAG_HELP, SERVICE_DOC_KEYS, type DocKey, type FieldHelp, type ResourceDoc } from "./types";
+import { DOC_FIELDS, NAME_TAG_HELP, SERVICE_DOC_KEYS, type DocKey, type FieldHelp, type ResourceDoc, type ServiceDocKey } from "./types";
 
 export * from "./types";
 
@@ -25,6 +28,7 @@ export const RESOURCE_DOCS: { [K in DocKey]: ResourceDoc<K> } = {
   "security-group": SECURITY_GROUP_DOC,
   "network-acl": NACL_DOC,
   ec2: EC2_DOC,
+  lambda: LAMBDA_DOC,
   alb: ALB_DOC,
   "target-group": TARGET_GROUP_DOC,
   "db-subnet-group": DB_SUBNET_GROUP_DOC,
@@ -32,9 +36,23 @@ export const RESOURCE_DOCS: { [K in DocKey]: ResourceDoc<K> } = {
   s3: S3_DOC,
   iam: IAM_DOC,
   cloudwatch: CLOUDWATCH_DOC,
+  eventbridge: EVENTBRIDGE_DOC,
+  cloudfront: CLOUDFRONT_DOC,
+  secretsmanager: SECRETS_DOC,
+  ssm: SSM_DOC,
 };
 
 export const ALL_DOC_KEYS: DocKey[] = [...RESOURCE_TYPES, ...SERVICE_DOC_KEYS];
+
+const SERVICE_SHORT_LABEL: Record<ServiceDocKey, string> = {
+  s3: "S3",
+  iam: "IAM",
+  cloudwatch: "CloudWatch",
+  eventbridge: "EventBridge",
+  cloudfront: "CloudFront",
+  secretsmanager: "Secrets Manager",
+  ssm: "Systems Manager",
+};
 
 /** 설명 데이터가 없을 때 쓰는 기본 안내 */
 function fallbackDoc(key: string): ResourceDoc {
@@ -84,5 +102,5 @@ export const docLabel = (key: string) => getResourceDoc(key).title;
 /** 리소스 유형의 짧은 이름 (아이콘 옆 표시용) */
 export function docShortLabel(key: DocKey): string {
   if ((RESOURCE_TYPES as readonly string[]).includes(key)) return RESOURCE_TYPE_INFO[key as ResourceType].shortLabel;
-  return { s3: "S3", iam: "IAM", cloudwatch: "CloudWatch" }[key as "s3" | "iam" | "cloudwatch"];
+  return SERVICE_SHORT_LABEL[key as ServiceDocKey];
 }

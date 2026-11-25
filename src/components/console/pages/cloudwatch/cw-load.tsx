@@ -91,7 +91,7 @@ export function LoadTestPage() {
       ) : (
         <Container id="tour-cw-load-form" header={<ContainerHeader title="새 가상 부하" />}>
           <SpaceBetween size="m">
-            <div className="grid gap-4 md:grid-cols-3">
+            <div className="grid gap-4 @2xl/main:grid-cols-3">
               <FormField label="이름">
                 <TextInput value={name} onChange={(e) => setName(e.target.value)} maxLength={100} />
               </FormField>
@@ -124,7 +124,7 @@ export function LoadTestPage() {
                 <TextInput value={customRate} onChange={(e) => setCustomRate(e.target.value)} inputMode="numeric" className="max-w-40" />
               </FormField>
             )}
-            <div className="grid gap-4 md:grid-cols-2">
+            <div className="grid gap-4 @2xl/main:grid-cols-2">
               <FormField label="지속 시간">
                 <SelectInput
                   value={duration}

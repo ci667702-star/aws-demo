@@ -1,11 +1,9 @@
 "use client";
 
-import { useEffect, useRef } from "react";
 import { alarmHistory, loadStatus, type AlarmState } from "@/lib/engine/cloudwatch-engine";
 import type { MetricRef } from "@/lib/engine/resource-models";
 import { useAnalysis } from "../../analysis-context";
 import { useProject } from "../../console-context";
-import { notify } from "../../notify";
 import { href } from "../../router";
 import { ButtonLink } from "../../ui/button";
 import { Container, ContainerHeader, PageHeader, SpaceBetween } from "../../ui/layout";
@@ -13,9 +11,8 @@ import { InfoLink } from "../../ui/links";
 import { PageGuide } from "../../ui/page-guide";
 import { StatusIndicator, type StatusType } from "../../ui/status";
 import { StartTutorialButton } from "../../tutorial/tutorial-menu";
-import { conditionText } from "./cw-alarms";
 import { MetricCharts } from "./cw-metrics";
-import { AlarmStateBadge, useMetricModel, useNow } from "./cw-shared";
+import { AlarmStateBadge, conditionText, useMetricModel, useNow } from "./cw-shared";
 
 function StatTile({ label, value, status, path }: { label: string; value: number; status: StatusType; path: string }) {
   return (
@@ -65,7 +62,7 @@ export function CloudWatchOverviewPage() {
         }
       />
       <PageGuide topic="cloudwatch" />
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 @xl/main:grid-cols-2 @3xl/main:grid-cols-4">
         <StatTile label="경보 상태" value={count("ALARM")} status="error" path="/cloudwatch/alarms" />
         <StatTile label="정상" value={count("OK")} status="success" path="/cloudwatch/alarms" />
         <StatTile label="데이터 부족" value={count("INSUFFICIENT_DATA")} status="pending" path="/cloudwatch/alarms" />
@@ -103,7 +100,7 @@ export function CloudWatchOverviewPage() {
         </Container>
       )}
       <Container header={<ContainerHeader title="시작하기" description="순서대로 해 보면 모니터링의 기본 흐름을 익힐 수 있습니다." />}>
-        <ol className="grid gap-3 md:grid-cols-4">
+        <ol className="grid gap-3 @2xl/main:grid-cols-4">
           {STEPS.map((s, i) => (
             <li key={s.title}>
               <a href={href(s.path)} className="block h-full rounded-xl border border-aws-border bg-aws-surface-2 p-4 transition-colors hover:border-aws-link">
@@ -118,34 +115,4 @@ export function CloudWatchOverviewPage() {
       </Container>
     </SpaceBetween>
   );
-}
-
-/**
- * 콘솔이 열려 있는 동안 경보 상태 변화를 지켜보다가 가상 알림(토스트)을 띄운다.
- * 실제 AWS의 SNS 알림(이메일·문자)을 흉내 낸 것으로, 아무것도 외부로 보내지 않는다.
- */
-export function AlarmWatcher() {
-  const project = useProject();
-  const model = useMetricModel();
-  const now = useNow();
-  const previous = useRef<Map<string, AlarmState> | null>(null);
-  useEffect(() => {
-    const alarms = project.services.cloudwatch.alarms;
-    const next = new Map(alarms.map((a) => [a.id, alarmHistory(model, a, now, 30).current.state]));
-    const before = previous.current;
-    previous.current = next;
-    if (!before) return;
-    for (const a of alarms) {
-      if (!a.notify) continue;
-      const was = before.get(a.id);
-      const is = next.get(a.id);
-      if (!is || was === is) continue;
-      if (is === "ALARM") {
-        notify({ type: "warning", title: `경보 ${a.name}이(가) 경보 상태(ALARM)가 되었습니다`, description: conditionText(a), action: { label: "경보 보기", href: `#/cloudwatch/alarms/${a.id}` } });
-      } else if (is === "OK" && was === "ALARM") {
-        notify({ type: "success", title: `경보 ${a.name}이(가) 정상(OK)으로 돌아왔습니다`, action: { label: "경보 보기", href: `#/cloudwatch/alarms/${a.id}` } });
-      }
-    }
-  }, [project, model, now]);
-  return null;
 }

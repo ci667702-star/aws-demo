@@ -110,7 +110,7 @@ export function S3AccessTestPage() {
         </SpaceBetween>
       </Container>
       <Container header={<ContainerHeader title="2. 무엇을 하려고 하나요?" />}>
-        <div className="grid gap-4 md:grid-cols-3">
+        <div className="grid gap-4 @2xl/main:grid-cols-3">
           <FormField label="버킷">
             <SelectInput value={bucketId} onChange={setBucketId} options={buckets.map((b) => ({ value: b.id, label: b.name }))} />
           </FormField>

@@ -5,16 +5,22 @@
  */
 import {
   Activity,
+  CalendarClock,
   Database,
+  Globe2,
   HardDrive,
   KeyRound,
+  Lambda,
+  LockKeyhole,
   Network,
   Server,
   ShieldCheck,
+  SquareTerminal,
   Waypoints,
   type LucideIcon,
 } from "lucide-react";
 import type { Project } from "@/lib/engine/resource-models";
+import { liveSecrets } from "@/lib/engine/secrets-engine";
 import type { Topology } from "@/lib/engine/topology-engine";
 
 export interface NavItem {
@@ -79,6 +85,27 @@ export const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
+    id: "lambda",
+    label: "서버리스 (Lambda)",
+    description: "서버 없이 요청·일정·이벤트가 올 때만 코드를 실행하는 함수를 만들고 테스트합니다.",
+    icon: Lambda,
+    root: "/lambda/functions",
+    items: [{ label: "함수", path: "/lambda/functions", count: n("lambda") }],
+  },
+  {
+    id: "eventbridge",
+    label: "이벤트·일정 (EventBridge)",
+    description: "정해진 시각이나 이벤트가 오면 Lambda 함수를 호출합니다.",
+    icon: CalendarClock,
+    root: "/eventbridge",
+    items: [
+      { label: "개요", path: "/eventbridge" },
+      { label: "일정 (Scheduler)", path: "/eventbridge/schedules", count: (_t, p) => p.services.eventbridge.schedules.length },
+      { label: "규칙", path: "/eventbridge/rules", count: (_t, p) => p.services.eventbridge.rules.length },
+      { label: "테스트 이벤트 보내기", path: "/eventbridge/send-event" },
+    ],
+  },
+  {
     id: "rds",
     label: "데이터베이스 (RDS)",
     description: "관계형 데이터베이스를 프라이빗 서브넷에 배치합니다.",
@@ -102,6 +129,14 @@ export const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
+    id: "cloudfront",
+    label: "콘텐츠 전송 (CloudFront)",
+    description: "S3 버킷·로드 밸런서의 콘텐츠를 엣지에서 캐시해 HTTPS로 빠르게 전달합니다.",
+    icon: Globe2,
+    root: "/cloudfront/distributions",
+    items: [{ label: "배포", path: "/cloudfront/distributions", count: (_t, p) => p.services.cloudfront.distributions.length }],
+  },
+  {
     id: "iam",
     label: "권한 관리 (IAM)",
     description: "사용자·역할을 만들고 누가 무엇을 할 수 있는지 정책으로 정합니다.",
@@ -115,6 +150,28 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: "정책", path: "/iam/policies" },
       { label: "정책 시뮬레이터", path: "/iam/simulator" },
       { label: "학교 역할 템플릿", path: "/iam/templates" },
+    ],
+  },
+  {
+    id: "secretsmanager",
+    label: "보안 암호 (Secrets Manager)",
+    description: "DB 암호·API 키를 코드 밖에 보관하고, 권한이 있는 앱만 읽게 합니다. 주기적으로 교체할 수 있습니다.",
+    icon: LockKeyhole,
+    root: "/secretsmanager/secrets",
+    // 복구 기간이 끝난(완전히 삭제된) 보안 암호는 세지 않는다
+    items: [{ label: "보안 암호", path: "/secretsmanager/secrets", count: (_t, p) => liveSecrets(p, Date.now()).length }],
+  },
+  {
+    id: "ssm",
+    label: "서버 관리 (Systems Manager)",
+    description: "설정 값을 한곳에 보관하고(Parameter Store), SSH 키나 열린 포트 없이 서버에 접속합니다(Session Manager).",
+    icon: SquareTerminal,
+    root: "/ssm",
+    items: [
+      { label: "개요", path: "/ssm" },
+      { label: "Parameter Store", path: "/ssm/parameters", count: (_t, p) => p.services.ssm.parameters.length },
+      { label: "관리형 노드", path: "/ssm/nodes" },
+      { label: "Session Manager", path: "/ssm/sessions" },
     ],
   },
   {
@@ -158,13 +215,16 @@ function normalize(path: string): string {
   return path;
 }
 
+/** 대시보드·개요 화면: 하위 경로(예: /vpc/subnets)는 따로 있는 메뉴 항목이 맡는다 */
+const OVERVIEW_PATHS = new Set(["/vpc", "/ec2", "/rds", "/iam", "/cloudwatch", "/eventbridge", "/ssm"]);
+
 /** 현재 경로와 가장 길게 일치하는 탐색 항목 */
 export function activeNavItem(path: string): { group: NavGroup; item: NavItem } | null {
   const p = normalize(path);
   let best: { group: NavGroup; item: NavItem } | null = null;
   for (const group of NAV_GROUPS) {
     for (const item of group.items) {
-      const match = p === item.path || (item.path !== "/vpc" && item.path !== "/ec2" && item.path !== "/rds" && item.path !== "/iam" && item.path !== "/cloudwatch" && p.startsWith(`${item.path}/`));
+      const match = p === item.path || (!OVERVIEW_PATHS.has(item.path) && p.startsWith(`${item.path}/`));
       if (match && (!best || item.path.length > best.item.path.length)) best = { group, item };
     }
   }

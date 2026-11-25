@@ -168,7 +168,8 @@ export function checkConnection(
     }
     case "ec2-security-group":
     case "alb-security-group":
-    case "rds-security-group": {
+    case "rds-security-group":
+    case "lambda-security-group": {
       const r = sameVpcCheck(topo, source, target, "보안 그룹은 같은 VPC의 리소스에만 연결할 수 있습니다.");
       if (r) return r;
       break;
@@ -278,6 +279,14 @@ export function checkConnection(
         }
       }
       metadata = { listenerId };
+      break;
+    }
+    case "lambda-subnet": {
+      const r = sameVpcCheck(topo, source, target, "Lambda 함수의 서브넷과 보안 그룹은 모두 같은 VPC에 있어야 합니다.");
+      if (r) return r;
+      if (topo.classifySubnet(target.id).kind === "public") {
+        notes.push("Lambda는 퍼블릭 서브넷에 연결해도 퍼블릭 IP를 받지 않아 인터넷에 나갈 수 없습니다. 인터넷이 필요하면 NAT 경로가 있는 프라이빗 서브넷을 쓰세요.");
+      }
       break;
     }
     case "db-subnet-group-subnet": {

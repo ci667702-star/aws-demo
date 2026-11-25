@@ -5,7 +5,7 @@
  *   A. 기본 정보 · B. 왜 사용하는가 · C. 주요 설정 · D. 관련 리소스 · E. 현재 구성 분석 · F. 시뮬레이터 제한
  * 일반 개념(설명 데이터)과 현재 프로젝트 분석(실제 연결·검증·시뮬레이션)은 배지와 색으로 구분한다.
  */
-import { Activity, ArrowRight, ChevronDown, CircleCheck, CircleX, ExternalLink, HardDrive, Info, KeyRound, Lightbulb, Play, TriangleAlert, X } from "lucide-react";
+import { Activity, ArrowRight, CalendarClock, ChevronDown, CircleCheck, CircleX, ExternalLink, Globe2, HardDrive, Info, KeyRound, Lightbulb, LockKeyhole, Play, SquareTerminal, TriangleAlert, X } from "lucide-react";
 import { cn } from "cn";
 import { useCallback, useEffect, useId, useRef, useSyncExternalStore } from "react";
 import { Button } from "@/components/ui/button";
@@ -47,6 +47,10 @@ const SERVICE_ICON: Record<ServiceDocKey, { icon: typeof HardDrive; className: s
   s3: { icon: HardDrive, className: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300" },
   iam: { icon: KeyRound, className: "bg-rose-500/15 text-rose-700 dark:text-rose-300" },
   cloudwatch: { icon: Activity, className: "bg-pink-500/15 text-pink-700 dark:text-pink-300" },
+  eventbridge: { icon: CalendarClock, className: "bg-fuchsia-500/15 text-fuchsia-700 dark:text-fuchsia-300" },
+  cloudfront: { icon: Globe2, className: "bg-indigo-500/15 text-indigo-700 dark:text-indigo-300" },
+  secretsmanager: { icon: LockKeyhole, className: "bg-red-500/15 text-red-700 dark:text-red-300" },
+  ssm: { icon: SquareTerminal, className: "bg-teal-500/15 text-teal-700 dark:text-teal-300" },
 };
 
 export function DocIcon({ docKey, size = "md" }: { docKey: DocKey; size?: "sm" | "md" | "lg" }) {

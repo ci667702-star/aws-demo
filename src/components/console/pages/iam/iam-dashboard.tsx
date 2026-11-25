@@ -56,7 +56,7 @@ export function IamDashboardPage() {
         />
       </Container>
       <Container header={<ContainerHeader title="권한은 이렇게 결정됩니다" info={<InfoLink topic="iam-policy" />} />}>
-        <ol className="grid gap-3 md:grid-cols-4">
+        <ol className="grid gap-3 @2xl/main:grid-cols-4">
           {FLOW.map((f, i) => (
             <li key={f.title} className="relative rounded-xl border border-aws-border bg-aws-surface-2 p-4">
               <p className="text-sm font-bold text-aws-link">

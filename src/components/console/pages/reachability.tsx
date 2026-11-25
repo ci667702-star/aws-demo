@@ -241,7 +241,7 @@ export function CreatePathPage() {
           <FormField label="이름 태그" optional>
             <TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="예: internet-to-web" maxLength={128} />
           </FormField>
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid gap-4 @2xl/main:grid-cols-2">
             <fieldset className="space-y-3 rounded-xl border border-aws-border p-4">
               <legend className="px-1 text-sm font-bold">소스</legend>
               <FormField label="소스 유형">
@@ -280,7 +280,7 @@ export function CreatePathPage() {
               )}
             </fieldset>
           </div>
-          <div className="grid gap-4 sm:grid-cols-3">
+          <div className="grid gap-4 @xl/main:grid-cols-3">
             <FormField label="프로토콜">
               <SelectInput value={protocol} onChange={(v) => setProtocol(v as typeof protocol)} options={[{ value: "tcp", label: "TCP" }, { value: "udp", label: "UDP" }, { value: "icmp", label: "ICMP" }]} />
             </FormField>

@@ -45,6 +45,16 @@ export const RESOURCE_NAME_HELP: Partial<Record<DocKey, FieldHelp>> = {
     mistakes: ["식별자를 바꾼 뒤 애플리케이션이 예전 엔드포인트로 접속하려 함"],
     example: "orders-db",
   },
+  lambda: {
+    title: "함수 이름 (FunctionName)",
+    meaning: "Lambda 함수의 고유 이름입니다. 함수 ARN의 마지막 부분이 되어 호출·권한 정책에서 함수를 가리킵니다.",
+    purpose: "여러 함수를 구분하고, IAM 정책과 일정·규칙이 어느 함수를 가리키는지 알아보기 쉽게 합니다.",
+    values: "실제 AWS: 리전 안에서 고유, 최대 64자, 영문·숫자·하이픈(-)·밑줄(_)",
+    realAws: "만든 뒤에는 이름을 바꿀 수 없습니다. 이름을 바꾸려면 새 함수를 만들고 트리거와 권한을 옮겨야 합니다.",
+    simulator: "함수 ARN(arn:aws:lambda:ap-northeast-2:가상계정:function:이름)을 만드는 데 쓰이므로, 쉬운 모드에서 이름을 바꾸면 이름으로 함수를 가리키던 IAM 정책·리소스 기반 정책이 더 이상 맞지 않습니다.",
+    mistakes: ["IAM 정책의 Resource에 함수 이름을 잘못 적어 lambda:InvokeFunction이 거부됨"],
+    example: "daily-report",
+  },
   "db-subnet-group": {
     title: "DB 서브넷 그룹 이름",
     meaning: "DB 서브넷 그룹의 고유 이름입니다. RDS를 만들 때 이 이름으로 그룹을 고릅니다.",
