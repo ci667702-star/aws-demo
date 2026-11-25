@@ -3,7 +3,7 @@
 import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "cn";
 import { useEffect, useMemo, useState } from "react";
-import { SearchInput } from "./form";
+import { SearchInput } from "./form-base";
 
 export interface TableColumn<T> {
   id: string;

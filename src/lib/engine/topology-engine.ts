@@ -237,7 +237,9 @@ export class Topology {
           ? "alb-security-group"
           : r.type === "rds"
             ? "rds-security-group"
-            : null;
+            : r.type === "lambda"
+              ? "lambda-security-group"
+              : null;
     if (!relation) return [];
     return this.targets(r.id, relation)
       .map((id) => this.getOfType(id, "security-group"))
@@ -259,6 +261,11 @@ export class Topology {
         (a, b) =>
           a.config.availabilityZone.localeCompare(b.config.availabilityZone) || this.orderOf(a.id) - this.orderOf(b.id),
       );
+  }
+
+  /** VPC에 연결한 Lambda의 서브넷 (VPC 밖 함수면 빈 목록) */
+  lambdaSubnets(lambdaId: string): ResourceOfType<"subnet">[] {
+    return this.memo(`lambdaSubnets:${lambdaId}`, () => this.sortSubnets(this.targets(lambdaId, "lambda-subnet")));
   }
 
   albSubnets(albId: string): ResourceOfType<"subnet">[] {
@@ -381,6 +388,10 @@ export class Topology {
         ]);
       case "db-subnet-group":
         return uniq(this.dbSubnetGroupSubnets(r.id).map((s) => this.vpcOfSubnet(s.id)));
+      case "lambda": {
+        const fromSubnets = uniq(this.lambdaSubnets(r.id).map((s) => this.vpcOfSubnet(s.id)));
+        return fromSubnets.length ? fromSubnets : uniq(this.securityGroupsOf(r.id).map((sg) => this.vpcOf(sg.id)));
+      }
       case "rds": {
         const group = this.dbSubnetGroupOf(r.id);
         const fromGroup = group ? this.vpcsOf(group.id) : [];

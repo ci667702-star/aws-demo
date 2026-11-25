@@ -144,7 +144,7 @@ function StatementBuilder({ document, onChange }: { document: string; onChange: 
   };
   return (
     <SpaceBetween size="m">
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-4 @2xl/main:grid-cols-2">
         <FormField help={{ docKey: "iam", field: "effect" }} label="효과 (Effect)">
           <RadioGroup
             aria-label="효과"
@@ -173,7 +173,7 @@ function StatementBuilder({ document, onChange }: { document: string; onChange: 
           <Checkbox checked={allActions} onChange={setAllActions} description="편하지만 필요 이상으로 넓은 권한이 됩니다.">
             모든 {service} 작업 ({service}:*)
           </Checkbox>
-          <div className="grid gap-x-6 gap-y-1.5 border-t border-aws-divider pt-2 sm:grid-cols-2">
+          <div className="grid gap-x-6 gap-y-1.5 border-t border-aws-divider pt-2 @xl/main:grid-cols-2">
             {serviceActions.map((a) => (
               <Checkbox key={a.action} checked={allActions || actions.includes(a.action)} disabled={allActions} onChange={(v) => toggle(a.action, v)}>
                 <span className="font-mono text-[13px]">{a.action}</span> <span className="text-aws-text-2">— {a.description}</span>

@@ -35,6 +35,7 @@ import { useProjectStore } from "@/lib/store/project-store";
 import { useAnalysis } from "@/components/console/analysis-context";
 import { edgeLabel } from "@/components/console/map/canvas-model";
 import { AlbForm, Ec2Form, TargetGroupForm } from "./compute-forms";
+import { LambdaForm } from "./serverless-forms";
 import { DbSubnetGroupForm, RdsForm } from "./database-forms";
 import { ServiceDocPanel, TypeDocPanel, useBuilderDocActions } from "./doc-panels";
 import { Callout, InfoRow, Section, TextField } from "./fields";
@@ -234,6 +235,8 @@ function ResourceForm({ resource, ctx }: { resource: Resource; ctx: FormContext 
       return <DbSubnetGroupForm group={resource} ctx={ctx} />;
     case "rds":
       return <RdsForm rds={resource} ctx={ctx} />;
+    case "lambda":
+      return <LambdaForm fn={resource} ctx={ctx} />;
   }
 }
 

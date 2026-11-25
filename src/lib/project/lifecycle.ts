@@ -34,7 +34,10 @@ function stateOf(config: unknown): string | undefined {
   return typeof state === "string" ? state : undefined;
 }
 
-/** 프로젝트에서 상태 전이를 기다리는 리소스 목록 */
+/** CloudFront 배포: 만들거나 설정을 바꾸면 엣지에 배포하는 동안 InProgress였다가 Deployed가 된다 (가상 대기 시간) */
+export const DISTRIBUTION_DEPLOY_MS = 4000;
+
+/** 프로젝트에서 상태 전이를 기다리는 리소스 목록 (CloudFront 배포 포함) */
 export function pendingTransitions(project: Project): PendingTransition[] {
   const result: PendingTransition[] = [];
   for (const r of project.resources) {
@@ -42,11 +45,19 @@ export function pendingTransitions(project: Project): PendingTransition[] {
     const t = TRANSITIONS.find((x) => x.type === r.type && x.from === state);
     if (t) result.push({ resourceId: r.id, from: t.from, to: t.to, delayMs: Math.round(t.delayMs * lifecycleTiming.scale) });
   }
+  for (const d of project.services.cloudfront.distributions) {
+    if (d.state === "InProgress") result.push({ resourceId: d.id, from: "InProgress", to: "Deployed", delayMs: Math.round(DISTRIBUTION_DEPLOY_MS * lifecycleTiming.scale) });
+  }
   return result;
 }
 
 /** 리소스가 아직 from 상태이면 to 상태로 바꾼 프로젝트를, 아니면 null을 돌려준다. */
 export function advanceLifecycle(project: Project, resourceId: string, from: string, to: string): Project | null {
+  const dist = project.services.cloudfront.distributions.find((d) => d.id === resourceId);
+  if (dist) {
+    if (dist.state !== from || to !== "Deployed") return null;
+    return { ...project, services: { ...project.services, cloudfront: { distributions: project.services.cloudfront.distributions.map((d) => (d.id === resourceId ? { ...d, state: "Deployed" as const } : d)) } } };
+  }
   const r = project.resources.find((x) => x.id === resourceId);
   if (!r || stateOf(r.config) !== from) return null;
   return {

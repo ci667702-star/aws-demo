@@ -1,6 +1,9 @@
 import { render } from "@testing-library/react";
 import { act } from "react";
+import { beforeAll } from "vitest";
+import { preloadLazyGroups } from "@/components/app/lazy";
 import { resetConsoleUi } from "@/components/console/console-store";
+import { resetTutorialStore } from "@/components/console/tutorial/tutorial-store";
 import { ConsoleRoute } from "@/components/console/console-route";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -10,9 +13,16 @@ import { resetProjectStore, useProjectStore } from "@/lib/store/project-store";
 
 export { routerPush } from "./router-mock";
 
+// 콘솔 화면 코드는 필요할 때 불러온다(lazyGroup). 테스트에서는 미리 불러 두어 화면이 기다림 없이 바로 그려지게 한다
+// (실제 앱에서도 콘솔이 열리면 한가할 때 미리 받아 둔다).
+beforeAll(async () => {
+  await preloadLazyGroups();
+});
+
 export function seedStore(projects: Project[]) {
   resetProjectStore();
   resetConsoleUi();
+  resetTutorialStore();
   useEditorStore.setState({
     projectId: null,
     selectedResourceIds: [],

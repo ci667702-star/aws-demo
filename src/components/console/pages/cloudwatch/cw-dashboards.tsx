@@ -180,7 +180,7 @@ export function DashboardDetailPage({ id }: { id: string }) {
           <EmptyState title="위젯이 없습니다" description="위젯 추가를 눌러 그래프나 숫자를 넣으세요." action={<Button onClick={() => setAdding(true)}>위젯 추가</Button>} />
         </Container>
       ) : (
-        <div className="grid gap-5 lg:grid-cols-2">
+        <div className="grid gap-5 @3xl/main:grid-cols-2">
           {dashboard.widgets.map((w) => (
             <WidgetCard key={w.id} widget={w} range={range} now={now} onRemove={() => run("PutDashboard", (p) => removeWidget(p, dashboard.id, w.id), { success: () => `위젯 ${w.title}을(를) 삭제했습니다.`, flashError: true })} />
           ))}

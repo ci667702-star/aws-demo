@@ -44,7 +44,6 @@ import { useEditorStore } from "@/lib/store/editor-store";
 import { useCanRedo, useCanUndo, useProjectStore } from "@/lib/store/project-store";
 import { formatTime } from "@/lib/ui/format";
 import { useAnalysis } from "@/components/console/analysis-context";
-import { startBuilderTour } from "./builder-tour";
 import { notifyHistory } from "./history-toast";
 import { IdentityBadge } from "./identity-badge";
 
@@ -238,7 +237,7 @@ export function BuilderToolbar({
       <div className="ml-auto flex items-center gap-1">
         <span className="hidden rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-800 xl:inline dark:text-amber-300">쉬운 모드</span>
         <IdentityBadge projectId={projectId} />
-        <Button variant="ghost" size="sm" onClick={startBuilderTour} data-testid="builder-tour">
+        <Button variant="ghost" size="sm" onClick={() => void import("./builder-tour").then((m) => m.startBuilderTour())} data-testid="builder-tour">
           <GraduationCap />
           <span className="hidden md:inline">둘러보기</span>
         </Button>

@@ -126,7 +126,7 @@ export function SelectLbTypePage() {
   return (
     <SpaceBetween>
       <PageHeader title="로드 밸런서 유형 비교 및 선택" info={<InfoLink topic="alb" />} />
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 @2xl/main:grid-cols-3">
         {cards.map((c) => (
           <Container key={c.id} header={<ContainerHeader title={c.title} />}>
             <SpaceBetween size="m">
@@ -275,7 +275,7 @@ export function CreateLoadBalancerPage() {
       <Container header={<ContainerHeader title="리스너 및 라우팅" info={<InfoLink topic="target-group" />} description="리스너는 지정한 프로토콜과 포트로 연결 요청을 확인하고, 기본 작업에 따라 대상 그룹으로 전달합니다." />}>
         <SpaceBetween size="m">
           {listeners.map((l, i) => (
-            <fieldset key={l.key} className="grid gap-3 rounded-xl border border-aws-border p-3 sm:grid-cols-[120px_120px_minmax(0,1fr)_auto]" data-testid="listener-draft">
+            <fieldset key={l.key} className="grid gap-3 rounded-xl border border-aws-border p-3 @xl/main:grid-cols-[120px_120px_minmax(0,1fr)_auto]" data-testid="listener-draft">
               <legend className="px-1 text-sm font-bold">리스너 {i + 1}</legend>
               <FormField help={{ docKey: "alb", field: "listenerProtocol" }} label="프로토콜">
                 <SelectInput value={l.protocol} onChange={(v) => updateListener(l.key, { protocol: v as "HTTP" | "HTTPS" })} options={[{ value: "HTTP", label: "HTTP" }, { value: "HTTPS", label: "HTTPS" }]} />
@@ -344,7 +344,7 @@ function ListenerModal({ alb, listenerId, open, onClose }: { alb: Alb; listenerI
     >
       <SpaceBetween size="m">
         {!binding && (
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid gap-3 @xl/main:grid-cols-2">
             <FormField help={{ docKey: "alb", field: "listenerProtocol" }} label="프로토콜">
               <SelectInput value={protocol} onChange={(v) => setProtocol(v as "HTTP" | "HTTPS")} options={[{ value: "HTTP", label: "HTTP" }, { value: "HTTPS", label: "HTTPS" }]} />
             </FormField>

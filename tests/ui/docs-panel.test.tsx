@@ -50,6 +50,7 @@ function allTypesProject(): Project {
   b.alb("web-alb", { subnets: [pubA, pubC], sgs: [albSg], listeners: [{ port: 80, targetGroup: tg }] });
   const group = b.dbSubnetGroup("db-group", [dbA, dbC], "private db");
   b.rds("db", { subnetGroup: group, sgs: [dbSg] });
+  b.lambda("fn", { subnets: [dbA, dbC], sgs: [webSg] });
   return b.build();
 }
 
@@ -96,7 +97,7 @@ describe("리소스 상세 설명 패널 (쉬운 모드)", () => {
     expect(within(panel).getByTestId("resource-name")).toHaveValue("orders-db");
   });
 
-  it("13개 리소스 유형 모두 설정 도움말이 빠짐없이 연결되고, 검증 규칙이 가리키는 설정 항목이 폼에 있다", async () => {
+  it("14개 리소스 유형 모두 설정 도움말이 빠짐없이 연결되고, 검증 규칙이 가리키는 설정 항목이 폼에 있다", async () => {
     const p = allTypesProject();
     setup(p);
     const covered = new Set<ResourceType>();

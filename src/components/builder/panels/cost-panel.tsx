@@ -5,7 +5,8 @@ import { Calculator, RotateCcw, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ResourceIcon } from "@/components/resource-visuals";
-import { DEFAULT_COST_ASSUMPTIONS, estimateCost, resolveCostAssumptions } from "@/lib/engine/cost-engine";
+import { DocIcon } from "@/components/docs/resource-doc-panel";
+import { DEFAULT_COST_ASSUMPTIONS, estimateCost, isServiceCostType, resolveCostAssumptions, SERVICE_COST_DOC_KEY, SERVICE_COST_LABEL, type ResolvedCostAssumptions } from "@/lib/engine/cost-engine";
 import { NatCostComparisonCard } from "@/components/docs/nat-cost-comparison";
 import type { CostAssumptions } from "@/lib/engine/resource-models";
 import { setCostAssumptions } from "@/lib/project/mutations";
@@ -14,13 +15,15 @@ import { formatMoney, formatRate } from "@/lib/ui/format";
 import { useProjectActions } from "../inspector/use-project-actions";
 
 type NumberKey = {
-  [K in keyof CostAssumptions]: CostAssumptions[K] extends number ? K : never;
-}[keyof CostAssumptions];
+  [K in keyof ResolvedCostAssumptions]: ResolvedCostAssumptions[K] extends number ? K : never;
+}[keyof ResolvedCostAssumptions];
 
 const USAGE_FIELDS: { key: NumberKey; label: string; max: number }[] = [
   { key: "hoursPerMonth", label: "월 사용 시간", max: 744 },
   { key: "dataProcessedGb", label: "NAT/ALB 처리 데이터 (GB/월)", max: 1_000_000 },
   { key: "dataTransferOutGb", label: "인터넷 방향 전송 (GB/월)", max: 1_000_000 },
+  { key: "cloudfrontDataGb", label: "CloudFront 전송 (GB/월, 배포당)", max: 1_000_000 },
+  { key: "cloudfrontRequestsMillion", label: "CloudFront 요청 (백만 건/월, 배포당)", max: 1_000_000 },
 ];
 
 const RATE_FIELDS: { key: NumberKey; label: string }[] = [
@@ -31,6 +34,13 @@ const RATE_FIELDS: { key: NumberKey; label: string }[] = [
   { key: "publicIpv4Hourly", label: "퍼블릭 IPv4 / 시간" },
   { key: "dataTransferOutPerGb", label: "인터넷 전송 / GB" },
   { key: "rdsStorageGbMonth", label: "RDS 스토리지 / GB-월" },
+  { key: "lambdaPerMillionRequests", label: "Lambda 요청 / 100만 건" },
+  { key: "lambdaPerGbSecond", label: "Lambda 실행 / GB-초" },
+  { key: "schedulerPerMillion", label: "Scheduler 호출 / 100만 회" },
+  { key: "secretPerMonth", label: "Secrets Manager 보안 암호 / 개-월" },
+  { key: "ssmAdvancedParameterPerMonth", label: "고급 파라미터 / 개-월" },
+  { key: "cloudfrontPerGb", label: "CloudFront 전송 / GB" },
+  { key: "cloudfrontPerMillionRequests", label: "CloudFront 요청 / 100만 건" },
 ];
 
 function NumberCell({ value, onCommit, label, max = 1_000_000 }: { value: number; onCommit: (v: number) => void; label: string; max?: number }) {
@@ -160,8 +170,9 @@ export function CostPanel({ projectId }: { projectId: string }) {
                 <tr key={line.resourceId} className="border-b align-top">
                   <td className="py-1.5 pr-2">
                     <span className="inline-flex items-center gap-1.5">
-                      <ResourceIcon type={line.resourceType} size="sm" className="size-5" />
+                      {isServiceCostType(line.resourceType) ? <DocIcon docKey={SERVICE_COST_DOC_KEY[line.resourceType]} size="sm" /> : <ResourceIcon type={line.resourceType} size="sm" className="size-5" />}
                       {line.resourceName}
+                      {isServiceCostType(line.resourceType) && <span className="text-muted-foreground">({SERVICE_COST_LABEL[line.resourceType]})</span>}
                     </span>
                   </td>
                   <td className="py-1.5 pr-2 text-muted-foreground">

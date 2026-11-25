@@ -7,6 +7,7 @@ import { X } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "cn";
 import { ImportDialog } from "@/components/app/import-dialog";
+import { preloadLazyGroupsWhenIdle } from "@/components/app/lazy";
 import { Button } from "@/components/ui/button";
 import type { ResourceType } from "@/lib/engine/resource-models";
 import { exportFileName, exportProjectJson } from "@/lib/project/serialization";
@@ -53,6 +54,9 @@ export function Builder({ projectId }: { projectId: string }) {
     void revalidateNonce;
     return analyzeProject(project);
   }, [project, revalidateNonce]);
+
+  // 첫 화면을 그린 뒤 한가할 때 나머지 탭 코드를 미리 받아 둔다
+  useEffect(() => preloadLazyGroupsWhenIdle(), []);
 
   // 작은 화면에서는 리소스를 선택하거나 설명·설정 항목을 열면 오른쪽 패널을 연다
   const [prevSelected, setPrevSelected] = useState(selectedCount);

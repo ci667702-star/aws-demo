@@ -270,7 +270,7 @@ export function MetricChart({
 /** 숫자 위젯: 최신 값 + 작은 추세선 */
 export function MetricNumber({ series }: { series: ChartSeries[] }) {
   return (
-    <ul className={cn("grid gap-4", series.length > 1 ? "sm:grid-cols-2" : "")}>
+    <ul className={cn("grid gap-4", series.length > 1 ? "@xl/main:grid-cols-2" : "")}>
       {series.map((s, i) => {
         const last = [...s.points].reverse().find((p) => p.value !== null);
         const pts = s.points.slice(-12);

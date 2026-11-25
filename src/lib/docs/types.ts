@@ -5,7 +5,7 @@
 import type { ResourceType } from "@/lib/engine/resource-models";
 
 /** VPC 밖에서 동작하는 가상 서비스 (캔버스 노드가 아니라 샌드박스 전체에 하나씩 있다) */
-export const SERVICE_DOC_KEYS = ["s3", "iam", "cloudwatch"] as const;
+export const SERVICE_DOC_KEYS = ["s3", "iam", "cloudwatch", "eventbridge", "cloudfront", "secretsmanager", "ssm"] as const;
 export type ServiceDocKey = (typeof SERVICE_DOC_KEYS)[number];
 export type DocKey = ResourceType | ServiceDocKey;
 
@@ -30,9 +30,14 @@ export const DOC_FIELDS = {
   "target-group": ["vpc", "protocol", "port", "targets", "healthCheck", "healthCheckPath", "healthCheckPort", "healthyThreshold", "unhealthyThreshold", "timeoutSeconds", "intervalSeconds", "matcher"],
   "db-subnet-group": ["description", "subnets"],
   rds: ["engine", "instanceClass", "port", "allocatedStorageGb", "dbSubnetGroup", "securityGroups", "publiclyAccessible", "multiAz", "state"],
+  lambda: ["runtime", "handler", "architecture", "memoryMb", "timeoutSeconds", "roleId", "codeTemplate", "templateTarget", "virtualDurationMs", "errorRatePercent", "environment", "reservedConcurrency", "permissions", "subnets", "securityGroups", "triggers"],
   s3: ["bucketName", "region", "objectKey", "blockPublicAccess", "blockPublicAcls", "ignorePublicAcls", "blockPublicPolicy", "restrictPublicBuckets", "versioning", "encryption", "bucketPolicy", "staticWebsite", "indexDocument", "errorDocument"],
   iam: ["user", "group", "role", "trustPolicy", "policyDocument", "effect", "action", "resource", "condition", "principal", "managedPolicy", "accessKey", "consoleAccess", "mfa", "instanceProfile", "session", "leastPrivilege"],
   cloudwatch: ["namespace", "metricName", "resourceDimension", "statistic", "period", "threshold", "comparisonOperator", "evaluationPeriods", "datapointsToAlarm", "treatMissingData", "alarmState", "notification", "virtualLoad", "dashboard"],
+  eventbridge: ["eventBus", "eventPattern", "ruleState", "ruleTargets", "testEvent", "scheduleExpression", "timezone", "flexibleTimeWindow", "scheduleTarget", "schedulerRole", "scheduleState", "retryPolicy", "scheduleInput"],
+  cloudfront: ["domainName", "distributionState", "origin", "originAccess", "originProtocolPolicy", "defaultRootObject", "cacheBehavior", "pathPattern", "viewerProtocolPolicy", "allowedMethods", "cachePolicy", "edgeCache", "invalidation", "priceClass"],
+  secretsmanager: ["secretName", "secretType", "secretKeys", "secretValue", "secretVersion", "rotation", "rotationFunction", "deletion", "encryptionKey", "secretArn", "secretAccess"],
+  ssm: ["parameterName", "parameterType", "parameterTier", "parameterValue", "parameterVersion", "parameterAccess", "managedNode", "ssmAgent", "instanceProfile", "ssmEndpoint", "sessionManager", "startSession"],
 } as const satisfies Record<DocKey, readonly string[]>;
 
 export type FieldKeyOf<K extends DocKey> = (typeof DOC_FIELDS)[K][number];

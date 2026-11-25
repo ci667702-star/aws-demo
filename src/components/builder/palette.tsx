@@ -13,7 +13,7 @@ import { RESOURCE_DRAG_TYPE } from "./canvas/architecture-canvas";
 const GROUPS: { label: string; types: ResourceType[] }[] = [
   { label: "네트워킹", types: ["vpc", "subnet", "internet-gateway", "route-table", "nat-gateway", "elastic-ip"] },
   { label: "보안", types: ["security-group", "network-acl"] },
-  { label: "컴퓨팅", types: ["ec2"] },
+  { label: "컴퓨팅", types: ["ec2", "lambda"] },
   { label: "로드 밸런싱", types: ["alb", "target-group"] },
   { label: "데이터베이스", types: ["db-subnet-group", "rds"] },
 ];

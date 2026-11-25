@@ -85,7 +85,7 @@ describe("JSON 내보내기와 가져오기", () => {
   it("스키마에 맞지 않는 데이터를 거부한다", () => {
     const project = createThreeTierSample();
     const broken = JSON.parse(exportProjectJson(project));
-    broken.project.resources[0].type = "lambda";
+    broken.project.resources[0].type = "dynamodb";
     const r = parseProjectJson(JSON.stringify(broken));
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.errors[0]).toContain("스키마");

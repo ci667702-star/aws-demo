@@ -5,7 +5,11 @@ import { ProjectBuilder } from "@/lib/project/builder";
 import { NACL, SG } from "@/lib/project/factory";
 import { createNatInstanceSample, createPublicEc2Sample, createThreeTierSample } from "@/lib/project/samples";
 import { createLab5Starter } from "@/lib/labs/labs";
-import { natInstanceProject, useDeterministicIds } from "../helpers";
+import * as cf from "@/lib/project/cloudfront-actions";
+import { advanceLifecycle } from "@/lib/project/lifecycle";
+import * as sm from "@/lib/project/secrets-actions";
+import * as ssm from "@/lib/project/ssm-actions";
+import { cdnProject, lambdaProject, must, natInstanceProject, scheduledLambdaProject, setFunctionTarget, ssmNodeProject, useDeterministicIds } from "../helpers";
 
 beforeEach(useDeterministicIds);
 
@@ -252,6 +256,57 @@ const triggers: Record<string, () => Project> = {
   "RDS-009": () => dbTier({ multiAz: false }),
   "RDS-010": () => dbTier({ state: "stopped" }),
   "RDS-011": () => dbTier({ dbPublic: true }),
+  "LAM-001": () => lambdaProject({ role: "none" }),
+  "LAM-002": () => lambdaProject({ sg: false }),
+  "LAM-003": () => lambdaProject({ role: "basic" }),
+  "LAM-004": () => lambdaProject({ placement: "public", template: "http-get" }),
+  "LAM-005": () => lambdaProject({ placement: "none", role: "basic" }),
+  "LAM-006": () => lambdaProject({ duration: 5000, timeout: 3 }),
+  "LAM-007": () => lambdaProject({ placement: "none", role: "no-logs", template: "hello" }),
+  "LAM-008": () => lambdaProject({ placement: "one-az" }),
+  "LAM-009": () => lambdaProject({ concurrency: 0 }),
+  "LAM-010": () => lambdaProject({ placement: "none", role: "basic", template: "s3-list" }),
+  "EVB-001": () => scheduledLambdaProject({ scheduleRole: "no-invoke" }),
+  "EVB-002": () => scheduledLambdaProject({ rule: "no-permission" }),
+  "EVB-003": () => scheduledLambdaProject({ expression: "cron(0 9 * * * *)" }),
+  "EVB-004": () => scheduledLambdaProject({ expression: "at(2020-01-01T09:00:00)" }),
+  "EVB-005": () => scheduledLambdaProject({ rule: "no-target" }),
+  "SMR-001": () => lambdaProject({ template: "secret-get" }),
+  "SMR-002": () => setFunctionTarget(must(sm.createSecret(lambdaProject({ template: "secret-get" }), { name: "prod/app/api", description: "", kind: "other", keys: ["api_key"] })).project, "prod/app/api"),
+  "SMR-003": () => {
+    const created = must(sm.createSecret(lambdaProject({ template: "hello" }), { name: "prod/db", description: "", kind: "other", keys: ["password"] }));
+    const fn = created.project.resources.find((r) => r.type === "lambda")!;
+    return must(sm.configureRotation(created.project, created.createdId!, { enabled: true, days: 30, lambdaId: fn.id, addPermission: false })).project;
+  },
+  "SMR-004": () => {
+    const p = lambdaProject();
+    const db = p.resources.find((r) => r.type === "rds")!;
+    return must(sm.createSecret(p, { name: "prod/db/admin", description: "", kind: "rds", rdsId: db.id, username: "admin" })).project;
+  },
+  "SSM-001": () => lambdaProject({ template: "ssm-get" }),
+  "SSM-002": () => setFunctionTarget(must(ssm.putParameter(lambdaProject({ template: "ssm-get" }), { name: "/my-app/prod/db-host", description: "", type: "String", tier: "Standard", value: "db.internal.example", overwrite: false })).project, "/my-app/prod/db-host"),
+  "SSM-003": () => ssmNodeProject({ route: "none" }).p,
+  "SSM-004": () => ssmNodeProject({ ssh: true }).p,
+  "CDN-001": () => cdnProject({ policy: "none" }).p,
+  "CDN-002": () => cdnProject({ defaultRootObject: "" }).p,
+  "CDN-003": () => cdnProject({ viewerProtocolPolicy: "allow-all" }).p,
+  "CDN-004": () => cdnProject({ originAccess: "public" }).p,
+  "CDN-005": () => {
+    const p = webTier({ scheme: "internal" });
+    const alb = p.resources.find((r) => r.type === "alb")!;
+    const created = must(
+      cf.createDistribution(p, {
+        comment: "api",
+        enabled: true,
+        defaultRootObject: "",
+        priceClass: "PriceClass_All",
+        origins: [{ id: "api-origin", kind: "alb", targetId: alb.id, originAccess: "public", protocolPolicy: "http-only" }],
+        behaviors: [{ pathPattern: "*", originId: "api-origin", viewerProtocolPolicy: "redirect-to-https", allowedMethods: "ALL", cachePolicy: "CachingDisabled" }],
+      }),
+    );
+    return advanceLifecycle(created.project, created.createdId!, "InProgress", "Deployed")!;
+  },
+  "CDN-006": () => cdnProject({ policy: "unscoped" }).p,
   "GEN-001": () => {
     const b = new ProjectBuilder("orphan");
     b.vpc("vpc", "10.0.0.0/16");
@@ -264,7 +319,7 @@ describe("검증 규칙", () => {
   it("모든 규칙은 고유 ID를 가진다", () => {
     const ids = VALIDATION_RULES.map((r) => r.id);
     expect(new Set(ids).size).toBe(ids.length);
-    for (const id of ids) expect(id).toMatch(/^(NET|SEC|EC2|ELB|RDS|GEN|EIP)-\d{3}$/);
+    for (const id of ids) expect(id).toMatch(/^(NET|SEC|EC2|ELB|RDS|GEN|EIP|LAM|EVB|SMR|SSM|CDN)-\d{3}$/);
   });
 
   it("모든 규칙에 트리거 테스트가 있다", () => {
@@ -284,6 +339,26 @@ describe("검증 규칙", () => {
 });
 
 describe("검증 결과는 실제 설정에 따라 달라진다", () => {
+  it("올바른 VPC Lambda와 일정·규칙에는 Lambda·EventBridge 오류와 경고가 없다", () => {
+    const bad = (p: Project) =>
+      validateProject(p)
+        .findings.filter((f) => f.severity !== "info" && /^(LAM|EVB)-/.test(f.ruleId))
+        .map((f) => `${f.ruleId}: ${f.cause}`);
+    expect(bad(lambdaProject())).toEqual([]);
+    expect(bad(scheduledLambdaProject({ rule: "with-permission" }))).toEqual([]);
+  });
+
+  it("OAC 정책을 넣은 CloudFront 배포와 온라인 관리형 노드에는 CDN·SSM 오류와 경고가 없다", () => {
+    const bad = (p: Project) =>
+      validateProject(p)
+        .findings.filter((f) => f.severity !== "info" && /^(CDN|SSM|SMR)-/.test(f.ruleId))
+        .map((f) => `${f.ruleId}: ${f.cause}`);
+    expect(bad(cdnProject().p)).toEqual([]);
+    expect(bad(ssmNodeProject().p)).toEqual([]);
+    // 정책을 지우면 바로 CDN-001로 바뀐다 (설정에 따라 결과가 갱신됨)
+    expect(validateProject(cdnProject({ policy: "none" }).p).findings.map((f) => f.ruleId)).toContain("CDN-001");
+  });
+
   it("정상 구성(3-Tier 샘플)에는 오류와 경고가 없다", () => {
     const report = validateProject(createThreeTierSample());
     expect(report.findings.filter((f) => f.severity !== "info").map((f) => `${f.ruleId}: ${f.cause}`)).toEqual([]);

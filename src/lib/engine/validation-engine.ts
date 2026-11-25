@@ -25,11 +25,20 @@ import {
   simulateWithTopology,
   type SimulationResult,
 } from "./connectivity-engine";
+import { parseEventPattern } from "./event-pattern";
+import { evaluateIam, objectArn } from "./iam-engine";
+import { internetPath, ruleCanInvoke, scheduleCanInvoke } from "./lambda-engine";
 import { hasNatSoftware, natInstanceScript, natInstanceUsages } from "./nat-instance";
+import { evaluateS3Access } from "./s3-engine";
+import { nextRunTimes, parseScheduleExpression } from "./schedule-expression";
 import { evaluateNacl, findShadowedRules, describeNaclRule } from "./network-acl-engine";
-import { AVAILABILITY_ZONES, type NaclRule, type Project, type SgRule } from "./resource-models";
+import { evaluateOacAccess, isDefaultBehavior, originTargetName } from "./cloudfront-engine";
+import { AVAILABILITY_ZONES, type IamRole, type LambdaCodeTemplate, type NaclRule, type Project, type ResourceOfType, type SgRule } from "./resource-models";
 import { findDuplicateDestinations } from "./route-engine";
+import { findSecretByName, isPendingDeletion, isPurged, liveSecrets, secretArn } from "./secrets-engine";
+import { checkSecretRotation, ROTATION_ROLE_ACTIONS } from "./service-access";
 import { describeSgRule, evaluateSecurityGroups, ruleAllowsFromAnywhere } from "./security-group-engine";
+import { findParameterByName, managedNodeStatus, parameterArn } from "./ssm-engine";
 import { buildTopology, displayName, type Topology } from "./topology-engine";
 
 export type Severity = "error" | "warning" | "info";
@@ -107,6 +116,27 @@ function representativeIp(cidrText: string): number | null {
   if (cidr.prefix === 0) return parseIpv4(DEFAULT_INTERNET_CLIENT_IP);
   return cidr.prefix >= 31 ? cidr.network : cidr.network + 1;
 }
+
+/** Lambda가 맡을 수 있는 실행 역할 (없거나 신뢰 정책이 맞지 않으면 undefined) */
+function lambdaRole(project: Project, fn: ResourceOfType<"lambda">): IamRole | undefined {
+  const role = project.services.iam.roles.find((r) => r.id === fn.config.roleId);
+  return role?.trustedEntity === "lambda.amazonaws.com" ? role : undefined;
+}
+
+const roleAllows = (project: Project, role: IamRole, action: string, resource = "*") => evaluateIam(project, { kind: "role", role }, action, resource).decision === "allowed";
+
+/** VPC 밖(인터넷·AWS 퍼블릭 엔드포인트)에 닿아야 하는 코드 템플릿 */
+const INTERNET_TEMPLATES: Partial<Record<LambdaCodeTemplate, string>> = {
+  "s3-list": "S3 읽기",
+  "http-get": "외부 API 호출",
+  "secret-get": "Secrets Manager 보안 암호 읽기",
+  "ssm-get": "Parameter Store 파라미터 읽기",
+};
+
+const LAMBDA_FIX_ROLE = [
+  "심화 모드: Lambda → 함수 → 구성 → 권한에서 역할을 바꾸거나, IAM → 역할에서 그 역할에 정책을 연결하세요.",
+  "쉬운 모드: 함수 설정의 '실행 역할'에서 역할을 고르거나 '기본 실행 역할 만들기'를 누르세요.",
+];
 
 function isServiceLikeRule(rule: NaclRule): boolean {
   if (rule.action !== "allow") return false;
@@ -1953,6 +1983,751 @@ export const VALIDATION_RULES: ValidationRule[] = [
       }),
   },
 
+  // ------------------------------------------------------------ Lambda
+  {
+    id: "LAM-001",
+    category: "compute",
+    severity: "error",
+    title: "Lambda가 맡을 수 없는 실행 역할",
+    concept: "Lambda 함수는 실행 역할(IAM 역할)을 맡아 그 임시 자격 증명으로 실행됩니다. 역할의 신뢰 정책이 lambda.amazonaws.com을 허용해야 Lambda가 역할을 맡을 수 있습니다.",
+    check: ({ topo }) =>
+      topo.ofType("lambda").flatMap((fn) => {
+        if (lambdaRole(topo.project, fn)) return [];
+        const role = topo.project.services.iam.roles.find((r) => r.id === fn.config.roleId);
+        return [
+          {
+            key: fn.id,
+            resourceIds: [fn.id],
+            cause: !fn.config.roleId
+              ? `${displayName(fn)}에 실행 역할이 없어 함수를 실행할 수 없습니다.`
+              : !role
+                ? `${displayName(fn)}의 실행 역할이 삭제되어 함수를 실행할 수 없습니다.`
+                : `${displayName(fn)}의 실행 역할 ${role.name}은(는) ${role.trustedEntity}를 신뢰해 Lambda가 맡을 수 없습니다.`,
+            condition: `${displayName(fn)}.roleId = ${role ? role.name : "없음"}`,
+            fix: LAMBDA_FIX_ROLE,
+            impact: "lambda.amazonaws.com을 신뢰하는 역할을 연결하면 호출이 실행 단계로 넘어갑니다. (실제 AWS에서는 이런 함수를 만들 수 없습니다)",
+          },
+        ];
+      }),
+  },
+  {
+    id: "LAM-002",
+    category: "compute",
+    severity: "error",
+    title: "VPC에 연결했지만 보안 그룹이 없는 Lambda",
+    concept: "VPC에 연결한 Lambda는 서브넷에 네트워크 인터페이스를 만들고, 그 인터페이스에 보안 그룹을 적용합니다. 서브넷을 지정하면 보안 그룹도 하나 이상 지정해야 합니다.",
+    check: ({ topo }) =>
+      topo
+        .ofType("lambda")
+        .filter((fn) => topo.lambdaSubnets(fn.id).length > 0 && topo.securityGroupsOf(fn.id).length === 0)
+        .map((fn) => ({
+          key: fn.id,
+          resourceIds: [fn.id],
+          cause: `${displayName(fn)}은(는) 서브넷 ${topo.lambdaSubnets(fn.id).length}개에 연결되어 있지만 보안 그룹이 없습니다.`,
+          condition: `${displayName(fn)}: 서브넷 있음, 보안 그룹 0개`,
+          fix: ["심화 모드: Lambda → 함수 → 구성 → VPC → 편집에서 보안 그룹을 고르세요.", "쉬운 모드: 함수 설정의 'VPC 연결'에서 같은 VPC의 보안 그룹을 체크하세요."],
+          impact: "보안 그룹을 연결하면 함수가 VPC 안에서 실행될 수 있습니다.",
+        })),
+  },
+  {
+    id: "LAM-003",
+    category: "compute",
+    severity: "error",
+    title: "VPC 연결 권한이 없는 실행 역할",
+    concept: "VPC에 연결한 Lambda는 실행 역할의 권한으로 서브넷에 네트워크 인터페이스를 만듭니다. 역할에 ec2:CreateNetworkInterface 같은 권한(AWSLambdaVPCAccessExecutionRole)이 있어야 합니다.",
+    check: ({ topo }) =>
+      topo.ofType("lambda").flatMap((fn) => {
+        const role = lambdaRole(topo.project, fn);
+        if (!role || !topo.lambdaSubnets(fn.id).length || roleAllows(topo.project, role, "ec2:CreateNetworkInterface")) return [];
+        return [
+          {
+            key: fn.id,
+            resourceIds: [fn.id],
+            cause: `${displayName(fn)}은(는) VPC에 연결되어 있지만 실행 역할 ${role.name}에 ec2:CreateNetworkInterface 권한이 없습니다.`,
+            condition: `${role.name}: ec2:CreateNetworkInterface 허용 안 함`,
+            fix: ["실행 역할에 AWS 관리형 정책 AWSLambdaVPCAccessExecutionRole을 연결하세요 (심화 모드: IAM → 역할 → 권한 추가).", "VPC 안의 리소스가 필요 없다면 함수의 VPC 연결을 해제하세요."],
+            impact: "권한을 주면 함수가 서브넷에 네트워크 인터페이스를 만들어 실행됩니다. (실제 AWS에서는 이 상태로 함수를 만들거나 VPC를 바꿀 수 없습니다)",
+          },
+        ];
+      }),
+  },
+  {
+    id: "LAM-004",
+    category: "compute",
+    severity: "warning",
+    title: "인터넷이 필요한데 NAT 경로가 없는 VPC Lambda",
+    concept:
+      "VPC에 연결한 Lambda는 퍼블릭 서브넷에 두어도 퍼블릭 IP를 받지 않습니다. 인터넷이나 S3 같은 AWS 퍼블릭 엔드포인트에 닿으려면 NAT 게이트웨이(또는 NAT 인스턴스) 경로가 있는 프라이빗 서브넷이 필요합니다.",
+    check: ({ topo }) =>
+      topo.ofType("lambda").flatMap((fn) => {
+        const need = INTERNET_TEMPLATES[fn.config.codeTemplate];
+        if (!need) return [];
+        const subnets = topo.lambdaSubnets(fn.id);
+        if (!subnets.length) return [];
+        const path = internetPath(topo, fn);
+        if (path.ok && !path.partial) return [];
+        return [
+          {
+            key: fn.id,
+            severity: path.ok ? ("info" as const) : undefined,
+            title: path.ok ? "일부 서브넷에만 NAT 경로가 있는 VPC Lambda" : undefined,
+            resourceIds: [fn.id, ...subnets.map((s) => s.id)],
+            cause: `${displayName(fn)}의 코드(${need})는 인터넷이나 AWS 서비스의 퍼블릭 엔드포인트가 필요합니다. ${path.detail}`,
+            condition: `${displayName(fn)}: VPC 연결, 외부 접근 필요`,
+            fix: ["NAT 게이트웨이 경로(0.0.0.0/0 → NAT)가 있는 프라이빗 서브넷에 함수를 연결하세요.", "VPC 안의 리소스가 필요 없다면 VPC 연결을 해제하세요 (VPC 밖 Lambda는 인터넷에 닿습니다)."],
+            impact: "NAT 경로가 있으면 호출이 시간 초과 없이 외부에 닿습니다.",
+          },
+        ];
+      }),
+  },
+  {
+    id: "LAM-005",
+    category: "compute",
+    severity: "warning",
+    title: "RDS에 닿지 않는 Lambda",
+    concept: "RDS는 VPC 안에만 있습니다. Lambda가 RDS에 접속하려면 RDS와 같은 VPC의 서브넷에 연결해야 하고, 보안 그룹이 DB 포트를 허용해야 합니다.",
+    check: ({ topo }) =>
+      topo.ofType("lambda").flatMap((fn) => {
+        if (fn.config.codeTemplate !== "rds-query") return [];
+        const rds = topo.getOfType(fn.config.templateTarget, "rds");
+        const subnets = topo.lambdaSubnets(fn.id);
+        if (rds && subnets.some((s) => topo.vpcOfSubnet(s.id) === topo.vpcOf(rds.id))) return [];
+        return [
+          {
+            key: fn.id,
+            resourceIds: [fn.id, rds?.id],
+            cause: !rds
+              ? `${displayName(fn)}은(는) RDS 조회 코드지만 접속할 DB 인스턴스가 없습니다.`
+              : subnets.length
+                ? `${displayName(fn)}은(는) ${displayName(rds)}과(와) 다른 VPC에 연결되어 있습니다.`
+                : `${displayName(fn)}은(는) VPC에 연결되어 있지 않아 VPC 안의 ${displayName(rds)}에 닿지 않습니다.`,
+            condition: `${displayName(fn)}: 코드 = RDS 조회`,
+            fix: ["함수를 RDS와 같은 VPC의 프라이빗 서브넷에 연결하고 보안 그룹을 지정하세요.", "RDS 보안 그룹의 인바운드에 함수 보안 그룹을 소스로 DB 포트를 허용하세요."],
+            impact: "같은 VPC에 연결하면 함수가 DB 포트까지 닿습니다 (SQL은 실행하지 않음).",
+          },
+        ];
+      }),
+  },
+  {
+    id: "LAM-006",
+    category: "compute",
+    severity: "warning",
+    title: "제한 시간보다 긴 가상 실행 시간",
+    concept: "Lambda는 제한 시간(기본 3초, 최대 900초)을 넘긴 실행을 강제로 끝내고 오류(Task timed out)로 처리합니다. 끝날 때까지 쓴 시간은 모두 과금됩니다.",
+    check: ({ topo }) =>
+      topo
+        .ofType("lambda")
+        .filter((fn) => fn.config.virtualDurationMs > fn.config.timeoutSeconds * 1000)
+        .map((fn) => ({
+          key: fn.id,
+          resourceIds: [fn.id],
+          cause: `${displayName(fn)}의 가상 실행 시간 ${fn.config.virtualDurationMs}ms가 제한 시간 ${fn.config.timeoutSeconds}초보다 깁니다.`,
+          condition: `virtualDurationMs ${fn.config.virtualDurationMs} > timeout ${fn.config.timeoutSeconds * 1000}`,
+          fix: ["제한 시간을 실행 시간보다 넉넉하게 늘리거나, 코드가 빨리 끝나게 하세요 (가상 실행 시간 줄이기)."],
+          impact: "제한 시간 안에 끝나면 호출이 시간 초과 없이 성공합니다.",
+        })),
+  },
+  {
+    id: "LAM-007",
+    category: "compute",
+    severity: "info",
+    title: "로그 권한이 없는 실행 역할",
+    concept: "Lambda는 실행 로그를 CloudWatch Logs에 씁니다. 실행 역할에 logs:CreateLogStream·logs:PutLogEvents 권한(AWSLambdaBasicExecutionRole)이 없으면 함수는 실행되지만 로그가 남지 않아 문제를 찾기 어렵습니다.",
+    check: ({ topo }) =>
+      topo.ofType("lambda").flatMap((fn) => {
+        const role = lambdaRole(topo.project, fn);
+        if (!role || (roleAllows(topo.project, role, "logs:CreateLogStream") && roleAllows(topo.project, role, "logs:PutLogEvents"))) return [];
+        return [
+          {
+            key: fn.id,
+            resourceIds: [fn.id],
+            cause: `${displayName(fn)}의 실행 역할 ${role.name}에 CloudWatch Logs 권한이 없습니다.`,
+            condition: `${role.name}: logs:PutLogEvents 허용 안 함`,
+            fix: ["실행 역할에 AWS 관리형 정책 AWSLambdaBasicExecutionRole을 연결하세요."],
+            impact: "권한을 주면 실행 로그(START·END·REPORT)가 남습니다.",
+          },
+        ];
+      }),
+  },
+  {
+    id: "LAM-008",
+    category: "compute",
+    severity: "info",
+    title: "한 가용 영역의 서브넷에만 연결한 Lambda",
+    concept: "VPC에 연결한 Lambda는 고른 서브넷 중 하나에서 실행됩니다. 서브넷이 한 가용 영역에만 있으면 그 가용 영역에 장애가 났을 때 함수가 실행되지 못합니다.",
+    check: ({ topo }) =>
+      topo.ofType("lambda").flatMap((fn) => {
+        const subnets = topo.lambdaSubnets(fn.id);
+        if (!subnets.length || new Set(subnets.map((s) => s.config.availabilityZone)).size >= 2) return [];
+        return [
+          {
+            key: fn.id,
+            resourceIds: [fn.id],
+            cause: `${displayName(fn)}은(는) 가용 영역 ${subnets[0].config.availabilityZone}의 서브넷에만 연결되어 있습니다.`,
+            condition: "VPC 서브넷의 가용 영역 1개",
+            fix: ["다른 가용 영역의 서브넷도 함께 고르세요 (AWS 권장: 2개 이상)."],
+            impact: "여러 가용 영역에 연결하면 한 곳에 장애가 나도 함수가 실행됩니다.",
+          },
+        ];
+      }),
+  },
+  {
+    id: "LAM-009",
+    category: "compute",
+    severity: "warning",
+    title: "예약 동시성이 0인 Lambda (모든 호출 제한)",
+    concept: "예약 동시성은 함수가 동시에 실행될 수 있는 최대 개수입니다. 0으로 두면 모든 호출이 제한(throttle)되어 실행되지 않습니다. 함수를 잠시 멈출 때 쓰는 설정입니다.",
+    check: ({ topo }) =>
+      topo
+        .ofType("lambda")
+        .filter((fn) => fn.config.reservedConcurrency === 0)
+        .map((fn) => ({
+          key: fn.id,
+          resourceIds: [fn.id],
+          cause: `${displayName(fn)}의 예약 동시성이 0이라 모든 호출이 TooManyRequestsException으로 제한됩니다.`,
+          condition: "reservedConcurrency = 0",
+          fix: ["멈출 의도가 아니라면 예약 동시성을 해제하거나 1 이상으로 바꾸세요 (심화 모드: 구성 → 동시성)."],
+          impact: "해제하면 일정·테스트 호출이 다시 실행됩니다.",
+        })),
+  },
+  {
+    id: "LAM-010",
+    category: "compute",
+    severity: "warning",
+    title: "S3를 읽는 코드인데 실행 역할에 S3 권한이 없음",
+    concept: "Lambda 코드가 AWS 서비스를 호출할 때는 실행 역할의 권한이 적용됩니다. 버킷의 객체 목록을 읽으려면 그 버킷에 대한 s3:ListBucket 허용이 필요합니다 (최소 권한: 필요한 버킷만).",
+    check: ({ topo }) =>
+      topo.ofType("lambda").flatMap((fn) => {
+        if (fn.config.codeTemplate !== "s3-list") return [];
+        const role = lambdaRole(topo.project, fn);
+        const bucket = topo.project.services.s3.buckets.find((b) => b.name === fn.config.templateTarget.trim());
+        if (!role || !bucket) return [];
+        const access = evaluateS3Access(topo.project, { bucketId: bucket.id, key: null, action: "s3:ListBucket", caller: { kind: "role", roleId: role.id } });
+        if (access.ok) return [];
+        return [
+          {
+            key: fn.id,
+            resourceIds: [fn.id],
+            cause: `${displayName(fn)}의 실행 역할 ${role.name}은(는) 버킷 ${bucket.name}의 s3:ListBucket이 허용되지 않아 AccessDenied가 납니다.`,
+            condition: `${role.name}: s3:ListBucket on ${bucket.name} 거부`,
+            fix: [`실행 역할에 arn:aws:s3:::${bucket.name}에 대한 s3:ListBucket을 허용하는 정책을 연결하세요 (예: AmazonS3ReadOnlyAccess, 또는 이 버킷만 허용하는 고객 관리형 정책).`],
+            impact: "권한을 주면 호출이 버킷의 객체 목록을 돌려줍니다.",
+          },
+        ];
+      }),
+  },
+
+  // ------------------------------------------------------------ EventBridge
+  {
+    id: "EVB-001",
+    category: "general",
+    severity: "error",
+    title: "Lambda를 호출할 수 없는 일정",
+    concept: "EventBridge Scheduler 일정은 실행 역할을 맡아 대상을 호출합니다. 역할이 scheduler.amazonaws.com을 신뢰하고 대상 함수의 lambda:InvokeFunction을 허용해야 합니다.",
+    check: ({ topo }) =>
+      topo.project.services.eventbridge.schedules.flatMap((s) => {
+        if (s.state !== "ENABLED" || !parseScheduleExpression(s.expression).ok) return [];
+        const can = scheduleCanInvoke(topo.project, s, topo.getOfType(s.targetLambdaId, "lambda") ?? undefined);
+        if (can.ok) return [];
+        return [
+          {
+            key: s.id,
+            resourceIds: [s.targetLambdaId],
+            cause: `일정 ${s.name}: ${can.reason}`,
+            condition: `일정 ${s.name} (${s.expression}) 활성`,
+            fix: ["심화 모드: EventBridge → 일정 → 편집에서 '이 일정에 대한 새 역할 만들기'를 고르거나, 실행 역할에 대상 함수의 lambda:InvokeFunction을 허용하세요.", "대상 함수가 삭제되었다면 일정의 대상을 바꾸거나 일정을 삭제하세요."],
+            impact: "고치면 실행 시각마다 함수가 호출되고 Invocations 지표가 늘어납니다.",
+          },
+        ];
+      }),
+  },
+  {
+    id: "EVB-002",
+    category: "general",
+    severity: "error",
+    title: "Lambda를 호출할 수 없는 규칙 (리소스 기반 정책 없음)",
+    concept: "EventBridge 규칙은 역할이 아니라 대상 함수의 리소스 기반 정책으로 호출 권한을 얻습니다. 함수 정책에 events.amazonaws.com과 이 규칙의 ARN을 허용하는 문이 있어야 합니다 (콘솔은 자동으로 추가).",
+    check: ({ topo }) =>
+      topo.project.services.eventbridge.rules.flatMap((rule) => {
+        if (rule.state !== "ENABLED") return [];
+        return rule.targetLambdaIds.flatMap((id) => {
+          const can = ruleCanInvoke(rule, topo.getOfType(id, "lambda") ?? undefined);
+          if (can.ok) return [];
+          return [
+            {
+              key: `${rule.id}:${id}`,
+              resourceIds: [id],
+              cause: `규칙 ${rule.name}: ${can.reason}`,
+              condition: `규칙 ${rule.name}의 대상 ${topo.name(id)}`,
+              fix: ["심화 모드: Lambda → 함수 → 구성 → 권한 → 권한 추가에서 주체 events.amazonaws.com, 소스 ARN에 규칙 ARN을 넣으세요.", "또는 규칙 편집에서 'Lambda 호출 권한 자동 추가'를 켜고 대상을 다시 저장하세요."],
+              impact: "고치면 패턴과 일치하는 이벤트가 올 때 함수가 호출됩니다.",
+            },
+          ];
+        });
+      }),
+  },
+  {
+    id: "EVB-003",
+    category: "general",
+    severity: "warning",
+    title: "표현식·패턴이 올바르지 않은 일정·규칙",
+    concept: "일정 표현식(rate·cron·at)과 이벤트 패턴(JSON)은 AWS가 정한 형식을 따라야 합니다. 형식이 틀리면 일정이 실행되지 않고 규칙이 어떤 이벤트와도 일치하지 않습니다.",
+    check: ({ topo }) => {
+      const { schedules, rules } = topo.project.services.eventbridge;
+      return [
+        ...schedules.flatMap((s) => {
+          const parsed = parseScheduleExpression(s.expression);
+          return parsed.ok
+            ? []
+            : [
+                {
+                  key: s.id,
+                  resourceIds: [s.targetLambdaId],
+                  cause: `일정 ${s.name}의 표현식 ${s.expression}이(가) 올바르지 않습니다: ${parsed.error}`,
+                  condition: `일정 ${s.name}`,
+                  fix: ["일정 편집에서 '자주 쓰는 일정' 버튼으로 표현식을 다시 채우세요. 예: rate(5 minutes), cron(0 9 * * ? *)"],
+                  impact: "고치면 다음 실행 시각이 계산되고 함수가 호출됩니다.",
+                },
+              ];
+        }),
+        ...rules.flatMap((r) => {
+          const parsed = parseEventPattern(r.eventPattern);
+          return parsed.ok
+            ? []
+            : [
+                {
+                  key: r.id,
+                  resourceIds: r.targetLambdaIds,
+                  cause: `규칙 ${r.name}의 이벤트 패턴이 올바르지 않습니다: ${parsed.error}`,
+                  condition: `규칙 ${r.name}`,
+                  fix: ["규칙 편집에서 예시 패턴을 고른 뒤 필요한 값만 바꾸세요. 값은 항상 배열로 씁니다."],
+                  impact: "고치면 테스트 이벤트로 일치 여부를 확인할 수 있습니다.",
+                },
+              ];
+        }),
+      ];
+    },
+  },
+  {
+    id: "EVB-004",
+    category: "general",
+    severity: "info",
+    title: "이미 지난 일회성 일정",
+    concept: "at() 일정은 지정한 시각에 한 번만 실행됩니다. 그 시각이 지나면 다시 실행되지 않으므로 지워도 됩니다 (실제 AWS는 완료 후 자동 삭제를 고를 수 있습니다).",
+    check: ({ topo }) =>
+      topo.project.services.eventbridge.schedules.flatMap((s) => {
+        const parsed = parseScheduleExpression(s.expression);
+        if (s.state !== "ENABLED" || !parsed.ok || parsed.value.kind !== "at") return [];
+        if (nextRunTimes(parsed.value, s.timezone, Date.parse(s.createdAt), Date.now(), 1).length) return [];
+        return [
+          {
+            key: s.id,
+            resourceIds: [s.targetLambdaId],
+            cause: `일정 ${s.name}의 시각(${s.expression}, ${s.timezone})이 이미 지나 더 이상 실행되지 않습니다.`,
+            condition: `일정 ${s.name}: 다음 실행 없음`,
+            fix: ["필요 없다면 일정을 삭제하고, 다시 실행하려면 시각을 바꾸세요."],
+            impact: "정리하면 일정 목록에서 실제로 동작하는 일정만 보입니다.",
+          },
+        ];
+      }),
+  },
+  {
+    id: "EVB-005",
+    category: "general",
+    severity: "info",
+    title: "대상이 없는 규칙",
+    concept: "규칙은 이벤트를 골라 대상에 보내는 역할만 합니다. 대상이 없으면 일치한 이벤트가 어디에도 전달되지 않습니다.",
+    check: ({ topo }) =>
+      topo.project.services.eventbridge.rules
+        .filter((r) => r.state === "ENABLED" && r.targetLambdaIds.length === 0)
+        .map((r) => ({
+          key: r.id,
+          resourceIds: [],
+          cause: `규칙 ${r.name}에 대상이 없습니다.`,
+          condition: `규칙 ${r.name}: 대상 0개`,
+          fix: ["규칙 편집에서 대상 Lambda 함수를 고르세요."],
+          impact: "대상을 추가하면 일치한 이벤트가 함수로 전달됩니다.",
+        })),
+  },
+
+  // ------------------------------------------------------------ Secrets Manager
+  {
+    id: "SMR-001",
+    category: "security",
+    severity: "error",
+    title: "없거나 삭제가 예약된 보안 암호를 읽는 Lambda",
+    concept:
+      "보안 암호는 이름이나 ARN으로 읽습니다. 보안 암호가 없으면 ResourceNotFoundException이 나고, 삭제가 예약된 보안 암호는 복구 기간 동안 값을 읽을 수 없어 InvalidRequestException이 납니다.",
+    check: ({ topo }) => {
+      const now = Date.now();
+      return topo.ofType("lambda").flatMap((fn) => {
+        if (fn.config.codeTemplate !== "secret-get") return [];
+        const name = fn.config.templateTarget.trim();
+        const found = findSecretByName(topo.project, name);
+        const secret = found && !isPurged(found, now) ? found : undefined;
+        if (secret && !isPendingDeletion(secret)) return [];
+        return [
+          {
+            key: fn.id,
+            resourceIds: [fn.id],
+            cause: !name
+              ? `${displayName(fn)}은(는) 보안 암호를 읽는 코드인데 읽을 보안 암호를 정하지 않았습니다.`
+              : secret
+                ? `${displayName(fn)}이(가) 읽는 보안 암호 ${secret.name}은(는) 삭제가 예약되어 값을 읽을 수 없습니다.`
+                : `${displayName(fn)}이(가) 읽는 보안 암호 ${name}이(가) 없습니다.`,
+            condition: `${displayName(fn)}: 코드 = 보안 암호 읽기, 대상 = ${name || "(없음)"}`,
+            fix: secret
+              ? ["심화 모드: Secrets Manager → 보안 암호에서 '삭제 취소'로 복원하세요.", "더 쓰지 않는 보안 암호라면 함수의 코드 대상을 다른 보안 암호로 바꾸세요."]
+              : ["심화 모드: Secrets Manager에서 보안 암호를 만들고, 함수의 코드 탭에서 대상으로 고르세요."],
+            impact: "고치면 함수가 실행 중에 보안 암호의 값을 읽습니다.",
+          },
+        ];
+      });
+    },
+  },
+  {
+    id: "SMR-002",
+    category: "security",
+    severity: "warning",
+    title: "보안 암호를 읽는 코드인데 실행 역할에 권한이 없음",
+    concept: "Lambda가 보안 암호를 읽을 때는 실행 역할의 권한이 적용됩니다. 그 보안 암호의 ARN에 대한 secretsmanager:GetSecretValue 허용이 필요합니다 (최소 권한: 필요한 보안 암호만).",
+    check: ({ topo }) =>
+      topo.ofType("lambda").flatMap((fn) => {
+        if (fn.config.codeTemplate !== "secret-get") return [];
+        const role = lambdaRole(topo.project, fn);
+        const secret = findSecretByName(topo.project, fn.config.templateTarget);
+        if (!role || !secret) return [];
+        const arn = secretArn(secret);
+        if (roleAllows(topo.project, role, "secretsmanager:GetSecretValue", arn)) return [];
+        return [
+          {
+            key: fn.id,
+            resourceIds: [fn.id],
+            cause: `${displayName(fn)}의 실행 역할 ${role.name}에 보안 암호 ${secret.name}의 secretsmanager:GetSecretValue 권한이 없어 AccessDeniedException이 납니다.`,
+            condition: `${role.name}: secretsmanager:GetSecretValue on ${secret.name} 거부`,
+            fix: [`실행 역할에 Resource가 ${arn}인 secretsmanager:GetSecretValue 허용 정책을 연결하세요.`, "심화 모드: 보안 암호의 '접근 테스트' 탭에서 이 함수를 골라 결과를 확인할 수 있습니다."],
+            impact: "권한을 주면 코드에 암호를 넣지 않고도 함수가 실행 중에 값을 읽습니다.",
+          },
+        ];
+      }),
+  },
+  {
+    id: "SMR-003",
+    category: "security",
+    severity: "warning",
+    title: "자동 교체가 실패하는 보안 암호",
+    concept:
+      "교체는 Secrets Manager가 교체 함수(Lambda)를 호출해 새 암호를 만들고 적용하는 작업입니다. 함수의 리소스 기반 정책이 secretsmanager.amazonaws.com의 호출을 허용하고, 실행 역할이 그 보안 암호를 읽고 새 버전을 쓸 수 있어야 합니다.",
+    check: ({ topo }) =>
+      liveSecrets(topo.project, Date.now()).flatMap((s) => {
+        if (!s.rotation.enabled || isPendingDeletion(s)) return [];
+        const result = checkSecretRotation(topo.project, topo, s);
+        const failed = result.checks.find((c) => c.status === "fail");
+        if (result.ok || !failed) return [];
+        return [
+          {
+            key: s.id,
+            resourceIds: [s.rotation.lambdaId],
+            cause: `보안 암호 ${s.name}의 자동 교체가 실패합니다 — ${failed.title}: ${failed.detail}`,
+            condition: `보안 암호 ${s.name}: 자동 교체 켜짐 (${s.rotation.days}일)`,
+            fix: [
+              "심화 모드: Secrets Manager → 보안 암호 → 교체 탭의 '교체가 성공할 조건'에서 실패한 항목을 고치세요.",
+              `교체 함수의 실행 역할에 ${ROTATION_ROLE_ACTIONS.join(", ")}을(를), 함수의 리소스 기반 정책에 secretsmanager.amazonaws.com 호출 허용을 주세요.`,
+            ],
+            impact: "고치면 '즉시 교체'가 성공하고 새 버전이 AWSCURRENT가 됩니다.",
+          },
+        ];
+      }),
+  },
+  {
+    id: "SMR-004",
+    category: "security",
+    severity: "info",
+    title: "자동 교체가 꺼진 DB 자격 증명",
+    concept: "DB 암호를 오래 그대로 쓰면 새어 나갔을 때 피해가 커집니다. Secrets Manager의 자동 교체를 켜면 정해진 주기마다 암호를 바꿉니다.",
+    check: ({ topo }) =>
+      liveSecrets(topo.project, Date.now())
+        .filter((s) => s.kind === "rds" && !s.rotation.enabled && !isPendingDeletion(s))
+        .map((s) => ({
+          key: s.id,
+          resourceIds: [s.rdsId],
+          cause: `DB 자격 증명 보안 암호 ${s.name}의 자동 교체가 꺼져 있습니다.`,
+          condition: `보안 암호 ${s.name}: 유형 RDS 자격 증명, 교체 꺼짐`,
+          fix: ["심화 모드: 보안 암호 → 교체 탭 → 교체 편집에서 자동 교체를 켜고 교체 함수를 고르세요."],
+          impact: "주기적으로 바꾸면 암호가 새어 나가도 쓸 수 있는 기간이 짧아집니다.",
+        })),
+  },
+
+  // ------------------------------------------------------------ Systems Manager
+  {
+    id: "SSM-001",
+    category: "general",
+    severity: "error",
+    title: "없는 파라미터를 읽는 Lambda",
+    concept: "파라미터는 이름(계층 경로 포함, 대소문자 구분)으로 읽습니다. 이름이 정확히 같은 파라미터가 없으면 ParameterNotFound 오류가 납니다.",
+    check: ({ topo }) =>
+      topo.ofType("lambda").flatMap((fn) => {
+        if (fn.config.codeTemplate !== "ssm-get") return [];
+        const name = fn.config.templateTarget.trim();
+        if (findParameterByName(topo.project, name)) return [];
+        return [
+          {
+            key: fn.id,
+            resourceIds: [fn.id],
+            cause: name ? `${displayName(fn)}이(가) 읽는 파라미터 ${name}이(가) 없습니다.` : `${displayName(fn)}은(는) 파라미터를 읽는 코드인데 읽을 파라미터를 정하지 않았습니다.`,
+            condition: `${displayName(fn)}: 코드 = 파라미터 읽기, 대상 = ${name || "(없음)"}`,
+            fix: ["심화 모드: Systems Manager → Parameter Store에서 파라미터를 만들고, 함수의 코드 탭에서 대상으로 고르세요."],
+            impact: "고치면 함수가 실행 중에 설정 값을 읽습니다.",
+          },
+        ];
+      }),
+  },
+  {
+    id: "SSM-002",
+    category: "security",
+    severity: "warning",
+    title: "파라미터를 읽는 코드인데 실행 역할에 권한이 없음",
+    concept: "Lambda가 파라미터를 읽을 때는 실행 역할의 권한이 적용됩니다. 그 파라미터(또는 경로, 예: parameter/my-app/prod/*)에 대한 ssm:GetParameter 허용이 필요합니다.",
+    check: ({ topo }) =>
+      topo.ofType("lambda").flatMap((fn) => {
+        if (fn.config.codeTemplate !== "ssm-get") return [];
+        const role = lambdaRole(topo.project, fn);
+        const param = findParameterByName(topo.project, fn.config.templateTarget);
+        if (!role || !param) return [];
+        const arn = parameterArn(param.name);
+        if (roleAllows(topo.project, role, "ssm:GetParameter", arn)) return [];
+        return [
+          {
+            key: fn.id,
+            resourceIds: [fn.id],
+            cause: `${displayName(fn)}의 실행 역할 ${role.name}에 파라미터 ${param.name}의 ssm:GetParameter 권한이 없어 AccessDeniedException이 납니다.`,
+            condition: `${role.name}: ssm:GetParameter on ${param.name} 거부`,
+            fix: [`실행 역할에 Resource가 ${arn}(또는 그 경로의 /*)인 ssm:GetParameter 허용 정책을 연결하세요.`],
+            impact: "권한을 주면 함수가 설정 값을 읽습니다.",
+          },
+        ];
+      }),
+  },
+  {
+    id: "SSM-003",
+    category: "compute",
+    severity: "warning",
+    title: "Systems Manager 역할은 있는데 관리형 노드가 되지 못한 인스턴스",
+    concept:
+      "SSM Agent는 밖으로 HTTPS(443) 연결을 맺어 Systems Manager에 자신을 등록합니다. 인스턴스 프로파일 권한이 있어도 엔드포인트로 나가는 경로(퍼블릭 IP와 IGW, 또는 NAT)가 없으면 관리형 노드가 되지 않아 Session Manager로 접속할 수 없습니다.",
+    check: ({ topo }) =>
+      topo
+        .ofType("ec2")
+        .filter((inst) => inst.config.state === "running")
+        .flatMap((inst) => {
+          const status = managedNodeStatus(topo.project, topo, inst);
+          const profileOk = status.checks.find((c) => c.id === "profile")?.status === "pass";
+          const failed = status.checks.find((c) => c.status === "fail");
+          if (status.managed || !profileOk || !failed) return [];
+          return [
+            {
+              key: inst.id,
+              resourceIds: [inst.id],
+              cause: `${displayName(inst)}에는 Systems Manager 권한이 있는 역할(${status.role?.name ?? ""})이 있지만 관리형 노드가 되지 못합니다: ${failed.detail}`,
+              condition: `${displayName(inst)}: ${failed.title} 실패`,
+              fix: [failed.fix ?? "인스턴스가 Systems Manager 엔드포인트(HTTPS 443)로 나갈 수 있게 라우팅과 보안 그룹 아웃바운드를 고치세요."],
+              impact: "고치면 관리형 노드가 되어 SSH 키나 22번 포트 없이 Session Manager로 접속할 수 있습니다.",
+            },
+          ];
+        }),
+  },
+  {
+    id: "SSM-004",
+    category: "security",
+    severity: "info",
+    title: "Session Manager를 쓸 수 있는데 SSH를 전체 공개한 인스턴스",
+    concept: "관리형 노드는 Session Manager로 접속하면 되므로 SSH(22) 인바운드가 필요 없습니다. 22번 포트를 닫으면 무차별 대입 공격을 받을 위험이 사라집니다.",
+    check: ({ topo }) =>
+      topo
+        .ofType("ec2")
+        .filter((inst) => inst.config.state === "running")
+        .flatMap((inst) => {
+          const open = topo.securityGroupsOf(inst.id).filter((sg) => sg.config.inboundRules.some((r) => ruleAllowsFromAnywhere(r) && (r.protocol === "all" || (r.protocol === "tcp" && r.fromPort <= 22 && r.toPort >= 22))));
+          if (!open.length || !managedNodeStatus(topo.project, topo, inst).managed) return [];
+          return [
+            {
+              key: inst.id,
+              resourceIds: [inst.id, ...open.map((sg) => sg.id)],
+              cause: `${displayName(inst)}은(는) Session Manager로 접속할 수 있는 관리형 노드인데, 보안 그룹 ${open.map((sg) => displayName(sg)).join(", ")}이(가) SSH(22)를 0.0.0.0/0에 엽니다.`,
+              condition: `${displayName(inst)}: 관리형 노드 + 인바운드 TCP 22 ← 0.0.0.0/0`,
+              fix: ["보안 그룹에서 SSH(22) 인바운드 규칙을 지우고, 접속은 Systems Manager → Session Manager로 하세요."],
+              impact: "통신 결과와 별개로, 인터넷에서 22번 포트로 들어오는 접속 시도가 차단됩니다.",
+            },
+          ];
+        }),
+  },
+
+  // ------------------------------------------------------------ CloudFront
+  {
+    id: "CDN-001",
+    category: "security",
+    severity: "error",
+    title: "버킷 정책이 OAC 요청을 허용하지 않는 배포",
+    concept:
+      "원본 액세스 제어(OAC)를 쓰면 CloudFront는 서명한 요청을 S3에 보냅니다. 버킷 정책에 cloudfront.amazonaws.com과 이 배포의 ARN(AWS:SourceArn)을 허용하는 문이 없으면 S3가 403(AccessDenied)으로 거부합니다.",
+    check: ({ topo }) =>
+      topo.project.services.cloudfront.distributions
+        .filter((d) => d.enabled)
+        .flatMap((d) =>
+          d.origins.flatMap((o) => {
+            if (o.kind !== "s3" || o.originAccess !== "oac") return [];
+            const bucket = topo.project.services.s3.buckets.find((b) => b.id === o.targetId);
+            if (!bucket) return [];
+            const read = evaluateOacAccess(bucket, d.id, "s3:GetObject", objectArn(bucket.name, d.defaultRootObject || "index.html"));
+            if (read.allowed) return [];
+            return [
+              {
+                key: `${d.id}:${o.id}`,
+                resourceIds: [],
+                cause: `배포 ${d.id}의 원본 ${o.id}: ${read.detail}`,
+                condition: `배포 ${d.id} → 버킷 ${bucket.name} (OAC)`,
+                fix: ["심화 모드: CloudFront → 배포 → 원본 탭에서 '버킷 정책에 추가'를 누르거나, 정책 문을 복사해 버킷 정책에 넣으세요."],
+                impact: "고치면 버킷은 비공개 그대로 두고 CloudFront로만 객체를 읽을 수 있습니다.",
+              },
+            ];
+          }),
+        ),
+  },
+  {
+    id: "CDN-002",
+    category: "general",
+    severity: "warning",
+    title: "기본 루트 객체가 없는 S3 원본 배포",
+    concept:
+      "S3 버킷(REST 엔드포인트)을 원본으로 쓰면 루트(/) 요청을 index.html로 바꿔 주지 않습니다. 기본 루트 객체를 지정하지 않으면 사이트 주소로 들어온 요청이 403(AccessDenied)이 됩니다.",
+    check: ({ topo }) =>
+      topo.project.services.cloudfront.distributions
+        .filter((d) => d.enabled && !d.defaultRootObject.trim())
+        .flatMap((d) => {
+          const def = d.behaviors.find(isDefaultBehavior);
+          const origin = d.origins.find((o) => o.id === def?.originId);
+          if (origin?.kind !== "s3") return [];
+          return [
+            {
+              key: d.id,
+              resourceIds: [],
+              cause: `배포 ${d.id}의 기본 동작이 S3 버킷(${originTargetName(topo.project, origin)})을 가리키는데 기본 루트 객체가 없어 / 요청이 403이 됩니다.`,
+              condition: `배포 ${d.id}: defaultRootObject 없음`,
+              fix: ["심화 모드: CloudFront → 배포 → 편집 → 설정에서 기본 루트 객체를 index.html로 지정하세요."],
+              impact: "고치면 사이트 주소(/)로 들어온 요청이 index.html을 돌려줍니다.",
+            },
+          ];
+        }),
+  },
+  {
+    id: "CDN-003",
+    category: "security",
+    severity: "warning",
+    title: "HTTP 요청을 그대로 허용하는 CloudFront 동작",
+    concept: "뷰어 프로토콜 정책이 'HTTP and HTTPS'이면 암호화되지 않은 HTTP 요청도 그대로 처리합니다. 'Redirect HTTP to HTTPS'로 두면 HTTP 요청을 HTTPS로 리디렉션합니다.",
+    check: ({ topo }) =>
+      topo.project.services.cloudfront.distributions
+        .filter((d) => d.enabled)
+        .flatMap((d) =>
+          d.behaviors
+            .filter((b) => b.viewerProtocolPolicy === "allow-all")
+            .map((b) => ({
+              key: `${d.id}:${b.id}`,
+              resourceIds: [],
+              cause: `배포 ${d.id}의 동작 ${isDefaultBehavior(b) ? "기본(*)" : b.pathPattern}이(가) HTTP 요청을 암호화 없이 처리합니다.`,
+              condition: `동작 ${isDefaultBehavior(b) ? "*" : b.pathPattern}: viewerProtocolPolicy = allow-all`,
+              fix: ["심화 모드: CloudFront → 배포 → 편집 → 동작에서 뷰어 프로토콜 정책을 'Redirect HTTP to HTTPS'로 바꾸세요."],
+              impact: "고치면 HTTP 요청이 301로 HTTPS 주소에 리디렉션됩니다.",
+            })),
+        ),
+  },
+  {
+    id: "CDN-004",
+    category: "security",
+    severity: "warning",
+    title: "버킷을 공개해야 하는 S3 원본",
+    concept: "원본 액세스가 '퍼블릭'이면 CloudFront가 서명하지 않은 요청을 보내므로 버킷이 공개되어 있어야 하고, 누구나 S3 주소로 직접 객체를 읽을 수 있습니다. OAC를 쓰면 버킷을 비공개로 둘 수 있습니다.",
+    check: ({ topo }) =>
+      topo.project.services.cloudfront.distributions
+        .filter((d) => d.enabled)
+        .flatMap((d) =>
+          d.origins
+            .filter((o) => o.kind === "s3" && o.originAccess === "public")
+            .map((o) => ({
+              key: `${d.id}:${o.id}`,
+              resourceIds: [],
+              cause: `배포 ${d.id}의 원본 ${originTargetName(topo.project, o)}은(는) 퍼블릭 원본 액세스를 씁니다.`,
+              condition: `원본 ${o.id}: originAccess = public`,
+              fix: ["심화 모드: CloudFront → 배포 → 편집 → 원본에서 '원본 액세스 제어 설정(권장)'을 고르고, 버킷 정책에 OAC 허용을 넣은 뒤 버킷의 퍼블릭 액세스를 막으세요."],
+              impact: "고치면 CloudFront를 거친 요청만 객체를 읽을 수 있습니다.",
+            })),
+        ),
+  },
+  {
+    id: "CDN-005",
+    category: "general",
+    severity: "error",
+    title: "CloudFront가 닿을 수 없는 원본",
+    concept:
+      "CloudFront는 인터넷을 통해 원본에 접속합니다. 내부(internal) 로드 밸런서에는 닿을 수 없고, 삭제된 원본이나 정적 웹 사이트 호스팅이 꺼진 버킷의 웹 사이트 엔드포인트는 응답하지 않습니다.",
+    check: ({ topo }) =>
+      topo.project.services.cloudfront.distributions
+        .filter((d) => d.enabled)
+        .flatMap((d) =>
+          d.origins.flatMap((o) => {
+            let problem: string | null = null;
+            if (o.kind === "alb") {
+              const alb = topo.getOfType(o.targetId, "alb");
+              problem = !alb ? "원본 로드 밸런서가 삭제되었습니다." : alb.config.scheme === "internal" ? `${displayName(alb)}은(는) 내부(internal) 로드 밸런서라 인터넷에서 접속하는 CloudFront가 닿지 못합니다 (504).` : null;
+            } else {
+              const bucket = topo.project.services.s3.buckets.find((b) => b.id === o.targetId);
+              problem = !bucket ? "원본 버킷이 삭제되었습니다." : o.kind === "s3-website" && !bucket.website.enabled ? `버킷 ${bucket.name}의 정적 웹 사이트 호스팅이 꺼져 있어 웹 사이트 엔드포인트가 404를 돌려줍니다.` : null;
+            }
+            if (!problem) return [];
+            return [
+              {
+                key: `${d.id}:${o.id}`,
+                resourceIds: [o.kind === "alb" ? o.targetId : null],
+                cause: `배포 ${d.id}의 원본 ${o.id}: ${problem}`,
+                condition: `원본 ${o.id} (${o.kind})`,
+                fix: ["원본을 인터넷 경계(internet-facing) 로드 밸런서나 있는 버킷으로 바꾸거나, 버킷의 정적 웹 사이트 호스팅을 켜세요 (심화 모드: CloudFront → 배포 → 편집)."],
+                impact: "고치면 캐시에 없는 요청이 원본에서 응답을 받아 옵니다.",
+              },
+            ];
+          }),
+        ),
+  },
+  {
+    id: "CDN-006",
+    category: "security",
+    severity: "info",
+    title: "AWS:SourceArn 조건 없이 CloudFront를 허용하는 버킷 정책",
+    concept:
+      "버킷 정책이 cloudfront.amazonaws.com을 조건 없이 허용하면 다른 계정의 CloudFront 배포도 이 버킷을 원본으로 읽을 수 있습니다(혼동된 대리자 문제). AWS:SourceArn 조건으로 내 배포만 허용하세요.",
+    check: ({ topo }) =>
+      topo.project.services.cloudfront.distributions
+        .filter((d) => d.enabled)
+        .flatMap((d) =>
+          d.origins.flatMap((o) => {
+            if (o.kind !== "s3" || o.originAccess !== "oac") return [];
+            const bucket = topo.project.services.s3.buckets.find((b) => b.id === o.targetId);
+            if (!bucket) return [];
+            const read = evaluateOacAccess(bucket, d.id, "s3:GetObject", objectArn(bucket.name, d.defaultRootObject || "index.html"));
+            if (!read.allowed || read.scoped) return [];
+            return [
+              {
+                key: `${d.id}:${o.id}`,
+                resourceIds: [],
+                cause: `버킷 ${bucket.name}의 정책이 CloudFront를 AWS:SourceArn 조건 없이 허용합니다.`,
+                condition: `버킷 ${bucket.name}: Principal Service cloudfront.amazonaws.com, Condition 없음`,
+                fix: [`버킷 정책의 그 문에 "Condition": {"StringEquals": {"AWS:SourceArn": "배포 ARN"}}을 넣으세요. 배포의 원본 탭에 있는 정책 문을 그대로 쓰면 됩니다.`],
+                impact: "통신 결과는 같고, 이 배포만 버킷을 읽도록 범위가 좁아집니다.",
+              },
+            ];
+          }),
+        ),
+  },
+
   // ------------------------------------------------------------ 일반
   {
     id: "GEN-001",
@@ -1962,7 +2737,7 @@ export const VALIDATION_RULES: ValidationRule[] = [
     concept: "리소스는 관계(소속, 배치, 연결)를 통해 아키텍처에 참여합니다. 연결이 없는 리소스는 시뮬레이션에 영향을 주지 않습니다.",
     check: ({ topo }) =>
       topo.project.resources
-        .filter((r) => r.type !== "vpc" && r.type !== "elastic-ip" && topo.connectionsOf(r.id).length === 0)
+        .filter((r) => r.type !== "vpc" && r.type !== "elastic-ip" && r.type !== "lambda" && topo.connectionsOf(r.id).length === 0)
         .map((r) => ({
           resourceIds: [r.id],
           cause: `${topo.label(r.id)}이(가) 다른 리소스와 연결되어 있지 않습니다.`,

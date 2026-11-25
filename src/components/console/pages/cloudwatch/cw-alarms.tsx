@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { alarmHistory, COMPARISON_SYMBOL, METRIC_CATALOG, metricDefinition, NAMESPACE_RESOURCE, type AlarmState } from "@/lib/engine/cloudwatch-engine";
-import type { Alarm, MetricRef, Project } from "@/lib/engine/resource-models";
+import { METRIC_NAMESPACES, type Alarm, type MetricRef, type Project } from "@/lib/engine/resource-models";
 import { displayName } from "@/lib/engine/topology-engine";
 import { createAlarm, deleteAlarms, updateAlarm, type AlarmInput } from "@/lib/project/cloudwatch-actions";
 import { formatDateTime } from "@/lib/ui/format";
@@ -18,7 +18,7 @@ import { InfoLink } from "../../ui/links";
 import { DeleteModal } from "../../ui/overlay";
 import { PageGuide } from "../../ui/page-guide";
 import { ResourceTable } from "../../ui/table";
-import { AlarmStateBadge, PERIOD_OPTIONS, RangePicker, STAT_OPTIONS, useMetricModel, useNow } from "./cw-shared";
+import { AlarmStateBadge, conditionText, PERIOD_OPTIONS, RangePicker, STAT_OPTIONS, useMetricModel, useNow } from "./cw-shared";
 import { MetricCharts } from "./cw-metrics";
 
 const COMPARISON_LABEL: Record<Alarm["comparison"], string> = {
@@ -35,10 +35,8 @@ const MISSING_LABEL: Record<Alarm["treatMissingData"], string> = {
   ignore: "무시 (현재 상태 유지)",
 };
 
-export function conditionText(alarm: Pick<Alarm, "metric" | "comparison" | "threshold" | "period" | "evaluationPeriods" | "datapointsToAlarm">): string {
-  const def = metricDefinition(alarm.metric);
-  return `${def?.label ?? alarm.metric.metricName} ${COMPARISON_SYMBOL[alarm.comparison]} ${alarm.threshold}${def?.unit === "Percent" ? "%" : ""} · ${alarm.period / 60}분 기간 ${alarm.evaluationPeriods}개 중 ${alarm.datapointsToAlarm}개`;
-}
+// conditionText는 콘솔 셸의 경보 알림(alarm-watcher)도 쓰므로 가벼운 cw-shared에 둔다
+export { conditionText };
 
 function resourceName(project: Project, id: string) {
   const r = project.resources.find((x) => x.id === id);
@@ -185,7 +183,7 @@ function AlarmWizard({ initial, alarmId }: { initial: AlarmInput; alarmId?: stri
         <>
           <Container header={<ContainerHeader title="지표" description="경보가 지켜볼 지표 하나를 고릅니다." />}>
             <SpaceBetween size="m">
-              <div className="grid gap-4 md:grid-cols-2">
+              <div className="grid gap-4 @2xl/main:grid-cols-2">
                 <FormField help={{ docKey: "cloudwatch", field: "namespace" }} label="네임스페이스">
                   <SelectInput
                     value={value.metric.namespace}
@@ -193,7 +191,7 @@ function AlarmWizard({ initial, alarmId }: { initial: AlarmInput; alarmId?: stri
                       const first = METRIC_CATALOG.find((m) => m.namespace === ns)!;
                       setMetric({ namespace: ns as MetricRef["namespace"], metricName: first.metricName, resourceId: topology.ofType(NAMESPACE_RESOURCE[ns as MetricRef["namespace"]])[0]?.id ?? "", stat: first.defaultStat });
                     }}
-                    options={(["AWS/EC2", "AWS/ApplicationELB", "AWS/RDS", "AWS/NATGateway"] as const).map((n) => ({ value: n, label: n }))}
+                    options={METRIC_NAMESPACES.map((n) => ({ value: n, label: n }))}
                   />
                 </FormField>
                 <FormField help={{ docKey: "cloudwatch", field: "resourceDimension" }} label="리소스">
@@ -250,7 +248,7 @@ function AlarmWizard({ initial, alarmId }: { initial: AlarmInput; alarmId?: stri
               <FormField help={{ docKey: "cloudwatch", field: "threshold" }} label="임계값" constraint={def?.unit === "Percent" ? "0~100 (%)" : def?.unit === "Seconds" ? "초 단위 (예: 0.5 = 500ms)" : def?.unit === "Bytes" ? "바이트 단위" : "숫자"}>
                 <TextInput value={thresholdText} onChange={(e) => setThresholdText(e.target.value)} inputMode="decimal" className="max-w-40" />
               </FormField>
-              <div className="grid gap-4 md:grid-cols-2">
+              <div className="grid gap-4 @2xl/main:grid-cols-2">
                 <FormField help={{ docKey: "cloudwatch", field: "datapointsToAlarm" }} label="경보를 울릴 데이터 포인트 (M / N)" description="최근 N개 기간 중 M개가 조건을 넘으면 경보가 됩니다. 순간적인 튐을 거르려면 M을 2 이상으로 하세요.">
                   <div className="flex items-center gap-2">
                     <TextInput aria-label="M" value={String(value.datapointsToAlarm)} onChange={(e) => set({ datapointsToAlarm: Math.max(1, Math.min(10, Number(e.target.value) || 1)) })} inputMode="numeric" className="w-20" />

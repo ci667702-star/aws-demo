@@ -324,6 +324,15 @@ export class ProjectBuilder {
     return id;
   }
 
+  /** Lambda 함수. subnets·sgs를 주면 VPC에 연결한다 */
+  lambda(name: string, options: { role?: string | null; subnets?: string[]; sgs?: string[] } & Partial<ConfigOf<"lambda">> = {}): string {
+    const { role, subnets, sgs, ...config } = options;
+    const id = this.add("lambda", name, { ...config, roleId: role ?? config.roleId ?? null });
+    for (const s of subnets ?? []) this.connect("lambda-subnet", id, s);
+    for (const sg of sgs ?? []) this.connect("lambda-security-group", id, sg);
+    return id;
+  }
+
   /** 현재 상태의 프로젝트 (자동 정렬 없이) */
   snapshot(): Project {
     return this.project;

@@ -256,6 +256,22 @@ export function instancesUsingRole(project: Project, roleId: string): ResourceOf
   return project.resources.filter((r): r is ResourceOfType<"ec2"> => r.type === "ec2" && r.config.iamRoleId === roleId && r.config.state !== "terminated");
 }
 
+/** 이 역할을 실행 역할로 쓰는 Lambda 함수와 Scheduler 일정 */
+export function serverlessUsingRole(project: Project, roleId: string): { functions: ResourceOfType<"lambda">[]; schedules: Project["services"]["eventbridge"]["schedules"] } {
+  return {
+    functions: project.resources.filter((r): r is ResourceOfType<"lambda"> => r.type === "lambda" && r.config.roleId === roleId),
+    schedules: project.services.eventbridge.schedules.filter((s) => s.roleId === roleId),
+  };
+}
+
+/** 역할 사용처 요약 (예: "인스턴스 1대 · 함수 2개") */
+export function roleUsageSummary(project: Project, roleId: string): string {
+  const instances = instancesUsingRole(project, roleId).length;
+  const { functions, schedules } = serverlessUsingRole(project, roleId);
+  const parts = [instances && `인스턴스 ${instances}대`, functions.length && `함수 ${functions.length}개`, schedules.length && `일정 ${schedules.length}개`].filter(Boolean);
+  return parts.length ? parts.join(" · ") : "없음";
+}
+
 export function deleteRole(project: Project, roleId: string): ActionResult {
   const role = project.services.iam.roles.find((r) => r.id === roleId);
   if (!role) return awsFail("NoSuchEntity", "역할을 찾을 수 없습니다.");
@@ -264,9 +280,17 @@ export function deleteRole(project: Project, roleId: string): ActionResult {
     return awsFail("DeleteConflict", `역할 ${role.name}이(가) 인스턴스 ${users.map((u) => u.id).join(", ")}에 연결되어 있습니다.`, "인스턴스의 IAM 역할을 먼저 해제하세요.");
   }
   const signedIn = project.services.iam.session?.kind === "role" && project.services.iam.session.id === roleId;
+  const usage = serverlessUsingRole(project, roleId);
+  const functions = usage.functions.map((r) => r.name || r.id);
+  const schedules = usage.schedules.map((s) => s.name);
   return ok(
     withIam(project, (iam) => ({ ...iam, roles: iam.roles.filter((r) => r.id !== roleId), session: signedIn ? null : iam.session })),
-    signedIn ? ["지금 전환한 역할을 삭제해 로그아웃되었습니다 (루트 사용자로 돌아감)."] : [],
+    [
+      ...(signedIn ? ["지금 전환한 역할을 삭제해 로그아웃되었습니다 (루트 사용자로 돌아감)."] : []),
+      ...(functions.length || schedules.length
+        ? [`이 역할을 쓰던 ${[...functions.map((n) => `Lambda ${n}`), ...schedules.map((n) => `일정 ${n}`)].join(", ")}은(는) 이제 실행·호출이 실패합니다. (AWS도 막지 않습니다)`]
+        : []),
+    ],
   );
 }
 
@@ -391,6 +415,10 @@ export function switchBack(project: Project): Project {
 
 /** 서버 운영자 템플릿과 함께 만드는 예시 EC2 역할 (iam:PassRole을 이름으로 제한한 것을 확인하는 용도) */
 export const SCHOOL_EC2_ROLE_NAME = "School-Ec2-S3ReadOnly";
+/** 서버 운영자가 Lambda 함수에 넘길 수 있는 실행 역할 (로그 쓰기만) */
+export const SCHOOL_LAMBDA_ROLE_NAME = "School-Lambda-BasicExecution";
+/** 서버 운영자가 일정에 넘길 수 있는 실행 역할 (lambda:InvokeFunction) */
+export const SCHOOL_SCHEDULER_ROLE_NAME = "School-Scheduler-InvokeLambda";
 
 /**
  * 템플릿마다 정책·그룹(+예시 사용자)을 만든다. 이미 같은 이름이 있으면 다시 만들지 않고 연결만 맞춘다.
@@ -444,6 +472,19 @@ export function applyRoleTemplates(project: Project, templateIds: string[], opti
       if (!r.ok) return r;
       p = r.project;
       notes.push(`EC2 역할 ${SCHOOL_EC2_ROLE_NAME}`);
+    }
+    if (t.id === "server-operator") {
+      const serviceRoles = [
+        { name: SCHOOL_LAMBDA_ROLE_NAME, description: "학교 역할 템플릿: 서버 운영자가 Lambda 함수에 연결할 수 있는 실행 역할 (로그 쓰기)", trustedEntity: "lambda.amazonaws.com" as const, policyIds: ["aws:AWSLambdaBasicExecutionRole"], label: "Lambda 실행 역할" },
+        { name: SCHOOL_SCHEDULER_ROLE_NAME, description: "학교 역할 템플릿: 서버 운영자가 일정에 연결할 수 있는 Scheduler 실행 역할 (함수 호출)", trustedEntity: "scheduler.amazonaws.com" as const, policyIds: ["aws:AWSLambdaRole"], label: "Scheduler 실행 역할" },
+      ];
+      for (const sr of serviceRoles) {
+        if (p.services.iam.roles.some((r) => sameName(r.name, sr.name))) continue;
+        const r = createRole(p, { name: sr.name, description: sr.description, trustedEntity: sr.trustedEntity, policyIds: sr.policyIds });
+        if (!r.ok) return r;
+        p = r.project;
+        notes.push(`${sr.label} ${sr.name}`);
+      }
     }
   }
   return ok(p, notes.length ? [`만든 항목: ${notes.join(", ")}`] : ["이미 모두 있어 새로 만든 항목이 없습니다."]);

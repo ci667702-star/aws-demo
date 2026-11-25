@@ -105,7 +105,7 @@ export function PolicySimulatorPage() {
       </Container>
       <Container header={<ContainerHeader title="2. 작업과 리소스" />}>
         <SpaceBetween size="m">
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid gap-4 @2xl/main:grid-cols-2">
             <FormField label="서비스">
               <SelectInput
                 value={service}
@@ -121,7 +121,7 @@ export function PolicySimulatorPage() {
             </FormField>
           </div>
           {service === "s3" && actionInfo?.resource !== "any" ? (
-            <div className="grid gap-4 md:grid-cols-2">
+            <div className="grid gap-4 @2xl/main:grid-cols-2">
               <FormField label="버킷" description={buckets.length ? undefined : "버킷이 없어 이름을 직접 입력합니다."}>
                 {buckets.length ? (
                   <SelectInput value={bucketName} onChange={setBucketName} options={buckets.map((b) => ({ value: b.name, label: b.name }))} />

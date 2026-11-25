@@ -182,7 +182,7 @@ function HealthCheckFields({ draft, onChange }: { draft: HcDraft; onChange: (d: 
   const set = (patch: Partial<HcDraft>) => onChange({ ...draft, ...patch });
   return (
     <SpaceBetween size="m">
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-4 @xl/main:grid-cols-2">
         <FormField help={{ docKey: "target-group", field: "healthCheck" }} label="상태 검사 프로토콜">
           <SelectInput value={draft.protocol} onChange={(v) => set({ protocol: v as "HTTP" | "HTTPS" })} options={[{ value: "HTTP", label: "HTTP" }, { value: "HTTPS", label: "HTTPS" }]} />
         </FormField>
@@ -191,7 +191,7 @@ function HealthCheckFields({ draft, onChange }: { draft: HcDraft; onChange: (d: 
         </FormField>
       </div>
       <ExpandableSection header="고급 상태 검사 설정">
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-4 @xl/main:grid-cols-2">
           <FormField help={{ docKey: "target-group", field: "healthCheckPort" }} label="상태 검사 포트">
             <SelectInput value={draft.portMode} onChange={(v) => set({ portMode: v as HcDraft["portMode"] })} options={[{ value: "traffic-port", label: "트래픽 포트" }, { value: "override", label: "재정의" }]} />
           </FormField>
@@ -277,7 +277,7 @@ export function CreateTargetGroupPage() {
               <FormField help={{ docKey: "target-group", field: "name" }} label="대상 그룹 이름" constraint="1~32자의 영문자, 숫자, 하이픈. 하이픈으로 시작하거나 끝날 수 없습니다. 만든 뒤에는 바꿀 수 없습니다.">
                 <TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="my-target-group" maxLength={32} />
               </FormField>
-              <div className="grid gap-4 sm:grid-cols-2">
+              <div className="grid gap-4 @xl/main:grid-cols-2">
                 <FormField help={{ docKey: "target-group", field: "protocol" }} label="프로토콜">
                   <SelectInput value={protocol} onChange={(v) => setProtocol(v as "HTTP" | "HTTPS")} options={[{ value: "HTTP", label: "HTTP" }, { value: "HTTPS", label: "HTTPS" }]} />
                 </FormField>

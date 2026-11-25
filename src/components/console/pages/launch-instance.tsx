@@ -111,7 +111,7 @@ export function LaunchInstancePage() {
     <div className="space-y-6" data-tour="launch-form">
       <PageHeader title="인스턴스 시작" info={<InfoLink topic="ec2-launch" />} description="아래 단계에 따라 가상 EC2 인스턴스를 구성합니다. 실제 서버는 실행되지 않으며, 네트워크 동작만 시뮬레이션합니다." />
       <PageGuide topic="ec2-launch" />
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="grid gap-6 @4xl/main:grid-cols-[minmax(0,1fr)_320px]">
         <SpaceBetween>
           <Container header={<ContainerHeader title="이름 및 태그" />}>
             <FormField help={{ docKey: "ec2", field: "name" }} label="이름">

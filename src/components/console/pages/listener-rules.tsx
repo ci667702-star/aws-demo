@@ -186,7 +186,7 @@ function RuleModal({ alb, listener, rule, onClose }: { alb: Alb; listener: Liste
     >
       <SpaceBetween size="m">
         <p className="text-[15px] text-aws-text-2">요청 경로가 조건과 맞으면 기본 작업 대신 이 규칙의 작업을 합니다. 예: /api/* 요청은 API 서버 대상 그룹으로, 나머지는 웹 서버로.</p>
-        <div className="grid gap-4 md:grid-cols-[160px_1fr]">
+        <div className="grid gap-4 @2xl/main:grid-cols-[160px_1fr]">
           <FormField help={{ docKey: "alb", field: "listenerRules" }} label="우선순위" constraint="1~50000 · 작을수록 먼저">
             <TextInput value={priority} onChange={(e) => setPriority(e.target.value)} inputMode="numeric" />
           </FormField>
@@ -211,7 +211,7 @@ function RuleModal({ alb, listener, rule, onClose }: { alb: Alb; listener: Liste
             <SelectInput value={tgId} onChange={setTgId} placeholder={tgs.length ? "대상 그룹 선택" : "사용할 수 있는 대상 그룹이 없습니다"} options={tgs.map((t) => ({ value: t.id, label: `${displayName(t)} (${t.config.protocol}:${t.config.port})` }))} />
           </FormField>
         ) : (
-          <div className="grid gap-4 md:grid-cols-[160px_220px_1fr]">
+          <div className="grid gap-4 @2xl/main:grid-cols-[160px_220px_1fr]">
             <FormField label="응답 코드">
               <SelectInput value={statusCode} onChange={setStatusCode} options={STATUS_CODES.map((c) => ({ value: c, label: c }))} />
             </FormField>

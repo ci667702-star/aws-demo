@@ -25,6 +25,7 @@ const NAMESPACES: { value: MetricRef["namespace"]; label: string; description: s
   { value: "AWS/ApplicationELB", label: "ApplicationELB", description: "요청 수·응답 시간·오류" },
   { value: "AWS/RDS", label: "RDS", description: "DB CPU·연결 수·저장 공간" },
   { value: "AWS/NATGateway", label: "NATGateway", description: "나간 데이터·연결 수" },
+  { value: "AWS/Lambda", label: "Lambda", description: "호출 수·오류·실행 시간 (일정이 호출할 때만)" },
 ];
 
 const CREATE_PATH: Record<string, { label: string; path: string }> = {
@@ -32,6 +33,7 @@ const CREATE_PATH: Record<string, { label: string; path: string }> = {
   alb: { label: "로드 밸런서 생성", path: "/ec2/load-balancers/select-type" },
   rds: { label: "데이터베이스 생성", path: "/rds/databases/create" },
   "nat-gateway": { label: "NAT 게이트웨이 생성", path: "/vpc/nat-gateways/create" },
+  lambda: { label: "함수 생성", path: "/lambda/functions/create" },
 };
 
 interface Row {

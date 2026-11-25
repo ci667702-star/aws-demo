@@ -4,7 +4,7 @@
 import { CircleX, Info, TriangleAlert } from "lucide-react";
 import { cn } from "cn";
 import { useMemo, useState } from "react";
-import { DEFAULT_COST_ASSUMPTIONS, estimateCost, resolveCostAssumptions } from "@/lib/engine/cost-engine";
+import { DEFAULT_COST_ASSUMPTIONS, estimateCost, isServiceCostType, resolveCostAssumptions, SERVICE_COST_LABEL, serviceCostPath, type ResolvedCostAssumptions } from "@/lib/engine/cost-engine";
 import { NatCostComparisonCard } from "@/components/docs/nat-cost-comparison";
 import { RESOURCE_TYPE_INFO, type CostAssumptions } from "@/lib/engine/resource-models";
 import { displayName } from "@/lib/engine/topology-engine";
@@ -14,7 +14,7 @@ import { useProjectStore } from "@/lib/store/project-store";
 import { formatDateTime, formatMoney, formatRate } from "@/lib/ui/format";
 import { useAnalysis } from "../analysis-context";
 import { useConsoleProjectId, useProject, useRunAction } from "../console-context";
-import { resourceHref } from "../router";
+import { href, resourceHref } from "../router";
 import { Alert } from "../ui/alert";
 import { Button } from "../ui/button";
 import { Checkbox, SearchInput, SelectInput, TextInput } from "../ui/form";
@@ -56,7 +56,7 @@ export function ChecksPage() {
         info={<InfoLink topic="checks" />}
         description="현재 구성을 검증 규칙으로 검사한 결과입니다. 구성을 바꾸면 즉시 다시 검사합니다."
       />
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid gap-4 @xl/main:grid-cols-3">
         {(Object.keys(SEVERITY) as Severity[]).map((s) => {
           const meta = SEVERITY[s];
           return (
@@ -127,7 +127,7 @@ function FindingRow({ finding }: { finding: ValidationFinding }) {
           </span>
         }
       >
-        <dl className="grid gap-3 text-sm sm:grid-cols-2">
+        <dl className="grid gap-3 text-sm @xl/main:grid-cols-2">
           <div>
             <dt className="font-bold text-aws-text-2">원인</dt>
             <dd>{finding.cause}</dd>
@@ -179,12 +179,14 @@ function FindingRow({ finding }: { finding: ValidationFinding }) {
 
 // ================================================================ 가상 비용
 
-type NumberKey = { [K in keyof CostAssumptions]: CostAssumptions[K] extends number ? K : never }[keyof CostAssumptions];
+type NumberKey = { [K in keyof ResolvedCostAssumptions]: ResolvedCostAssumptions[K] extends number ? K : never }[keyof ResolvedCostAssumptions];
 
 const USAGE_FIELDS: { key: NumberKey; label: string; max: number }[] = [
   { key: "hoursPerMonth", label: "월 사용 시간", max: 744 },
   { key: "dataProcessedGb", label: "NAT/ALB 처리 데이터 (GB/월)", max: 1_000_000 },
   { key: "dataTransferOutGb", label: "인터넷 방향 전송 (GB/월)", max: 1_000_000 },
+  { key: "cloudfrontDataGb", label: "CloudFront 전송 (GB/월, 배포당)", max: 1_000_000 },
+  { key: "cloudfrontRequestsMillion", label: "CloudFront 요청 (백만 건/월, 배포당)", max: 1_000_000 },
 ];
 
 const RATE_FIELDS: { key: NumberKey; label: string }[] = [
@@ -195,6 +197,13 @@ const RATE_FIELDS: { key: NumberKey; label: string }[] = [
   { key: "publicIpv4Hourly", label: "퍼블릭 IPv4 / 시간" },
   { key: "dataTransferOutPerGb", label: "인터넷 전송 / GB" },
   { key: "rdsStorageGbMonth", label: "RDS 스토리지 / GB-월" },
+  { key: "lambdaPerMillionRequests", label: "Lambda 요청 / 100만 건" },
+  { key: "lambdaPerGbSecond", label: "Lambda 실행 / GB-초" },
+  { key: "schedulerPerMillion", label: "Scheduler 호출 / 100만 회" },
+  { key: "secretPerMonth", label: "Secrets Manager 보안 암호 / 개-월" },
+  { key: "ssmAdvancedParameterPerMonth", label: "고급 파라미터 / 개-월" },
+  { key: "cloudfrontPerGb", label: "CloudFront 전송 / GB" },
+  { key: "cloudfrontPerMillionRequests", label: "CloudFront 요청 / 100만 건" },
 ];
 
 function NumberField({ label, value, max = 1_000_000, onCommit }: { label: string; value: number; max?: number; onCommit: (v: number) => void }) {
@@ -243,7 +252,7 @@ export function BillingPage() {
       <Alert type="warning" header="실제 요금이 아닙니다">
         이 값은 학습용 가정 단가로 계산한 가상 비용이며 실제 AWS 청구 금액이나 요금표가 아닙니다. 아래에서 가정값을 직접 바꿀 수 있습니다.
       </Alert>
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
+      <div className="grid gap-6 @3xl/main:grid-cols-[minmax(0,1fr)_340px]">
         <Container header={<ContainerHeader title="월 예상 가상 비용" description="리소스별 계산 내역" />}>
           <SpaceBetween size="m">
             <p className="text-3xl font-bold" data-testid="cost-total">
@@ -265,8 +274,19 @@ export function BillingPage() {
                     {report.lines.map((line) => (
                       <tr key={line.resourceId} className="border-b border-aws-divider align-top">
                         <td className="px-3 py-2">
-                          <ResourceLink id={line.resourceId} showName />
-                          <span className="block text-xs text-aws-text-2">{RESOURCE_TYPE_INFO[line.resourceType].label}</span>
+                          {isServiceCostType(line.resourceType) ? (
+                            <>
+                              <a className="font-mono text-[13px] break-all text-aws-link hover:underline" href={href(serviceCostPath(line.resourceType, line.resourceId))}>
+                                {line.resourceName}
+                              </a>
+                              <span className="block text-xs text-aws-text-2">{SERVICE_COST_LABEL[line.resourceType]}</span>
+                            </>
+                          ) : (
+                            <>
+                              <ResourceLink id={line.resourceId} showName />
+                              <span className="block text-xs text-aws-text-2">{RESOURCE_TYPE_INFO[line.resourceType].label}</span>
+                            </>
+                          )}
                         </td>
                         <td className="px-3 py-2 text-[13px] text-aws-text-2">
                           {line.items.length === 0 ? (

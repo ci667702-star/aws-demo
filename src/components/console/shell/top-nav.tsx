@@ -188,6 +188,11 @@ function GlobalSearch() {
       ...project.services.iam.users.map((u) => ({ key: u.id, label: u.name, detail: "IAM 사용자", href: href(`/iam/users/${u.id}`) })),
       ...project.services.iam.roles.map((r) => ({ key: r.id, label: r.name, detail: "IAM 역할", href: href(`/iam/roles/${r.id}`) })),
       ...project.services.cloudwatch.alarms.map((a) => ({ key: a.id, label: a.name, detail: "CloudWatch 경보", href: href(`/cloudwatch/alarms/${a.id}`) })),
+      ...project.services.eventbridge.schedules.map((s) => ({ key: s.id, label: s.name, detail: "EventBridge 일정", href: href(`/eventbridge/schedules/${s.id}`) })),
+      ...project.services.eventbridge.rules.map((r) => ({ key: r.id, label: r.name, detail: "EventBridge 규칙", href: href(`/eventbridge/rules/${r.id}`) })),
+      ...project.services.cloudfront.distributions.map((d) => ({ key: d.id, label: d.comment ? `${d.id} (${d.comment})` : d.id, detail: "CloudFront 배포", href: href(`/cloudfront/distributions/${d.id}`) })),
+      ...project.services.secretsmanager.secrets.map((s) => ({ key: s.id, label: s.name, detail: "Secrets Manager 보안 암호", href: href(`/secretsmanager/secrets/${s.id}`) })),
+      ...project.services.ssm.parameters.map((p) => ({ key: p.id, label: p.name, detail: "Systems Manager 파라미터", href: href(`/ssm/parameters/${p.id}`) })),
     ].filter((r) => r.label.toLowerCase().includes(q));
     return [...pages, ...resources, ...services.slice(0, 10)];
   }, [query, topology, project]);

@@ -66,7 +66,8 @@ export function CopyText({ text, children, className }: { text: string; children
       >
         <Copy className="size-3.5" aria-hidden />
       </button>
-      {children ?? <span className="font-mono text-[13px]">{text}</span>}
+      {/* ARN처럼 긴 값이 옆 칸으로 넘치지 않게 필요할 때만 줄을 바꾼다 */}
+      {children ?? <span className="min-w-0 font-mono text-[13px] [overflow-wrap:anywhere]">{text}</span>}
       {copied && <span className="text-xs text-aws-success">복사됨</span>}
     </span>
   );
